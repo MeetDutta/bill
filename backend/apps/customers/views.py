@@ -20,7 +20,18 @@ class CustomerListView(generics.ListCreateAPIView):
         return CustomerSerializer
 
     def perform_create(self, serializer):
-        serializer.save(organization=self.request.user.organization)
+        customer = serializer.save(organization=self.request.user.organization)
+        from apps.loyalty.models import LoyaltyAccount
+        LoyaltyAccount.objects.get_or_create(
+            organization=self.request.user.organization,
+            customer=customer,
+            defaults={"balance": 0, "total_earned": 0, "total_redeemed": 0},
+        )
+        CustomerTimeline.objects.create(
+            organization=self.request.user.organization,
+            customer=customer,
+            event_type="created",
+        )
 
 
 class CustomerDetailView(generics.RetrieveUpdateDestroyAPIView):

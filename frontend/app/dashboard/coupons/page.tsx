@@ -5,8 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { couponApi } from "@/services/api";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { Ticket, Plus, Search, CheckCircle, XCircle } from "lucide-react";
+import { formatCurrency, formatDate, parseApiError } from "@/lib/utils";
+import { Ticket, Plus, Search, CheckCircle, XCircle, Loader2 } from "lucide-react";
 
 import {
   Dialog,
@@ -24,6 +24,8 @@ interface Coupon {
   name: string;
   discount_type: string;
   discount_value: number;
+  min_order_value?: number;
+  start_at?: string;
   expires_at: string;
   usage_limit: number;
   used_count: number;
@@ -43,7 +45,7 @@ export default function CouponsPage() {
     name: "",
     discount_type: "percentage",
     discount_value: "",
-    minimum_order_value: "0",
+    min_order_value: "0",
     expires_at: "",
     usage_limit: "100",
   });
@@ -65,8 +67,34 @@ export default function CouponsPage() {
 
   const handleCreateCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.code || !formData.name || !formData.discount_value) {
-      setError("Code, Name, and Discount Value are required.");
+    const cleanCode = formData.code.trim().toUpperCase();
+    const cleanName = formData.name.trim();
+    const discountVal = Number(formData.discount_value);
+    const minOrderVal = Number(formData.min_order_value || 0);
+    const usageLimitVal = Number(formData.usage_limit || 0);
+
+    if (!cleanCode || !cleanName || !formData.discount_value) {
+      setError("Coupon Code, Name, and Discount Value are required.");
+      return;
+    }
+
+    if (isNaN(discountVal) || discountVal <= 0) {
+      setError("Discount value must be greater than zero.");
+      return;
+    }
+
+    if (formData.discount_type === "percentage" && discountVal > 100) {
+      setError("Percentage discount cannot exceed 100%.");
+      return;
+    }
+
+    if (minOrderVal < 0) {
+      setError("Minimum order value cannot be negative.");
+      return;
+    }
+
+    if (usageLimitVal < 0) {
+      setError("Usage limit cannot be negative.");
       return;
     }
 
@@ -79,32 +107,29 @@ export default function CouponsPage() {
         : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
       await couponApi.create({
-        code: formData.code.toUpperCase(),
-        name: formData.name,
+        code: cleanCode,
+        name: cleanName,
         discount_type: formData.discount_type,
-        discount_value: Number(formData.discount_value),
-        minimum_order_value: Number(formData.minimum_order_value || 0),
+        discount_value: discountVal,
+        min_order_value: minOrderVal,
         expires_at: expiresAt,
-        usage_limit: Number(formData.usage_limit || 100),
+        usage_limit: usageLimitVal,
         is_active: true,
       } as Partial<Coupon>);
+
       setOpen(false);
       setFormData({
         code: "",
         name: "",
         discount_type: "percentage",
         discount_value: "",
-        minimum_order_value: "0",
+        min_order_value: "0",
         expires_at: "",
         usage_limit: "100",
       });
-      fetchCoupons();
-    } catch (err: any) {
-      setError(
-        err.response?.data?.detail ||
-          err.response?.data?.code?.[0] ||
-          "Failed to create coupon. Code must be unique."
-      );
+      await fetchCoupons();
+    } catch (err: unknown) {
+      setError(parseApiError(err, "Failed to create coupon. Please check input values."));
     } finally {
       setSubmitting(false);
     }
@@ -123,7 +148,7 @@ export default function CouponsPage() {
           <h2 className="text-2xl font-bold">Coupons</h2>
           <p className="text-sm text-muted-foreground">Create promotional discounts and track usage rates.</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(val) => { setOpen(val); if (!val) setError(""); }}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -199,8 +224,8 @@ export default function CouponsPage() {
                     <Input
                       type="number"
                       placeholder="500"
-                      value={formData.minimum_order_value}
-                      onChange={(e) => setFormData({ ...formData, minimum_order_value: e.target.value })}
+                      value={formData.min_order_value}
+                      onChange={(e) => setFormData({ ...formData, min_order_value: e.target.value })}
                     />
                   </div>
                   <div className="space-y-1">
@@ -227,8 +252,15 @@ export default function CouponsPage() {
                 <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? "Creating..." : "Create Coupon"}
+                <Button type="submit" disabled={submitting} className="min-w-[130px]">
+                  {submitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    "Create Coupon"
+                  )}
                 </Button>
               </DialogFooter>
             </form>

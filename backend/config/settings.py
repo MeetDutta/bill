@@ -150,6 +150,9 @@ CORS_ALLOWED_ORIGINS = config(
 ).split(",")
 CORS_ALLOW_CREDENTIALS = True
 
+# Frontend URL
+FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
+
 # Redis
 REDIS_URL = config("REDIS_URL", default="redis://redis:6379/0")
 

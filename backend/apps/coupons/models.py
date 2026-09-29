@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 from common.models import TenantModel, TimeStampedModel, UUIDModel
 
@@ -16,7 +17,7 @@ class Coupon(UUIDModel, TenantModel, TimeStampedModel):
     discount_value = models.DecimalField(max_digits=10, decimal_places=2)
     min_order_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     max_discount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    start_at = models.DateTimeField()
+    start_at = models.DateTimeField(default=timezone.now, blank=True)
     expires_at = models.DateTimeField()
     usage_limit = models.PositiveIntegerField(default=0)
     per_customer_limit = models.PositiveIntegerField(default=1)
@@ -29,6 +30,13 @@ class Coupon(UUIDModel, TenantModel, TimeStampedModel):
     class Meta:
         ordering = ["-created_at"]
         unique_together = [("organization", "code")]
+
+    def save(self, *args, **kwargs):
+        if self.code:
+            self.code = self.code.strip().upper()
+        if not self.start_at:
+            self.start_at = timezone.now()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.code} - {self.name}"

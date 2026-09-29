@@ -18,9 +18,23 @@ class CustomerSerializer(serializers.ModelSerializer):
             "organization", "created_at",
         ]
         read_only_fields = [
-            "id", "total_purchases", "total_spend", "average_order_value",
+            "id", "customer_id", "total_purchases", "total_spend", "average_order_value",
             "last_purchase_at", "created_at", "organization",
         ]
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        org = getattr(request.user, "organization", None) if request and hasattr(request, "user") else None
+        phone = attrs.get("phone")
+        if phone and org:
+            qs = Customer.objects.filter(organization=org, phone=phone)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    "phone": ["Customer with this phone number already exists."]
+                })
+        return attrs
 
 
 class CustomerListSerializer(serializers.ModelSerializer):

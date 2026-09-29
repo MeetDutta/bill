@@ -4,6 +4,8 @@ from .models import Transaction, TransactionItem
 
 
 class TransactionItemSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+
     class Meta:
         model = TransactionItem
         fields = [
@@ -11,6 +13,13 @@ class TransactionItemSerializer(serializers.ModelSerializer):
             "unit_price", "discount", "tax", "total", "hsn_code",
         ]
         read_only_fields = ["id"]
+
+    def get_name(self, obj):
+        if obj.name:
+            return obj.name
+        if obj.product:
+            return obj.product.name
+        return "Item"
 
 
 class TransactionSerializer(serializers.ModelSerializer):

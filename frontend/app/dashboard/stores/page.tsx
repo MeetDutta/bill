@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { storeApi } from "@/services/api";
 import type { Store as StoreType } from "@/types";
-import { Search, Plus, Store, Building2 } from "lucide-react";
+import { parseApiError } from "@/lib/utils";
+import { Search, Plus, Store, Building2, Loader2 } from "lucide-react";
 
 export default function StoresPage() {
   const [stores, setStores] = useState<StoreType[]>([]);
@@ -50,7 +51,7 @@ export default function StoresPage() {
 
   const handleCreateStore = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.code) {
+    if (!formData.name.trim() || !formData.code.trim()) {
       setError("Store Name and Store Code are required.");
       return;
     }
@@ -60,12 +61,14 @@ export default function StoresPage() {
 
     try {
       await storeApi.create({
-        name: formData.name,
-        code: formData.code.toUpperCase(),
-        city: formData.city || "Main",
-        phone: formData.phone,
+        name: formData.name.trim(),
+        code: formData.code.trim().toUpperCase(),
+        city: formData.city.trim() || "Main",
+        phone: formData.phone.trim(),
+        address_line1: formData.address_line1.trim(),
         status: "active",
       } as Partial<StoreType>);
+
       setOpen(false);
       setFormData({
         name: "",
@@ -74,13 +77,9 @@ export default function StoresPage() {
         phone: "",
         address_line1: "",
       });
-      fetchStores();
-    } catch (err: any) {
-      setError(
-        err.response?.data?.detail ||
-          err.response?.data?.code?.[0] ||
-          "Failed to create store. Store code must be unique."
-      );
+      await fetchStores();
+    } catch (err: unknown) {
+      setError(parseApiError(err, "Failed to create store. Store code must be unique."));
     } finally {
       setSubmitting(false);
     }

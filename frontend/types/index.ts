@@ -34,9 +34,12 @@ export interface Store {
 export interface Customer {
   id: string;
   customer_id: string;
+  first_name?: string;
+  last_name?: string;
   full_name: string;
   phone: string;
   email: string;
+  city?: string;
   total_purchases: number;
   total_spend: number;
   segment: string;
@@ -83,12 +86,43 @@ export interface Coupon {
   id: string;
   code: string;
   name: string;
+  description?: string;
   discount_type: string;
   discount_value: number;
+  min_order_value?: number;
+  start_at?: string;
   expires_at: string;
   usage_limit: number;
   used_count: number;
   is_active: boolean;
+}
+
+export interface TrendPoint {
+  date: string;
+  formatted_date: string;
+  revenue: number;
+  transactions: number;
+}
+
+export interface GrowthPoint {
+  date: string;
+  formatted_date: string;
+  new_customers: number;
+  total_customers: number;
+}
+
+export interface DashboardData {
+  total_revenue: string;
+  total_transactions: number;
+  total_customers: number;
+  new_customers_today: number;
+  active_campaigns: number;
+  total_loyalty_points: string;
+  total_coupons_redeemed: number;
+  has_revenue_data: boolean;
+  has_customer_data: boolean;
+  revenue_trend: TrendPoint[];
+  customer_growth: GrowthPoint[];
 }
 
 export interface PaginatedResponse<T> {

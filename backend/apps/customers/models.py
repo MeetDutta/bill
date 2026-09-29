@@ -4,7 +4,7 @@ from common.models import TenantModel, TimeStampedModel, UUIDModel
 
 
 class Customer(UUIDModel, TenantModel, TimeStampedModel):
-    customer_id = models.CharField(max_length=50, db_index=True)
+    customer_id = models.CharField(max_length=50, db_index=True, blank=True)
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150, blank=True)
     phone = models.CharField(max_length=20, db_index=True)
@@ -57,6 +57,16 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
     @property
     def full_name(self):
         return f"{self.first_name} {self.last_name}".strip()
+
+    def save(self, *args, **kwargs):
+        if not self.customer_id:
+            import secrets
+            while True:
+                candidate_id = f"CUS-{secrets.token_hex(5).upper()}"
+                if not Customer.objects.filter(customer_id=candidate_id).exists():
+                    self.customer_id = candidate_id
+                    break
+        super().save(*args, **kwargs)
 
     def update_stats(self, amount):
         self.total_purchases += 1

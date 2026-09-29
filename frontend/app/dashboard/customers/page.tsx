@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { customerApi } from "@/services/api";
 import type { Customer } from "@/types";
-import { Search, Plus, UserPlus } from "lucide-react";
+import { formatCurrency, parseApiError } from "@/lib/utils";
+import { Search, Plus, UserPlus, Loader2 } from "lucide-react";
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -51,8 +52,8 @@ export default function CustomersPage() {
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.phone || !formData.first_name) {
-      setError("First name and Phone number are required.");
+    if (!formData.phone.trim() || !formData.first_name.trim()) {
+      setError("First Name and Phone Number are required.");
       return;
     }
 
@@ -61,15 +62,16 @@ export default function CustomersPage() {
 
     try {
       await customerApi.create({
-        first_name: formData.first_name,
-        last_name: formData.last_name,
-        phone: formData.phone,
-        email: formData.email,
-        city: formData.city,
+        first_name: formData.first_name.trim(),
+        last_name: formData.last_name.trim(),
+        phone: formData.phone.trim(),
+        email: formData.email.trim(),
+        city: formData.city.trim(),
         segment: formData.segment,
         whatsapp_opt_in: true,
         marketing_consent: true,
       } as Partial<Customer>);
+
       setOpen(false);
       setFormData({
         first_name: "",
@@ -79,13 +81,9 @@ export default function CustomersPage() {
         city: "",
         segment: "new",
       });
-      fetchCustomers();
-    } catch (err: any) {
-      setError(
-        err.response?.data?.detail ||
-          err.response?.data?.phone?.[0] ||
-          "Failed to create customer. Please check input values."
-      );
+      await fetchCustomers();
+    } catch (err: unknown) {
+      setError(parseApiError(err, "Failed to create customer. Please check input values."));
     } finally {
       setSubmitting(false);
     }
@@ -105,7 +103,7 @@ export default function CustomersPage() {
           <h2 className="text-2xl font-bold">Customers</h2>
           <p className="text-sm text-muted-foreground">Manage your customer relationships, CRM profiles, and loyalty details.</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(val) => { setOpen(val); if (!val) setError(""); }}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -197,8 +195,15 @@ export default function CustomersPage() {
                 <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? "Saving..." : "Save Customer"}
+                <Button type="submit" disabled={submitting} className="min-w-[120px]">
+                  {submitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Customer"
+                  )}
                 </Button>
               </DialogFooter>
             </form>

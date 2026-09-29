@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { productApi } from "@/services/api";
 import type { Product } from "@/types";
-import { Search, Plus, Tag, PackagePlus } from "lucide-react";
+import { parseApiError } from "@/lib/utils";
+import { Search, Plus, Tag, PackagePlus, Loader2 } from "lucide-react";
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -50,7 +51,7 @@ export default function ProductsPage() {
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.unit_price) {
+    if (!formData.name.trim() || !formData.unit_price) {
       setError("Product Name and Unit Price are required.");
       return;
     }
@@ -60,13 +61,14 @@ export default function ProductsPage() {
 
     try {
       await productApi.create({
-        name: formData.name,
-        sku: formData.sku || `SKU-${Date.now().toString().slice(-6)}`,
-        external_id: formData.external_id || `P-${Date.now().toString().slice(-6)}`,
+        name: formData.name.trim(),
+        sku: formData.sku.trim() || `SKU-${Date.now().toString().slice(-6)}`,
+        external_id: formData.external_id.trim() || `P-${Date.now().toString().slice(-6)}`,
         unit_price: Number(formData.unit_price),
-        tax_rate: Number(formData.tax_rate),
+        tax_rate: Number(formData.tax_rate || 0),
         is_active: true,
       } as Partial<Product>);
+
       setOpen(false);
       setFormData({
         name: "",
@@ -75,13 +77,9 @@ export default function ProductsPage() {
         unit_price: "",
         tax_rate: "18.00",
       });
-      fetchProducts();
-    } catch (err: any) {
-      setError(
-        err.response?.data?.detail ||
-          err.response?.data?.name?.[0] ||
-          "Failed to create product. Please check input values."
-      );
+      await fetchProducts();
+    } catch (err: unknown) {
+      setError(parseApiError(err, "Failed to create product. Please check input values."));
     } finally {
       setSubmitting(false);
     }
@@ -100,7 +98,7 @@ export default function ProductsPage() {
           <h2 className="text-2xl font-bold">Products</h2>
           <p className="text-sm text-muted-foreground">Manage your product catalog, SKUs, and pricing.</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(val) => { setOpen(val); if (!val) setError(""); }}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -181,8 +179,15 @@ export default function ProductsPage() {
                 <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? "Saving..." : "Save Product"}
+                <Button type="submit" disabled={submitting} className="min-w-[120px]">
+                  {submitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Product"
+                  )}
                 </Button>
               </DialogFooter>
             </form>

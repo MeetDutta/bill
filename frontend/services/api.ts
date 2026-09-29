@@ -9,6 +9,7 @@ import type {
   Product,
   Campaign,
   Coupon,
+  DashboardData,
   LoginPayload,
   RegisterPayload,
 } from "@/types";
@@ -78,9 +79,12 @@ export const couponApi = {
 
 // Analytics
 export const analyticsApi = {
+  getDashboard: () => api.get<DashboardData>("/analytics/"),
   getSales: () => api.get("/analytics/sales/"),
   getCustomers: () => api.get("/analytics/customers/"),
   getCampaigns: () => api.get("/analytics/campaigns/"),
+  getRevenueTrend: () => api.get("/analytics/revenue-trend/"),
+  getCustomerGrowth: () => api.get("/analytics/customer-growth/"),
 };
 
 // Loyalty

@@ -134,13 +134,14 @@ def send_digital_bill_task(transaction_id):
                 caption=f"Your bill from {tx.store.name} - Invoice #{invoice.invoice_number}",
             )
         else:
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000").rstrip("/")
             text = (
                 f"Hi {tx.customer.first_name},\n\n"
                 f"Thank you for your purchase at {tx.store.name}!\n"
                 f"Invoice: {invoice.invoice_number}\n"
                 f"Amount: ₹{tx.total}\n"
                 f"Date: {tx.transaction_date.strftime('%d %b %Y')}\n\n"
-                f"View your bill: {settings.FRONTEND_URL}/bills/{invoice.secure_token}"
+                f"View your bill: {frontend_url}/bills/{invoice.secure_token}"
             )
             result = service.send_text(to=phone, text=text)
 

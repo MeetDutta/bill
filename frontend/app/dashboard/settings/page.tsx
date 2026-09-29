@@ -5,7 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { whatsappApi } from "@/services/api";
-import { Settings, MessageSquare, Building2, Key, CheckCircle, Save } from "lucide-react";
+import { parseApiError } from "@/lib/utils";
+import { Settings, MessageSquare, Building2, Key, CheckCircle, Save, Loader2 } from "lucide-react";
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -51,7 +52,7 @@ export default function SettingsPage() {
       await whatsappApi.updateConfig(whatsappData);
       setMessage("WhatsApp API configuration updated successfully!");
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to update WhatsApp configuration.");
+      setError(parseApiError(err, "Failed to update WhatsApp configuration."));
     } finally {
       setSaving(false);
     }
