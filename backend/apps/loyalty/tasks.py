@@ -20,7 +20,7 @@ def calculate_loyalty_task(transaction_id, organization_id):
         return {"error": "No customer linked"}
 
     customer = tx.customer
-    org_id = organization_id
+    org_id = tx.organization_id or organization_id
 
     # Idempotency check: don't award points twice for the same transaction
     if LoyaltyTransaction.objects.filter(

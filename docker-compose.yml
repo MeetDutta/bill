@@ -52,7 +52,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A config worker -l info -Q celery,critical,notifications,whatsapp,campaigns,reports,analytics,automation
+    command: celery -A config worker -l info --concurrency=2 --max-tasks-per-child=100 -Q celery,critical,notifications,whatsapp,campaigns,reports,analytics,automation
     volumes:
       - ./backend:/app
     env_file:
