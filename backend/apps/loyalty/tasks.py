@@ -22,59 +22,74 @@ def calculate_loyalty_task(transaction_id, organization_id):
     customer = tx.customer
     org_id = organization_id
 
-    account, _ = LoyaltyAccount.objects.get_or_create(
+    # Idempotency check: don't award points twice for the same transaction
+    if LoyaltyTransaction.objects.filter(
         organization_id=org_id,
-        customer=customer,
-    )
+        reference_type="transaction",
+        reference_id=str(tx.id),
+    ).exists():
+        return {
+            "message": "Loyalty points already calculated for this transaction",
+            "transaction_id": str(tx.id),
+        }
 
-    earn_rules = LoyaltyRule.objects.filter(
-        organization_id=org_id,
-        rule_type="earn_purchase",
-        is_active=True,
-    ).order_by("-priority")
+    from django.db import transaction
 
-    total_points = Decimal("0")
-    for rule in earn_rules:
-        if tx.total >= rule.min_transaction_amount:
-            if rule.per_amount > 0:
-                points = (tx.total / rule.per_amount) * rule.points
-            else:
-                points = rule.points
-
-            if rule.max_points_per_transaction > 0:
-                points = min(points, rule.max_points_per_transaction)
-
-            total_points += points
-            break
-
-    if total_points > 0:
-        balance_after = account.balance + total_points
-        account.balance = balance_after
-        account.total_earned += total_points
-        account.save(update_fields=["balance", "total_earned", "updated_at"])
-
-        LoyaltyTransaction.objects.create(
-            organization_id=org_id,
-            loyalty_account=account,
-            transaction_type="earn",
-            points=total_points,
-            balance_after=balance_after,
-            reference_type="transaction",
-            reference_id=str(tx.id),
-            description=f"Points earned for invoice {tx.invoice_number}",
-            expires_at=timezone.now() + timezone.timedelta(days=365),
-        )
-
-        tx.loyalty_points_earned = int(total_points)
-        tx.save(update_fields=["loyalty_points_earned"])
-
-        CustomerTimeline.objects.create(
+    with transaction.atomic():
+        account, _ = LoyaltyAccount.objects.select_for_update().get_or_create(
             organization_id=org_id,
             customer=customer,
-            event_type="loyalty_earned",
-            reference_id=str(tx.id),
-            metadata={"points": str(total_points), "invoice_number": tx.invoice_number},
+            defaults={"balance": 0, "total_earned": 0, "total_redeemed": 0},
         )
+
+        earn_rules = LoyaltyRule.objects.filter(
+            organization_id=org_id,
+            rule_type="earn_purchase",
+            is_active=True,
+        ).order_by("-priority")
+
+        total_points = Decimal("0")
+        for rule in earn_rules:
+            if tx.total >= rule.min_transaction_amount:
+                if rule.per_amount > 0:
+                    points = (tx.total / rule.per_amount) * rule.points
+                else:
+                    points = rule.points
+
+                if rule.max_points_per_transaction > 0:
+                    points = min(points, rule.max_points_per_transaction)
+
+                total_points += points
+                break
+
+        if total_points > 0:
+            balance_after = account.balance + total_points
+            account.balance = balance_after
+            account.total_earned += total_points
+            account.save(update_fields=["balance", "total_earned", "updated_at"])
+
+            LoyaltyTransaction.objects.create(
+                organization_id=org_id,
+                loyalty_account=account,
+                transaction_type="earn",
+                points=total_points,
+                balance_after=balance_after,
+                reference_type="transaction",
+                reference_id=str(tx.id),
+                description=f"Points earned for invoice {tx.invoice_number}",
+                expires_at=timezone.now() + timezone.timedelta(days=365),
+            )
+
+            tx.loyalty_points_earned = int(total_points)
+            tx.save(update_fields=["loyalty_points_earned"])
+
+            CustomerTimeline.objects.create(
+                organization_id=org_id,
+                customer=customer,
+                event_type="loyalty_earned",
+                reference_id=str(tx.id),
+                metadata={"points": str(total_points), "invoice_number": tx.invoice_number},
+            )
 
     return {
         "transaction_id": str(tx.id),

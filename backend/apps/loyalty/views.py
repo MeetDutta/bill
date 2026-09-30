@@ -73,22 +73,25 @@ class RedeemPointsView(APIView):
 
         org = request.user.organization
 
-        try:
-            account = LoyaltyAccount.objects.select_related("customer").get(
-                organization=org,
-                customer_id=data["customer_id"],
-            )
-        except LoyaltyAccount.DoesNotExist:
-            return Response({"error": "Loyalty account not found"}, status=status.HTTP_404_NOT_FOUND)
-
         points = Decimal(str(data["points"]))
-        if account.balance < points:
-            return Response(
-                {"error": "Insufficient points", "balance": str(account.balance)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if points <= 0:
+            return Response({"error": "Points to redeem must be greater than zero"}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
+            try:
+                account = LoyaltyAccount.objects.select_for_update().select_related("customer").get(
+                    organization=org,
+                    customer_id=data["customer_id"],
+                )
+            except LoyaltyAccount.DoesNotExist:
+                return Response({"error": "Loyalty account not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            if account.balance < points:
+                return Response(
+                    {"error": "Insufficient points", "balance": str(account.balance)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             balance_after = account.balance - points
             account.balance = balance_after
             account.total_redeemed += points

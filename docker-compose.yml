@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:16-alpine
@@ -54,7 +52,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A config worker -l info -Q critical,notifications,whatsapp,campaigns,reports,analytics,automation
+    command: celery -A config worker -l info -Q celery,critical,notifications,whatsapp,campaigns,reports,analytics,automation
     volumes:
       - ./backend:/app
     env_file:

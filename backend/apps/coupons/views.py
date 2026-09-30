@@ -96,35 +96,54 @@ class ValidateCouponView(APIView):
 
 class RedeemCouponView(APIView):
     def post(self, request):
-        code = request.data.get("code", "")
+        code = (request.data.get("code") or "").strip().upper()
         customer_id = request.data.get("customer_id")
         transaction_id = request.data.get("transaction_id")
         order_value = Decimal(str(request.data.get("order_value", 0)))
 
-        try:
-            coupon = Coupon.objects.get(
-                organization=request.user.organization,
-                code=code.upper(),
-                is_active=True,
-            )
-        except Coupon.DoesNotExist:
-            return Response({"error": "Invalid coupon code"}, status=status.HTTP_400_BAD_REQUEST)
-
         now = timezone.now()
-        if coupon.expires_at < now:
-            return Response({"error": "Coupon has expired"}, status=status.HTTP_400_BAD_REQUEST)
-        if coupon.usage_limit > 0 and coupon.used_count >= coupon.usage_limit:
-            return Response({"error": "Coupon usage limit reached"}, status=status.HTTP_400_BAD_REQUEST)
-
-        discount = Decimal("0")
-        if coupon.discount_type == "percentage":
-            discount = (order_value * coupon.discount_value) / 100
-            if coupon.max_discount:
-                discount = min(discount, coupon.max_discount)
-        else:
-            discount = min(coupon.discount_value, order_value)
 
         with transaction.atomic():
+            try:
+                coupon = Coupon.objects.select_for_update().get(
+                    organization=request.user.organization,
+                    code=code,
+                    is_active=True,
+                )
+            except Coupon.DoesNotExist:
+                return Response({"error": "Invalid coupon code"}, status=status.HTTP_400_BAD_REQUEST)
+
+            if coupon.start_at and coupon.start_at > now:
+                return Response({"error": "Coupon not yet active"}, status=status.HTTP_400_BAD_REQUEST)
+            if coupon.expires_at and coupon.expires_at < now:
+                return Response({"error": "Coupon has expired"}, status=status.HTTP_400_BAD_REQUEST)
+            if coupon.usage_limit > 0 and coupon.used_count >= coupon.usage_limit:
+                return Response({"error": "Coupon usage limit reached"}, status=status.HTTP_400_BAD_REQUEST)
+            if order_value < coupon.min_order_value:
+                return Response(
+                    {"error": f"Minimum order value is ₹{coupon.min_order_value}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if customer_id and coupon.per_customer_limit > 0:
+                redemptions = CouponRedemption.objects.filter(
+                    coupon=coupon,
+                    customer_id=customer_id,
+                ).count()
+                if redemptions >= coupon.per_customer_limit:
+                    return Response(
+                        {"error": "Per-customer usage limit reached"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            discount = Decimal("0")
+            if coupon.discount_type == "percentage":
+                discount = (order_value * coupon.discount_value) / 100
+                if coupon.max_discount:
+                    discount = min(discount, coupon.max_discount)
+            else:
+                discount = min(coupon.discount_value, order_value)
+
             coupon.used_count += 1
             coupon.save(update_fields=["used_count"])
 

@@ -42,7 +42,13 @@ class Transaction(UUIDModel, TenantModel, TimeStampedModel):
 
     class Meta:
         ordering = ["-transaction_date"]
-        unique_together = [("organization", "external_transaction_id")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "external_transaction_id"],
+                condition=~models.Q(external_transaction_id=""),
+                name="unique_org_non_empty_external_tx",
+            )
+        ]
         indexes = [
             models.Index(fields=["organization", "transaction_date"]),
             models.Index(fields=["organization", "store", "transaction_date"]),

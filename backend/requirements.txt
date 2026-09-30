@@ -7,6 +7,7 @@ requests==2.32.3
 
 # Database
 psycopg2-binary==2.9.9
+dj-database-url==2.2.0
 
 # Redis
 redis==5.0.8
@@ -27,6 +28,7 @@ sentry-sdk==2.11.0
 
 # PDF generation
 weasyprint==62.3
+pydyf==0.11.0
 
 # Validation
 pydantic==2.8.2

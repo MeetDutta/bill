@@ -22,6 +22,15 @@ class ProductSerializer(serializers.ModelSerializer):
             "organization", "created_at",
         ]
         read_only_fields = ["id", "created_at", "organization"]
+        extra_kwargs = {
+            "external_id": {"required": False, "allow_blank": True},
+        }
+
+    def create(self, validated_data):
+        if not validated_data.get("external_id"):
+            import uuid
+            validated_data["external_id"] = f"PRD-{uuid.uuid4().hex[:8].upper()}"
+        return super().create(validated_data)
 
 
 class ProductListSerializer(serializers.ModelSerializer):

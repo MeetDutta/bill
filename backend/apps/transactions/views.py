@@ -41,21 +41,44 @@ class TransactionIngestView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
+        # 1. Integration / User Authentication
+        org = None
+        if request.user and request.user.is_authenticated:
+            org = request.user.organization
+        else:
+            api_key = request.headers.get("X-API-Key")
+            if not api_key:
+                auth_header = request.headers.get("Authorization", "")
+                if auth_header.startswith("Api-Key "):
+                    api_key = auth_header.split(" ", 1)[1].strip()
+
+            if api_key:
+                from apps.integrations.models import Integration
+                integration = Integration.objects.filter(api_key=api_key, is_active=True).select_related("organization").first()
+                if integration:
+                    org = integration.organization
+
+        if not org:
+            return Response(
+                {"error": "Authentication required. Provide a valid Bearer token or X-API-Key header."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
         serializer = TransactionIngestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        org = request.user.organization if request.user.is_authenticated else None
-        if not org:
-            from apps.stores.models import Store
-            store_code = data.get("store_id")
-            try:
-                store = Store.objects.get(code=store_code)
-                org = store.organization
-            except Store.DoesNotExist:
-                return Response({"error": "Store not found"}, status=status.HTTP_400_BAD_REQUEST)
+        # 2. Store lookup scoped strictly to organization
+        from apps.stores.models import Store
+        store = Store.objects.filter(organization=org, code=data["store_id"]).first()
+        if not store:
+            return Response(
+                {"error": f"Store with code '{data['store_id']}' not found in your organization"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        external_tx_id = data.get("external_transaction_id", "")
+        # 3. Idempotency Check
+        external_tx_id = (data.get("external_transaction_id") or "").strip()
         if external_tx_id:
             existing = Transaction.objects.filter(
                 organization=org,
@@ -66,37 +89,61 @@ class TransactionIngestView(APIView):
                     TransactionSerializer(existing).data,
                     status=status.HTTP_200_OK,
                 )
+        else:
+            # If no external_transaction_id, check store + invoice_number
+            existing = Transaction.objects.filter(
+                organization=org,
+                store=store,
+                invoice_number=data["invoice_number"],
+            ).first()
+            if existing:
+                return Response(
+                    TransactionSerializer(existing).data,
+                    status=status.HTTP_200_OK,
+                )
 
+        # 4. Atomic Execution
         with transaction.atomic():
             from apps.customers.models import Customer, CustomerTimeline
-            customer_data = data.get("customer", {})
-            phone = customer_data.get("phone", "")
+            from apps.customers.utils import normalize_phone
+            from django.db import IntegrityError
+
+            customer_data = data.get("customer") or {}
+            raw_phone = customer_data.get("phone", "")
+            phone = normalize_phone(raw_phone)
             customer = None
             customer_created = False
+
             if phone:
-                customer, customer_created = Customer.objects.get_or_create(
-                    organization=org,
-                    phone=phone,
-                    defaults={
-                        "customer_id": f"CUST-{uuid.uuid4().hex[:8].upper()}",
-                        "first_name": customer_data.get("name", "Customer").split()[0],
-                        "last_name": " ".join(customer_data.get("name", "Customer").split()[1:]),
-                        "email": customer_data.get("email", ""),
-                        "source": data.get("external_source", "api"),
-                    },
-                )
+                try:
+                    customer, customer_created = Customer.objects.get_or_create(
+                        organization=org,
+                        phone=phone,
+                        defaults={
+                            "customer_id": f"CUST-{uuid.uuid4().hex[:8].upper()}",
+                            "first_name": customer_data.get("name", "Customer").split()[0],
+                            "last_name": " ".join(customer_data.get("name", "Customer").split()[1:]),
+                            "email": customer_data.get("email", ""),
+                            "source": data.get("external_source") or "api",
+                        },
+                    )
+                except IntegrityError:
+                    # Concurrency safeguard: another request created customer concurrently
+                    customer = Customer.objects.get(organization=org, phone=phone)
+                    customer_created = False
+
                 if customer_created:
+                    from apps.loyalty.models import LoyaltyAccount
+                    LoyaltyAccount.objects.get_or_create(
+                        organization=org,
+                        customer=customer,
+                        defaults={"balance": 0, "total_earned": 0, "total_redeemed": 0},
+                    )
                     CustomerTimeline.objects.create(
                         organization=org,
                         customer=customer,
                         event_type="created",
                     )
-
-            from apps.stores.models import Store
-            try:
-                store = Store.objects.get(organization=org, code=data["store_id"])
-            except Store.DoesNotExist:
-                return Response({"error": "Store not found"}, status=status.HTTP_400_BAD_REQUEST)
 
             tx = Transaction.objects.create(
                 organization=org,
@@ -105,7 +152,7 @@ class TransactionIngestView(APIView):
                 invoice_number=data["invoice_number"],
                 transaction_date=data["transaction_date"],
                 subtotal=data["subtotal"],
-                discount=data["discount"],
+                discount=data.get("discount", Decimal("0")),
                 tax=data["tax"],
                 total=data["total"],
                 payment_method=data.get("payment_method", ""),
@@ -120,14 +167,19 @@ class TransactionIngestView(APIView):
                     name=item_data["name"],
                     quantity=item_data.get("quantity", 1),
                     unit_price=item_data["unit_price"],
-                    discount=item_data.get("discount", 0),
-                    tax=item_data.get("tax", 0),
+                    discount=item_data.get("discount", Decimal("0")),
+                    tax=item_data.get("tax", Decimal("0")),
                     total=item_data["total"],
+                    hsn_code=item_data.get("hsn_code", ""),
                 )
 
             if customer:
                 customer.update_stats(Decimal(str(data["total"])))
-                event_type = "repeat_purchase" if not customer_created and customer.total_purchases > 1 else "purchase"
+                event_type = (
+                    "repeat_purchase"
+                    if not customer_created and customer.total_purchases > 1
+                    else "purchase"
+                )
                 CustomerTimeline.objects.create(
                     organization=org,
                     customer=customer,
@@ -136,6 +188,7 @@ class TransactionIngestView(APIView):
                     metadata={"invoice_number": tx.invoice_number, "total": str(tx.total)},
                 )
 
+        # 5. Background Pipeline
         from apps.invoices.tasks import generate_invoice_task
         generate_invoice_task.delay(str(tx.id))
 

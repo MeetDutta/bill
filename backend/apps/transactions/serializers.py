@@ -53,16 +53,68 @@ class TransactionListSerializer(serializers.ModelSerializer):
         ]
 
 
+class TransactionItemIngestSerializer(serializers.Serializer):
+    external_product_id = serializers.CharField(required=False, default="", allow_blank=True)
+    name = serializers.CharField(max_length=255)
+    quantity = serializers.DecimalField(max_digits=10, decimal_places=2)
+    unit_price = serializers.DecimalField(max_digits=12, decimal_places=2)
+    discount = serializers.DecimalField(max_digits=12, decimal_places=2, default=0, required=False)
+    tax = serializers.DecimalField(max_digits=12, decimal_places=2, default=0, required=False)
+    total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    hsn_code = serializers.CharField(required=False, default="", allow_blank=True)
+
+    def validate(self, attrs):
+        qty = attrs.get("quantity", 0)
+        price = attrs.get("unit_price", 0)
+        disc = attrs.get("discount", 0)
+        tax = attrs.get("tax", 0)
+        item_total = attrs.get("total", 0)
+
+        if qty <= 0:
+            raise serializers.ValidationError({"quantity": "Quantity must be greater than zero."})
+        if price < 0:
+            raise serializers.ValidationError({"unit_price": "Unit price cannot be negative."})
+        if disc < 0:
+            raise serializers.ValidationError({"discount": "Discount cannot be negative."})
+        if tax < 0:
+            raise serializers.ValidationError({"tax": "Tax cannot be negative."})
+
+        expected_total = (qty * price) - disc + tax
+        if abs(expected_total - item_total) > 0.05:
+            raise serializers.ValidationError({
+                "total": f"Item total ({item_total}) does not match quantity * unit_price - discount + tax ({expected_total:.2f})"
+            })
+        return attrs
+
+
 class TransactionIngestSerializer(serializers.Serializer):
     store_id = serializers.CharField()
     invoice_number = serializers.CharField()
     transaction_date = serializers.DateTimeField()
-    customer = serializers.DictField()
-    items = serializers.ListField()
+    customer = serializers.DictField(required=False, default=dict)
+    items = serializers.ListField(child=TransactionItemIngestSerializer(), min_length=1)
     subtotal = serializers.DecimalField(max_digits=12, decimal_places=2)
-    discount = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount = serializers.DecimalField(max_digits=12, decimal_places=2, default=0, required=False)
     tax = serializers.DecimalField(max_digits=12, decimal_places=2)
     total = serializers.DecimalField(max_digits=12, decimal_places=2)
-    payment_method = serializers.CharField(required=False, default="")
-    external_source = serializers.CharField(required=False, default="")
-    external_transaction_id = serializers.CharField(required=False, default="")
+    payment_method = serializers.CharField(required=False, default="", allow_blank=True)
+    external_source = serializers.CharField(required=False, default="", allow_blank=True)
+    external_transaction_id = serializers.CharField(required=False, default="", allow_blank=True)
+
+    def validate(self, attrs):
+        items = attrs.get("items", [])
+        if not items:
+            raise serializers.ValidationError({"items": "At least one line item is required."})
+
+        subtotal = attrs.get("subtotal")
+        discount = attrs.get("discount", 0)
+        tax = attrs.get("tax")
+        total = attrs.get("total")
+
+        expected_total = subtotal - discount + tax
+        if abs(expected_total - total) > 0.05:
+            raise serializers.ValidationError({
+                "total": f"Transaction total ({total}) does not match subtotal ({subtotal}) - discount ({discount}) + tax ({tax}) = {expected_total:.2f}"
+            })
+
+        return attrs

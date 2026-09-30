@@ -23,17 +23,21 @@ class CustomerSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        from .utils import normalize_phone
         request = self.context.get("request")
         org = getattr(request.user, "organization", None) if request and hasattr(request, "user") else None
         phone = attrs.get("phone")
-        if phone and org:
-            qs = Customer.objects.filter(organization=org, phone=phone)
-            if self.instance:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError({
-                    "phone": ["Customer with this phone number already exists."]
-                })
+        if phone:
+            phone = normalize_phone(phone)
+            attrs["phone"] = phone
+            if org:
+                qs = Customer.objects.filter(organization=org, phone=phone)
+                if self.instance:
+                    qs = qs.exclude(pk=self.instance.pk)
+                if qs.exists():
+                    raise serializers.ValidationError({
+                        "phone": ["Customer with this phone number already exists."]
+                    })
         return attrs
 
 

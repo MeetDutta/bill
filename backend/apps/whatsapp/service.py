@@ -8,9 +8,9 @@ from django.utils import timezone
 
 
 class WhatsAppService:
-    BASE_URL = "https://graph.facebook.com/v18.0"
-
     def __init__(self, phone_number_id=None, access_token=None):
+        version = getattr(settings, "WHATSAPP_API_VERSION", "v20.0")
+        self.base_url = getattr(settings, "WHATSAPP_API_BASE_URL", f"https://graph.facebook.com/{version}")
         self.phone_number_id = phone_number_id or settings.WHATSAPP_PHONE_NUMBER_ID
         self.access_token = access_token or settings.WHATSAPP_ACCESS_TOKEN
 
@@ -33,7 +33,7 @@ class WhatsAppService:
         if components:
             payload["template"]["components"] = components
 
-        url = f"{self.BASE_URL}/{self.phone_number_id}/messages"
+        url = f"{self.base_url}/{self.phone_number_id}/messages"
         response = requests.post(url, json=payload, headers=self._headers(), timeout=30)
         return response.json()
 
@@ -44,7 +44,7 @@ class WhatsAppService:
             "type": "text",
             "text": {"body": text},
         }
-        url = f"{self.BASE_URL}/{self.phone_number_id}/messages"
+        url = f"{self.base_url}/{self.phone_number_id}/messages"
         response = requests.post(url, json=payload, headers=self._headers(), timeout=30)
         return response.json()
 
@@ -58,7 +58,7 @@ class WhatsAppService:
                 "caption": caption,
             },
         }
-        url = f"{self.BASE_URL}/{self.phone_number_id}/messages"
+        url = f"{self.base_url}/{self.phone_number_id}/messages"
         response = requests.post(url, json=payload, headers=self._headers(), timeout=30)
         return response.json()
 
@@ -72,7 +72,7 @@ class WhatsAppService:
                 "caption": caption,
             },
         }
-        url = f"{self.BASE_URL}/{self.phone_number_id}/messages"
+        url = f"{self.base_url}/{self.phone_number_id}/messages"
         response = requests.post(url, json=payload, headers=self._headers(), timeout=30)
         return response.json()
 
