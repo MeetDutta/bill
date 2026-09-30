@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { authApi } from "@/services/api";
 
+import { parseApiError } from "@/lib/api-error";
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -25,7 +27,7 @@ export default function LoginPage() {
       localStorage.setItem("refresh_token", res.data.refresh);
       router.push("/dashboard");
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Invalid credentials";
+      const errorMessage = parseApiError(err, "Invalid email or password. Please check your credentials.");
       setError(errorMessage);
     } finally {
       setLoading(false);
