@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "apps.billing",
     "apps.reports",
     "apps.ai",
+    "apps.engagement",
 ]
 
 MIDDLEWARE = [

@@ -1,0 +1,4 @@
+from django.contrib import admin
+from .models import Review, Referral
+admin.site.register(Review)
+admin.site.register(Referral)

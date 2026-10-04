@@ -17,16 +17,20 @@ import {
   Ticket,
   Zap,
   MessageSquare,
+  Sparkles,
+  HeartHandshake,
 } from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Customers", href: "/dashboard/customers", icon: Users },
+  { name: "Engagement", href: "/dashboard/engagement", icon: HeartHandshake },
   { name: "Transactions", href: "/dashboard/transactions", icon: Receipt },
   { name: "Products", href: "/dashboard/products", icon: Tag },
   { name: "Loyalty", href: "/dashboard/loyalty", icon: Star },
   { name: "Coupons", href: "/dashboard/coupons", icon: Ticket },
   { name: "Campaigns", href: "/dashboard/campaigns", icon: Megaphone },
+  { name: "AI Campaign Assistant", href: "/dashboard/ai-campaigns", icon: Sparkles },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Stores", href: "/dashboard/stores", icon: Store },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },

@@ -144,3 +144,20 @@ export interface RegisterPayload {
   phone: string;
   password: string;
 }
+
+export interface EngagementOpportunity { key: string; icon: string; title: string; count: number; action: string; }
+export interface EngagementDashboard {
+  opportunities: EngagementOpportunity[];
+  customer_totals: { total: number; vip: number; inactive: number; new_30d: number };
+  reviews: { count: number; average: number };
+  campaigns: { active: number };
+}
+export interface Customer360 {
+  customer: Customer & { name: string; average_order_value: string; preferred_store?: string | null; created_at: string };
+  engagement: { score: number; label: string; reasons: string[] };
+  loyalty: { balance: string; total_earned: string; total_redeemed: string; total_expired: string } | null;
+  recommended_action: { title: string; reason: string; suggested_offer: string };
+  transactions: { id: string; invoice_number: string; total: string; date: string; payment_method: string; items: number }[];
+  timeline: { id: string; event_type: string; reference_id: string; metadata: Record<string, unknown>; created_at: string }[];
+}
+export interface SegmentSummary { key: string; name: string; count: number; description: string; }

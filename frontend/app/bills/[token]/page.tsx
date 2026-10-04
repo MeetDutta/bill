@@ -21,6 +21,7 @@ interface BillData {
   invoice_number: string;
   secure_token: string;
   is_viewed: boolean;
+  loyalty_balance?: string | null;
   organization_name: string;
   store_name: string;
   customer_name: string;
@@ -174,6 +175,21 @@ export default function DigitalBillPage() {
               </div>
             </div>
           )}
+
+          {/* Customer Rewards Wallet */}
+          <div className="mx-4 sm:mx-6 mb-2 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Your Rewards Wallet</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">You have {Number(bill.loyalty_balance || 0).toLocaleString("en-IN")} loyalty points</p>
+                <p className="mt-1 text-xs text-slate-500">Keep shopping to unlock more rewards.</p>
+              </div>
+              <div className="rounded-xl bg-white px-3 py-2 text-center shadow-sm border border-indigo-100">
+                <Sparkles className="mx-auto h-4 w-4 text-indigo-600" />
+                <span className="text-lg font-black text-indigo-700">{Number(bill.loyalty_balance || 0).toLocaleString("en-IN")}</span>
+              </div>
+            </div>
+          </div>
 
           {/* Items Table */}
           <div className="p-4 sm:p-6">

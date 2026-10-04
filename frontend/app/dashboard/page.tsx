@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { analyticsApi } from "@/services/api";
+import { analyticsApi, engagementApi } from "@/services/api";
 import { formatCurrency } from "@/lib/utils";
-import type { DashboardData } from "@/types";
-import { TrendingUp, Users, Receipt, Megaphone, Star, Ticket } from "lucide-react";
+import type { DashboardData, EngagementDashboard } from "@/types";
+import { TrendingUp, Users, Receipt, Megaphone, Star, Ticket, ArrowRight, Sparkles } from "lucide-react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -19,14 +19,14 @@ import {
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [engagement, setEngagement] = useState<EngagementDashboard | null>(null);
 
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const res = await analyticsApi.getDashboard();
-        if (res.data) {
-          setData(res.data);
-        }
+        const [res, engagementRes] = await Promise.all([analyticsApi.getDashboard(), engagementApi.dashboard()]);
+        if (res.data) setData(res.data);
+        if (engagementRes.data) setEngagement(engagementRes.data);
       } catch {
         // Handled with null fallback
       } finally {
@@ -114,6 +114,25 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {/* Customer Engagement Opportunities */}
+      <Card className="border-primary/20 bg-gradient-to-r from-primary/5 via-background to-background">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4 text-primary" /> Today&apos;s Customer Opportunities</CardTitle>
+          <CardDescription>Actions based on your actual customer and loyalty data.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            {(engagement?.opportunities || []).map((opportunity) => (
+              <a key={opportunity.key} href={opportunity.key === "vip" ? "/dashboard/customers" : "/dashboard/engagement"} className="rounded-xl border bg-background p-4 transition hover:-translate-y-0.5 hover:shadow-sm">
+                <div className="flex items-center justify-between"><span className="text-xl">{opportunity.icon}</span><span className="text-2xl font-bold">{opportunity.count}</span></div>
+                <p className="mt-2 text-sm font-semibold">{opportunity.title}</p>
+                <p className="mt-1 flex items-center text-xs text-muted-foreground">{opportunity.action}<ArrowRight className="ml-1 h-3 w-3" /></p>
+              </a>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Real Charts Grid */}
       <div className="grid gap-4 md:grid-cols-2">

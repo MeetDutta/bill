@@ -14,9 +14,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { customerApi } from "@/services/api";
+import Link from "next/link";
 import type { Customer } from "@/types";
 import { formatCurrency, parseApiError } from "@/lib/utils";
-import { Search, Plus, UserPlus, Loader2 } from "lucide-react";
+import { Search, Plus, UserPlus, Loader2, ArrowUpRight } from "lucide-react";
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -248,7 +249,7 @@ export default function CustomersPage() {
                 <tbody>
                   {filtered.map((customer) => (
                     <tr key={customer.id} className="border-b">
-                      <td className="py-3 pr-4 font-medium">{customer.full_name}</td>
+                      <td className="py-3 pr-4 font-medium"><Link className="inline-flex items-center gap-1 hover:text-primary" href={`/dashboard/customers/${customer.id}`}>{customer.full_name}<ArrowUpRight className="h-3 w-3" /></Link></td>
                       <td className="py-3 pr-4">{customer.phone}</td>
                       <td className="py-3 pr-4">{customer.email || "—"}</td>
                       <td className="py-3 pr-4">{customer.total_purchases}</td>

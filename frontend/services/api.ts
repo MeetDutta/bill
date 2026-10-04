@@ -12,6 +12,9 @@ import type {
   DashboardData,
   LoginPayload,
   RegisterPayload,
+  EngagementDashboard,
+  Customer360,
+  SegmentSummary,
 } from "@/types";
 
 // Auth
@@ -100,4 +103,15 @@ export const whatsappApi = {
   updateConfig: (data: unknown) => api.patch("/whatsapp/config/", data),
   getMessages: () => api.get("/whatsapp/messages/"),
   getTemplates: () => api.get("/whatsapp/templates/"),
+};
+
+// Customer engagement
+export const engagementApi = {
+  dashboard: () => api.get<EngagementDashboard>("/engagement/dashboard/"),
+  customer360: (id: string) => api.get<Customer360>(`/engagement/customers/${id}/`),
+  score: (id: string) => api.get(`/engagement/customers/${id}/score/`),
+  segments: () => api.get<SegmentSummary[]>("/engagement/segments/"),
+  reviews: () => api.get("/engagement/reviews/"),
+  referrals: () => api.get("/engagement/referrals/"),
+  generateCampaign: (goal: string) => api.post("/engagement/campaign-assistant/", { goal }),
 };
