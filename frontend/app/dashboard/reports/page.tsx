@@ -30,6 +30,7 @@ export default function POSReportsPage() {
 
   // Report Data
   const [salesReport, setSalesReport] = useState<any[]>([]);
+  const [salesSummary, setSalesSummary] = useState<any | null>(null);
   const [paymentsReport, setPaymentsReport] = useState<any[]>([]);
   const [productSalesReport, setProductSalesReport] = useState<any[]>([]);
   const [taxReport, setTaxReport] = useState<any | null>(null);
@@ -50,22 +51,33 @@ export default function POSReportsPage() {
       const params = { period: dateFilter };
       if (activeTab === "sales") {
         const res = await posApi.getSalesReport(params);
-        setSalesReport(res.data?.results || res.data || []);
+        const data = res.data;
+        const txns = data?.transactions || (Array.isArray(data) ? data : data?.results || []);
+        setSalesReport(txns);
+        setSalesSummary(data?.summary || null);
       } else if (activeTab === "payments") {
         const res = await posApi.getPaymentsReport(params);
-        setPaymentsReport(res.data?.results || res.data || []);
+        const data = res.data;
+        const pms = data?.breakdown || (Array.isArray(data) ? data : data?.results || []);
+        setPaymentsReport(pms);
       } else if (activeTab === "products") {
         const res = await posApi.getProductSalesReport(params);
-        setProductSalesReport(res.data?.results || res.data || []);
+        const data = res.data;
+        const prods = data?.products || (Array.isArray(data) ? data : data?.results || []);
+        setProductSalesReport(prods);
       } else if (activeTab === "tax") {
         const res = await posApi.getTaxReport(params);
         setTaxReport(res.data || null);
       } else if (activeTab === "returns") {
         const res = await posApi.getReturnsReport(params);
-        setReturnsReport(res.data?.results || res.data || []);
+        const data = res.data;
+        const rets = data?.returns || (Array.isArray(data) ? data : data?.results || []);
+        setReturnsReport(rets);
       } else if (activeTab === "outstanding") {
         const res = await posApi.getOutstandingReport(params);
-        setOutstandingReport(res.data?.results || res.data || []);
+        const data = res.data;
+        const debtors = data?.customers || (Array.isArray(data) ? data : data?.results || []);
+        setOutstandingReport(debtors);
       }
     } catch (err) {
       console.error("Failed to load report", err);
@@ -155,54 +167,100 @@ export default function POSReportsPage() {
 
       {/* TAB 1: Sales Report */}
       {activeTab === "sales" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Transactions & Sales Ledger</CardTitle>
-            <CardDescription className="text-xs">Detailed audit of all customer invoices and payments</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="py-8 text-center text-xs text-muted-foreground">Loading sales data...</div>
-            ) : salesReport.length === 0 ? (
-              <div className="py-8 text-center text-xs text-muted-foreground">No sales recorded for this period.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="border-b bg-muted/40 text-muted-foreground">
-                    <tr>
-                      <th className="py-2.5 px-3">Date</th>
-                      <th className="py-2.5 px-3">Invoice #</th>
-                      <th className="py-2.5 px-3">Customer</th>
-                      <th className="py-2.5 px-3 text-right">Items</th>
-                      <th className="py-2.5 px-3 text-right">Subtotal</th>
-                      <th className="py-2.5 px-3 text-right">Tax</th>
-                      <th className="py-2.5 px-3 text-right">Grand Total</th>
-                      <th className="py-2.5 px-3">Payment</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {salesReport.map((s) => (
-                      <tr key={s.id} className="hover:bg-muted/20">
-                        <td className="py-2.5 px-3 text-muted-foreground">
-                          {new Date(s.transaction_date).toLocaleString()}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono font-bold">{s.invoice_number}</td>
-                        <td className="py-2.5 px-3 font-medium">{s.customer_name || s.customer || "Walk-in"}</td>
-                        <td className="py-2.5 px-3 text-right">{s.item_count || 1}</td>
-                        <td className="py-2.5 px-3 text-right">₹{Number(s.subtotal).toFixed(2)}</td>
-                        <td className="py-2.5 px-3 text-right text-muted-foreground">₹{Number(s.tax).toFixed(2)}</td>
-                        <td className="py-2.5 px-3 text-right font-black text-foreground">
-                          ₹{Number(s.total).toFixed(2)}
-                        </td>
-                        <td className="py-2.5 px-3 uppercase text-[11px] font-medium">{s.payment_method}</td>
+        <div className="space-y-4">
+          {salesSummary && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="bg-muted/20">
+                <CardHeader className="pb-1">
+                  <CardTitle className="text-xs uppercase text-muted-foreground font-semibold">Total Revenue</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-xl font-black text-foreground">
+                    ₹{Number(salesSummary.total_sales || 0).toLocaleString()}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-muted/20">
+                <CardHeader className="pb-1">
+                  <CardTitle className="text-xs uppercase text-muted-foreground font-semibold">Bills Issued</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-xl font-bold">{salesSummary.bill_count || 0}</div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-muted/20">
+                <CardHeader className="pb-1">
+                  <CardTitle className="text-xs uppercase text-muted-foreground font-semibold">Average Bill Value</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-xl font-bold text-blue-600">
+                    ₹{Number(salesSummary.average_bill_value || 0).toFixed(2)}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-muted/20">
+                <CardHeader className="pb-1">
+                  <CardTitle className="text-xs uppercase text-muted-foreground font-semibold">Discounts Given</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-xl font-bold text-emerald-600">
+                    ₹{Number(salesSummary.total_discount || 0).toFixed(2)}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Transactions & Sales Ledger</CardTitle>
+              <CardDescription className="text-xs">Detailed audit of all customer invoices and payments</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">Loading sales data...</div>
+              ) : salesReport.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">No sales recorded for this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b bg-muted/40 text-muted-foreground">
+                      <tr>
+                        <th className="py-2.5 px-3">Date</th>
+                        <th className="py-2.5 px-3">Invoice #</th>
+                        <th className="py-2.5 px-3">Customer</th>
+                        <th className="py-2.5 px-3 text-right">Subtotal</th>
+                        <th className="py-2.5 px-3 text-right">Tax</th>
+                        <th className="py-2.5 px-3 text-right">Grand Total</th>
+                        <th className="py-2.5 px-3">Payment</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    </thead>
+                    <tbody className="divide-y">
+                      {salesReport.map((s) => (
+                        <tr key={s.id} className="hover:bg-muted/20">
+                          <td className="py-2.5 px-3 text-muted-foreground">
+                            {new Date(s.date || s.transaction_date).toLocaleString()}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold">{s.invoice_number}</td>
+                          <td className="py-2.5 px-3 font-medium">{s.customer || s.customer_name || "Walk-in"}</td>
+                          <td className="py-2.5 px-3 text-right">₹{Number(s.subtotal).toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-right text-muted-foreground">₹{Number(s.tax).toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-right font-black text-foreground">
+                            ₹{Number(s.total).toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-3 uppercase text-[11px] font-medium">{s.payment_method}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* TAB 2: Payment Breakdown */}
@@ -225,14 +283,16 @@ export default function POSReportsPage() {
                   <Card key={idx} className="bg-muted/20">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-xs uppercase text-muted-foreground font-bold">
-                        {p.payment_method || "Other"}
+                        {p.method || p.payment_method || "Other"}
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-black text-foreground">
-                        ₹{Number(p.total_amount || p.amount || 0).toLocaleString()}
+                        ₹{Number(p.total || p.total_amount || p.amount || 0).toLocaleString()}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">{p.count || 0} transactions</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {p.count || 0} transactions {p.percentage ? `(${p.percentage}%)` : ""}
+                      </p>
                     </CardContent>
                   </Card>
                 ))}
@@ -260,7 +320,7 @@ export default function POSReportsPage() {
                   <thead className="border-b bg-muted/40 text-muted-foreground">
                     <tr>
                       <th className="py-2.5 px-3">Product Name</th>
-                      <th className="py-2.5 px-3">SKU</th>
+                      <th className="py-2.5 px-3">HSN / SKU</th>
                       <th className="py-2.5 px-3 text-right">Units Sold</th>
                       <th className="py-2.5 px-3 text-right">Total Revenue</th>
                     </tr>
@@ -268,11 +328,11 @@ export default function POSReportsPage() {
                   <tbody className="divide-y">
                     {productSalesReport.map((item, idx) => (
                       <tr key={idx} className="hover:bg-muted/20">
-                        <td className="py-2.5 px-3 font-semibold">{item.product_name}</td>
-                        <td className="py-2.5 px-3 font-mono text-muted-foreground">{item.sku}</td>
-                        <td className="py-2.5 px-3 text-right font-bold">{item.total_quantity}</td>
+                        <td className="py-2.5 px-3 font-semibold">{item.name || item.product_name}</td>
+                        <td className="py-2.5 px-3 font-mono text-muted-foreground">{item.hsn_code || item.sku || "—"}</td>
+                        <td className="py-2.5 px-3 text-right font-bold">{item.quantity_sold || item.total_quantity || 0}</td>
                         <td className="py-2.5 px-3 text-right font-black text-foreground">
-                          ₹{Number(item.total_revenue).toFixed(2)}
+                          ₹{Number(item.revenue || item.total_revenue || 0).toFixed(2)}
                         </td>
                       </tr>
                     ))}
@@ -303,21 +363,58 @@ export default function POSReportsPage() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="rounded-lg bg-muted p-3">
                     <span className="text-muted-foreground text-xs block">Taxable Amount</span>
-                    <span className="text-xl font-black">₹{Number(taxReport.taxable_amount || 0).toFixed(2)}</span>
+                    <span className="text-xl font-black">
+                      ₹{Number(taxReport.totals?.gross || taxReport.taxable_amount || 0).toFixed(2)}
+                    </span>
                   </div>
                   <div className="rounded-lg bg-muted p-3">
                     <span className="text-muted-foreground text-xs block">CGST Collected</span>
-                    <span className="text-xl font-bold text-blue-600">₹{Number(taxReport.cgst || 0).toFixed(2)}</span>
+                    <span className="text-xl font-bold text-blue-600">
+                      ₹{Number(taxReport.totals?.cgst || taxReport.cgst || 0).toFixed(2)}
+                    </span>
                   </div>
                   <div className="rounded-lg bg-muted p-3">
                     <span className="text-muted-foreground text-xs block">SGST Collected</span>
-                    <span className="text-xl font-bold text-blue-600">₹{Number(taxReport.sgst || 0).toFixed(2)}</span>
+                    <span className="text-xl font-bold text-blue-600">
+                      ₹{Number(taxReport.totals?.sgst || taxReport.sgst || 0).toFixed(2)}
+                    </span>
                   </div>
                   <div className="rounded-lg bg-primary/10 p-3">
                     <span className="text-primary text-xs font-semibold block">Total Tax Liability</span>
-                    <span className="text-xl font-black text-primary">₹{Number(taxReport.total_tax || 0).toFixed(2)}</span>
+                    <span className="text-xl font-black text-primary">
+                      ₹{Number(taxReport.totals?.tax || taxReport.total_tax || 0).toFixed(2)}
+                    </span>
                   </div>
                 </div>
+
+                {taxReport.by_tax_rate && taxReport.by_tax_rate.length > 0 && (
+                  <div className="border rounded overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b bg-muted/40 text-muted-foreground">
+                        <tr>
+                          <th className="py-2 px-3">Tax Slab</th>
+                          <th className="py-2 px-3 text-right">Items Sold</th>
+                          <th className="py-2 px-3 text-right">Gross Amount</th>
+                          <th className="py-2 px-3 text-right">CGST</th>
+                          <th className="py-2 px-3 text-right">SGST</th>
+                          <th className="py-2 px-3 text-right">Total Tax</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {taxReport.by_tax_rate.map((rate: any, i: number) => (
+                          <tr key={i}>
+                            <td className="py-2 px-3 font-bold">{rate.tax_rate}% GST</td>
+                            <td className="py-2 px-3 text-right">{rate.items_sold}</td>
+                            <td className="py-2 px-3 text-right">₹{Number(rate.gross).toFixed(2)}</td>
+                            <td className="py-2 px-3 text-right">₹{Number(rate.cgst).toFixed(2)}</td>
+                            <td className="py-2 px-3 text-right">₹{Number(rate.sgst).toFixed(2)}</td>
+                            <td className="py-2 px-3 text-right font-bold text-primary">₹{Number(rate.total_tax).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
@@ -344,7 +441,7 @@ export default function POSReportsPage() {
                       <th className="py-2.5 px-3">Return #</th>
                       <th className="py-2.5 px-3">Original Invoice</th>
                       <th className="py-2.5 px-3">Date</th>
-                      <th className="py-2.5 px-3 text-right">Items Returned</th>
+                      <th className="py-2.5 px-3">Customer</th>
                       <th className="py-2.5 px-3 text-right">Refund Total</th>
                       <th className="py-2.5 px-3">Refund Method</th>
                     </tr>
@@ -353,11 +450,11 @@ export default function POSReportsPage() {
                     {returnsReport.map((r) => (
                       <tr key={r.id} className="hover:bg-muted/20">
                         <td className="py-2.5 px-3 font-mono font-bold">{r.return_number}</td>
-                        <td className="py-2.5 px-3 font-mono text-muted-foreground">{r.original_invoice_number}</td>
+                        <td className="py-2.5 px-3 font-mono text-muted-foreground">{r.original_invoice || r.original_invoice_number}</td>
                         <td className="py-2.5 px-3 text-muted-foreground">{new Date(r.created_at).toLocaleString()}</td>
-                        <td className="py-2.5 px-3 text-right font-medium">{r.items_returned_count || 1}</td>
+                        <td className="py-2.5 px-3">{r.customer || "Walk-in"}</td>
                         <td className="py-2.5 px-3 text-right font-bold text-destructive">
-                          -₹{Number(r.total_refund_amount).toFixed(2)}
+                          -₹{Number(r.refund_amount || r.total_refund_amount).toFixed(2)}
                         </td>
                         <td className="py-2.5 px-3 uppercase text-[11px]">{r.refund_method}</td>
                       </tr>
@@ -391,7 +488,6 @@ export default function POSReportsPage() {
                     <tr>
                       <th className="py-2.5 px-3">Customer Name</th>
                       <th className="py-2.5 px-3">Phone</th>
-                      <th className="py-2.5 px-3 text-right">Total Purchases</th>
                       <th className="py-2.5 px-3 text-right">Credit Limit</th>
                       <th className="py-2.5 px-3 text-right">Outstanding Due</th>
                       <th className="py-2.5 px-3 text-right">Actions</th>
@@ -400,9 +496,8 @@ export default function POSReportsPage() {
                   <tbody className="divide-y">
                     {outstandingReport.map((c) => (
                       <tr key={c.id} className="hover:bg-muted/20">
-                        <td className="py-2.5 px-3 font-semibold">{c.full_name}</td>
+                        <td className="py-2.5 px-3 font-semibold">{c.name || c.full_name}</td>
                         <td className="py-2.5 px-3 font-mono text-muted-foreground">{c.phone}</td>
-                        <td className="py-2.5 px-3 text-right font-medium">₹{Number(c.total_spend || 0).toFixed(2)}</td>
                         <td className="py-2.5 px-3 text-right text-muted-foreground">
                           ₹{Number(c.credit_limit || 5000).toFixed(2)}
                         </td>
@@ -443,7 +538,7 @@ export default function POSReportsPage() {
             <form onSubmit={handleSettleCredit} className="space-y-3 py-2 text-xs">
               <div className="rounded bg-muted p-2.5">
                 <p className="font-semibold text-muted-foreground">Customer</p>
-                <p className="text-sm font-bold">{selectedCust.full_name}</p>
+                <p className="text-sm font-bold">{selectedCust.name || selectedCust.full_name}</p>
                 <p className="text-xs text-destructive font-semibold">
                   Outstanding Due: ₹{Number(selectedCust.outstanding_credit).toFixed(2)}
                 </p>
