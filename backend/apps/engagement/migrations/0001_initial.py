@@ -4,7 +4,7 @@ import uuid
 
 class Migration(migrations.Migration):
     initial=True
-    dependencies=[("organizations","0001_initial"),("customers","0003_alter_customer_customer_id"),("transactions","0002_initial")]
+    dependencies=[("organizations","0001_initial"),("customers","0003_alter_customer_customer_id"),("transactions","0001_initial")]
     operations=[
         migrations.CreateModel(name="Review",fields=[
             ("created_at",models.DateTimeField(auto_now_add=True,db_index=True)),("updated_at",models.DateTimeField(auto_now=True)),
