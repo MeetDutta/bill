@@ -41,6 +41,10 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
     payment_method = serializers.CharField(source="transaction.payment_method", read_only=True)
     loyalty_points_earned = serializers.IntegerField(source="transaction.loyalty_points_earned", read_only=True)
     loyalty_balance = serializers.SerializerMethodField()
+    loyalty_tier = serializers.SerializerMethodField()
+    portal_token = serializers.SerializerMethodField()
+    smart_offer = serializers.SerializerMethodField()
+    product_recommendation = serializers.SerializerMethodField()
     transaction_details = serializers.SerializerMethodField()
 
     class Meta:
@@ -49,7 +53,8 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
             "id", "invoice_number", "pdf_url", "web_url", "secure_token", "is_viewed", "viewed_at",
             "business", "store", "customer", "items", "transaction_date",
             "subtotal", "discount", "tax", "total", "payment_method",
-            "loyalty_points_earned", "loyalty_balance", "created_at",
+            "loyalty_points_earned", "loyalty_balance", "loyalty_tier", "portal_token",
+            "smart_offer", "product_recommendation", "created_at",
             "organization_name", "store_name", "customer_name", "customer_phone",
             "transaction_details",
         ]
@@ -122,6 +127,52 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
         if cust and hasattr(cust, "loyalty_account"):
             return str(cust.loyalty_account.balance)
         return None
+
+    def get_loyalty_tier(self, obj):
+        cust = obj.transaction.customer
+        if not cust:
+            return None
+        from apps.analytics.services import LoyaltyTierService
+        return LoyaltyTierService.get_customer_tier(cust)
+
+    def get_portal_token(self, obj):
+        cust = obj.transaction.customer
+        return cust.portal_token if cust else None
+
+    def get_smart_offer(self, obj):
+        from apps.coupons.models import Coupon
+        from django.utils import timezone
+        coupon = Coupon.objects.filter(
+            organization=obj.organization,
+            is_active=True,
+            expires_at__gte=timezone.now(),
+        ).first()
+        if coupon:
+            return {
+                "code": coupon.code,
+                "name": coupon.name,
+                "discount_type": coupon.discount_type,
+                "discount_value": str(coupon.discount_value),
+                "min_order": str(coupon.min_order_value),
+            }
+        return None
+
+    def get_product_recommendation(self, obj):
+        from apps.analytics.models import ProductAffinity
+        first_item = obj.transaction.items.filter(product__isnull=False).first()
+        if first_item and first_item.product:
+            aff = ProductAffinity.objects.filter(
+                organization=obj.organization,
+                product_a=first_item.product,
+            ).select_related("product_b").first()
+            if aff:
+                return {
+                    "product_name": aff.product_b.name,
+                    "unit_price": str(aff.product_b.unit_price),
+                    "reason": f"Frequently bought with {first_item.product.name}",
+                }
+        return None
+
 
 
 class InvoiceListSerializer(serializers.ModelSerializer):

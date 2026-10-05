@@ -2,17 +2,33 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { CheckCircle2, Download, Printer, Sparkles, Store, Phone, Calendar, CreditCard, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import {
+  CheckCircle2,
+  Printer,
+  Sparkles,
+  Store,
+  Phone,
+  Calendar,
+  CreditCard,
+  ShieldCheck,
+  Award,
+  Tag,
+  ExternalLink,
+  QrCode,
+  ArrowRight,
+  Star,
+} from "lucide-react";
 import axios from "axios";
 
 interface BillItem {
   id: string;
   name: string;
-  quantity: string;
-  unit_price: string;
-  discount: string;
-  tax: string;
-  total: string;
+  quantity: string | number;
+  unit_price: string | number;
+  discount: string | number;
+  tax: string | number;
+  total: string | number;
   hsn_code?: string;
 }
 
@@ -21,7 +37,27 @@ interface BillData {
   invoice_number: string;
   secure_token: string;
   is_viewed: boolean;
-  loyalty_balance?: string | null;
+  loyalty_balance?: string | number | null;
+  loyalty_tier?: {
+    name: string;
+    slug: string;
+    color: string;
+    multiplier: number;
+  } | null;
+  portal_token?: string | null;
+  smart_offer?: {
+    code: string;
+    title: string;
+    discount_value: number;
+    discount_type: string;
+    min_order_value: number;
+  } | null;
+  product_recommendation?: {
+    id: string;
+    name: string;
+    price: number;
+    insight: string;
+  } | null;
   organization_name: string;
   store_name: string;
   customer_name: string;
@@ -32,10 +68,10 @@ interface BillData {
     invoice_number: string;
     transaction_date: string;
     status: string;
-    subtotal: string;
-    discount: string;
-    tax: string;
-    total: string;
+    subtotal: string | number;
+    discount: string | number;
+    tax: string | number;
+    total: string | number;
     payment_method: string;
     loyalty_points_earned: number;
     items: BillItem[];
@@ -96,6 +132,7 @@ export default function DigitalBillPage() {
   }
 
   const tx = bill.transaction_details;
+  const portalLink = `/portal/${bill.portal_token || bill.secure_token}`;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-slate-100 py-8 px-4 sm:px-6">
@@ -107,6 +144,13 @@ export default function DigitalBillPage() {
             <span>Verified Digital Tax Invoice</span>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href={portalLink}
+              className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-200 text-xs font-semibold shadow-sm transition"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Customer Portal</span>
+            </Link>
             <button
               onClick={handlePrint}
               className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium shadow-sm transition"
@@ -143,7 +187,21 @@ export default function DigitalBillPage() {
           <div className="bg-slate-50/60 p-4 sm:p-6 grid grid-cols-2 gap-4 text-xs border-b border-slate-200">
             <div>
               <p className="text-slate-400 font-medium">BILLED TO</p>
-              <p className="font-bold text-slate-800 text-sm mt-0.5">{bill.customer_name || "Valued Customer"}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="font-bold text-slate-800 text-sm">{bill.customer_name || "Valued Customer"}</span>
+                {bill.loyalty_tier && (
+                  <span
+                    className="px-2 py-0.2 rounded-full text-[10px] font-bold uppercase border"
+                    style={{
+                      borderColor: bill.loyalty_tier.color || "#818cf8",
+                      color: bill.loyalty_tier.color || "#818cf8",
+                      backgroundColor: `${bill.loyalty_tier.color}15` || "#818cf815",
+                    }}
+                  >
+                    {bill.loyalty_tier.name}
+                  </span>
+                )}
+              </div>
               <p className="text-slate-500 flex items-center gap-1 mt-0.5 font-mono">
                 <Phone className="w-3 h-3 text-slate-400" />
                 {bill.customer_phone || "—"}
@@ -176,20 +234,63 @@ export default function DigitalBillPage() {
             </div>
           )}
 
-          {/* Customer Rewards Wallet */}
+          {/* Customer Rewards Wallet & Portal Link */}
           <div className="mx-4 sm:mx-6 mb-2 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 sm:p-5">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Your Rewards Wallet</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">You have {Number(bill.loyalty_balance || 0).toLocaleString("en-IN")} loyalty points</p>
-                <p className="mt-1 text-xs text-slate-500">Keep shopping to unlock more rewards.</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  You have {Number(bill.loyalty_balance || 0).toLocaleString("en-IN")} loyalty points
+                </p>
+                <Link
+                  href={portalLink}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 mt-1"
+                >
+                  View Full Loyalty Portal & Rewards <ArrowRight className="h-3 w-3" />
+                </Link>
               </div>
               <div className="rounded-xl bg-white px-3 py-2 text-center shadow-sm border border-indigo-100">
-                <Sparkles className="mx-auto h-4 w-4 text-indigo-600" />
-                <span className="text-lg font-black text-indigo-700">{Number(bill.loyalty_balance || 0).toLocaleString("en-IN")}</span>
+                <Award className="mx-auto h-4 w-4 text-indigo-600" />
+                <span className="text-lg font-black text-indigo-700">
+                  {Number(bill.loyalty_balance || 0).toLocaleString("en-IN")}
+                </span>
               </div>
             </div>
           </div>
+
+          {/* Smart Coupon Banner (if present) */}
+          {bill.smart_offer && (
+            <div className="mx-4 sm:mx-6 mb-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0">
+                  <Tag className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold uppercase text-emerald-800">Exclusive Next-Visit Offer</span>
+                  <p className="text-sm font-bold text-slate-900">{bill.smart_offer.title}</p>
+                  <p className="text-xs text-slate-600 font-mono mt-0.5">Use Coupon Code: <strong>{bill.smart_offer.code}</strong></p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Product Recommendation Companion Banner */}
+          {bill.product_recommendation && (
+            <div className="mx-4 sm:mx-6 mb-2 rounded-2xl border border-purple-200 bg-purple-50/50 p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0">
+                  <Star className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold uppercase text-purple-800">Recommended Companion</span>
+                  <p className="text-sm font-bold text-slate-900">
+                    {bill.product_recommendation.name} — ₹{bill.product_recommendation.price.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-slate-600 mt-0.5">{bill.product_recommendation.insight}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Items Table */}
           <div className="p-4 sm:p-6">
@@ -252,8 +353,14 @@ export default function DigitalBillPage() {
             </div>
           </div>
 
-          {/* Footer Note */}
-          <div className="p-6 text-center bg-white border-t border-slate-100">
+          {/* Verification QR Code and Footer Note */}
+          <div className="p-6 text-center bg-white border-t border-slate-100 flex flex-col items-center">
+            {/* Verification QR Representation */}
+            <div className="p-2 border rounded-xl bg-slate-50 mb-3 shadow-inner">
+              <QrCode className="w-16 h-16 text-slate-800" />
+            </div>
+            <p className="text-[11px] font-mono text-slate-500 mb-2">Scan to verify invoice authenticity</p>
+
             <div className="inline-flex items-center gap-1.5 text-xs text-emerald-600 font-semibold mb-1">
               <CheckCircle2 className="w-4 h-4" />
               <span>Thank you for shopping with us!</span>

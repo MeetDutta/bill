@@ -105,3 +105,58 @@ class LoyaltyRedemption(UUIDModel, TenantModel, TimeStampedModel):
 
     def __str__(self):
         return f"Redemption {self.points} pts"
+
+
+class LoyaltyTier(UUIDModel, TenantModel, TimeStampedModel):
+    name = models.CharField(max_length=50) # Bronze, Silver, Gold, Platinum
+    min_spend = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    min_points = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    points_multiplier = models.DecimalField(max_digits=4, decimal_places=2, default=1.0)
+    perks = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        ordering = ["order", "min_spend"]
+        unique_together = [("organization", "name")]
+
+    def __str__(self):
+        return f"{self.name} Tier (Min Spend: ₹{self.min_spend})"
+
+
+class Achievement(UUIDModel, TenantModel, TimeStampedModel):
+    code = models.CharField(max_length=100, db_index=True)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    icon = models.CharField(max_length=50, default="award")
+    badge_tier = models.CharField(max_length=20, default="Bronze")
+    points_reward = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["title"]
+        unique_together = [("organization", "code")]
+
+    def __str__(self):
+        return f"{self.title} ({self.code})"
+
+
+class CustomerAchievement(UUIDModel, TenantModel, TimeStampedModel):
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="achievements",
+    )
+    achievement = models.ForeignKey(
+        Achievement,
+        on_delete=models.CASCADE,
+        related_name="unlocked_by",
+    )
+    unlocked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-unlocked_at"]
+        unique_together = [("customer", "achievement")]
+
+    def __str__(self):
+        return f"{self.customer} unlocked {self.achievement.title}"

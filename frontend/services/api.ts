@@ -115,3 +115,54 @@ export const engagementApi = {
   referrals: () => api.get("/engagement/referrals/"),
   generateCampaign: (goal: string) => api.post("/engagement/campaign-assistant/", { goal }),
 };
+
+// V2 Customer Intelligence
+export const customerIntelligenceApi = {
+  getHealth: (id: string) => api.get(`/customers/${id}/health/`),
+  getChurn: (id: string) => api.get(`/customers/${id}/churn/`),
+  getNextAction: (id: string) => api.get(`/customers/${id}/next-action/`),
+  getRecommendations: (id: string) => api.get(`/customers/${id}/recommendations/`),
+  createOffer: (id: string, data?: unknown) => api.post(`/customers/${id}/create-recommended-offer/`, data),
+  getRFM: (id: string) => api.get(`/customers/${id}/rfm/`),
+  getAtRisk: (limit = 20) => api.get("/analytics/churn/at-risk/", { params: { limit } }),
+};
+
+// V2 Analytics & RFM
+export const intelligenceAnalyticsApi = {
+  getRFMDistribution: () => api.get("/analytics/rfm/distribution/"),
+  getRFMSummary: () => api.get("/analytics/rfm/summary/"),
+  getRFMCustomers: (params?: { segment?: string; search?: string; page?: number }) =>
+    api.get("/analytics/rfm/customers/", { params }),
+  getBusinessHealth: () => api.get("/analytics/business-health/"),
+  getRetentionMetrics: () => api.get("/analytics/customer-retention/"),
+  getCohorts: () => api.get("/analytics/cohorts/"),
+  getAlerts: () => api.get("/analytics/alerts/"),
+  acknowledgeAlert: (id: string) => api.post(`/analytics/alerts/${id}/acknowledge/`),
+  dismissAlert: (id: string) => api.post(`/analytics/alerts/${id}/dismiss/`),
+  getStoreComparison: () => api.get("/analytics/stores/comparison/"),
+  getStaffPerformance: () => api.get("/analytics/staff/"),
+};
+
+// V2 Product Intelligence
+export const productIntelligenceApi = {
+  getAnalytics: () => api.get("/products/intelligence/"),
+  getAffinity: () => api.get("/products/affinity/"),
+  getBundles: () => api.get("/products/bundles/"),
+};
+
+// V2 Campaign ROI
+export const campaignIntelligenceApi = {
+  getROISummary: () => api.get("/campaigns/roi/"),
+  getCampaignROI: (id: string) => api.get(`/campaigns/${id}/roi/`),
+};
+
+// V2 AI Business Copilot
+export const copilotApi = {
+  query: (question: string) => api.post("/copilot/query/", { question }),
+};
+
+// V2 Customer Mini Portal
+export const customerPortalApi = {
+  getPortalData: (token: string) => api.get(`/customer-portal/${token}/`),
+};
+

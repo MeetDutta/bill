@@ -36,6 +36,8 @@ const navigation = [
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
+import { CopilotDrawer } from "@/components/CopilotDrawer";
+
 export default function DashboardLayout({
   children,
 }: {
@@ -91,6 +93,7 @@ export default function DashboardLayout({
         </header>
         <div className="p-6">{children}</div>
       </main>
+      <CopilotDrawer />
     </div>
   );
 }

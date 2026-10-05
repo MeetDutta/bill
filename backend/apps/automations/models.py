@@ -65,3 +65,45 @@ class AutomationExecution(UUIDModel, TenantModel, TimeStampedModel):
 
     def __str__(self):
         return f"{self.automation.name} - {self.customer}"
+
+
+class CustomerJourney(UUIDModel, TenantModel, TimeStampedModel):
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    journey_type = models.CharField(max_length=50, default="custom")
+    steps = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.journey_type})"
+
+
+class CustomerJourneyProgress(UUIDModel, TenantModel, TimeStampedModel):
+    journey = models.ForeignKey(
+        CustomerJourney,
+        on_delete=models.CASCADE,
+        related_name="progress_records",
+    )
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="journey_progress",
+    )
+    current_step_id = models.CharField(max_length=50, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=[("in_progress", "In Progress"), ("completed", "Completed"), ("exited", "Exited")],
+        default="in_progress",
+    )
+    context = models.JSONField(default=dict, blank=True)
+    last_advanced_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = [("journey", "customer")]
+
+    def __str__(self):
+        return f"{self.journey.name} - {self.customer} ({self.status})"

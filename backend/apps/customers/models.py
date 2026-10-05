@@ -41,6 +41,7 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
     marketing_consent = models.BooleanField(default=True)
     whatsapp_opt_in = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
+    portal_token = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -59,12 +60,18 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
         return f"{self.first_name} {self.last_name}".strip()
 
     def save(self, *args, **kwargs):
+        import secrets
         if not self.customer_id:
-            import secrets
             while True:
                 candidate_id = f"CUS-{secrets.token_hex(5).upper()}"
                 if not Customer.objects.filter(customer_id=candidate_id).exists():
                     self.customer_id = candidate_id
+                    break
+        if not self.portal_token:
+            while True:
+                candidate_token = secrets.token_urlsafe(24)
+                if not Customer.objects.filter(portal_token=candidate_token).exists():
+                    self.portal_token = candidate_token
                     break
         super().save(*args, **kwargs)
 
