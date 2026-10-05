@@ -166,3 +166,38 @@ export const customerPortalApi = {
   getPortalData: (token: string) => api.get(`/customer-portal/${token}/`),
 };
 
+// Universal POS & Billing Engine
+export const posApi = {
+  getConfig: () => api.get("/pos/config/"),
+  updateConfig: (data: unknown) => api.post("/pos/config/", data),
+  getBusinessTypes: () => api.get("/pos/business-types/"),
+  searchProducts: (params?: { search?: string; category?: string; low_stock?: boolean; page?: number; page_size?: number }) =>
+    api.get("/pos/products/", { params }),
+  quickCreateProduct: (data: unknown) => api.post("/pos/products/quick-create/", data),
+  calculateCart: (data: unknown) => api.post("/pos/cart/calculate/", data),
+  checkout: (data: unknown) => api.post("/pos/checkout/", data),
+  getHeldCarts: () => api.get("/pos/held-carts/"),
+  holdCart: (data: unknown) => api.post("/pos/held-carts/", data),
+  deleteHeldCart: (id: string) => api.delete(`/pos/held-carts/${id}/`),
+  processReturn: (data: unknown) => api.post("/pos/returns/", data),
+  recordCreditPayment: (data: unknown) => api.post("/pos/credit/payment/", data),
+  getCustomerLedger: (customerId: string) => api.get(`/pos/credit/customers/${customerId}/`),
+  getRegisterStatus: () => api.get("/pos/register/current/"),
+  openRegister: (data: { opening_balance: number; notes?: string }) => api.post("/pos/register/open/", data),
+  addRegisterMovement: (data: { movement_type: "in" | "out"; amount: number; notes?: string }) =>
+    api.post("/pos/register/movement/", data),
+  closeRegister: (data: { actual_cash: number; notes?: string }) => api.post("/pos/register/close/", data),
+  getInventoryMovements: (params?: unknown) => api.get("/pos/inventory/movements/", { params }),
+  adjustInventory: (data: unknown) => api.post("/pos/inventory/adjust/", data),
+  getPurchaseOrders: (params?: unknown) => api.get("/pos/inventory/purchases/", { params }),
+  createPurchaseOrder: (data: unknown) => api.post("/pos/inventory/purchases/", data),
+  getSalesReport: (params?: unknown) => api.get("/pos/reports/sales/", { params }),
+  getPaymentsReport: (params?: unknown) => api.get("/pos/reports/payments/", { params }),
+  getProductSalesReport: (params?: unknown) => api.get("/pos/reports/product-sales/", { params }),
+  getTaxReport: (params?: unknown) => api.get("/pos/reports/tax/", { params }),
+  getReturnsReport: (params?: unknown) => api.get("/pos/reports/returns/", { params }),
+  getOutstandingReport: (params?: unknown) => api.get("/pos/reports/outstanding/", { params }),
+  getDailyClosingReport: (params?: unknown) => api.get("/pos/reports/daily-closing/", { params }),
+};
+
+

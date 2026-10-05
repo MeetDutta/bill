@@ -41,6 +41,9 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
     marketing_consent = models.BooleanField(default=True)
     whatsapp_opt_in = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
+    is_walk_in = models.BooleanField(default=False)
+    credit_limit = models.DecimalField(max_digits=12, decimal_places=2, default=0, blank=True)
+    outstanding_credit = models.DecimalField(max_digits=12, decimal_places=2, default=0, blank=True)
     portal_token = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True)
 
     class Meta:
@@ -50,6 +53,7 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
             models.Index(fields=["organization", "segment"]),
             models.Index(fields=["organization", "last_purchase_at"]),
             models.Index(fields=["organization", "total_spend"]),
+            models.Index(fields=["organization", "outstanding_credit"]),
         ]
 
     def __str__(self):
@@ -76,9 +80,11 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
         super().save(*args, **kwargs)
 
     def update_stats(self, amount):
+        from django.utils import timezone
         self.total_purchases += 1
         self.total_spend += amount
         self.average_order_value = self.total_spend / self.total_purchases
+        self.last_purchase_at = timezone.now()
         self.save(update_fields=["total_purchases", "total_spend", "average_order_value", "last_purchase_at"])
 
 
@@ -101,6 +107,9 @@ class CustomerTimeline(UUIDModel, TenantModel, TimeStampedModel):
             ("feedback", "Feedback"),
             ("referral", "Referral"),
             ("repeat_purchase", "Repeat Purchase"),
+            ("credit_sale", "Credit Sale"),
+            ("credit_payment", "Credit Payment"),
+            ("sale_return", "Sale Return"),
         ],
         db_index=True,
     )

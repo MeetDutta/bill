@@ -41,12 +41,56 @@ def run_seed():
         org.save()
         print(f"Using organization: {org.name}")
 
-    # Ensure all users are linked to this org
+    # Ensure admin user exists
+    if User.objects.count() == 0:
+        admin_user = User.objects.create_superuser(
+            email="admin@apexretail.com",
+            first_name="Merchant",
+            last_name="Admin",
+            password="adminpassword123",
+            organization=org,
+            role="owner",
+        )
+        print(f"Created demo admin user: {admin_user.email} (password: adminpassword123)")
+
     for user in User.objects.all():
         if not user.organization:
             user.organization = org
             user.save(update_fields=["organization"])
             print(f"Linked user {user.email} to {org.name}")
+
+    # Seed Loyalty Tiers
+    from apps.loyalty.models import LoyaltyTier, Achievement
+    LoyaltyTier.objects.get_or_create(
+        organization=org, name="Bronze",
+        defaults={"min_spend": Decimal("0.00"), "points_multiplier": Decimal("1.0"), "order": 1}
+    )
+    LoyaltyTier.objects.get_or_create(
+        organization=org, name="Silver",
+        defaults={"min_spend": Decimal("2500.00"), "points_multiplier": Decimal("1.25"), "order": 2}
+    )
+    LoyaltyTier.objects.get_or_create(
+        organization=org, name="Gold",
+        defaults={"min_spend": Decimal("7500.00"), "points_multiplier": Decimal("1.50"), "order": 3}
+    )
+    LoyaltyTier.objects.get_or_create(
+        organization=org, name="Platinum",
+        defaults={"min_spend": Decimal("20000.00"), "points_multiplier": Decimal("2.00"), "order": 4}
+    )
+
+    # Seed Achievements
+    Achievement.objects.get_or_create(
+        organization=org, code="FIRST_PURCHASE",
+        defaults={"title": "First Purchase", "description": "Welcome to the family! Completed your first verified order.", "badge_tier": "bronze"}
+    )
+    Achievement.objects.get_or_create(
+        organization=org, code="FIVE_PURCHASES",
+        defaults={"title": "Loyal Regular", "description": "Completed 5 orders with us.", "badge_tier": "silver"}
+    )
+    Achievement.objects.get_or_create(
+        organization=org, code="VIP_CUSTOMER",
+        defaults={"title": "VIP Customer", "description": "Exceeded ₹10,000 in lifetime spend.", "badge_tier": "gold"}
+    )
 
     # 2. Stores
     store1, _ = Store.objects.get_or_create(

@@ -5,9 +5,14 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
+  ShoppingCart,
   Users,
   Receipt,
   Tag,
+  Boxes,
+  RotateCcw,
+  Landmark,
+  FileSpreadsheet,
   Megaphone,
   BarChart3,
   Store,
@@ -15,14 +20,17 @@ import {
   LogOut,
   Star,
   Ticket,
-  Zap,
-  MessageSquare,
   Sparkles,
   HeartHandshake,
 } from "lucide-react";
 
 const navigation = [
+  { name: "POS Terminal", href: "/dashboard/pos", icon: ShoppingCart },
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Inventory", href: "/dashboard/inventory", icon: Boxes },
+  { name: "Returns", href: "/dashboard/returns", icon: RotateCcw },
+  { name: "Cash Register", href: "/dashboard/register", icon: Landmark },
+  { name: "POS Reports", href: "/dashboard/reports", icon: FileSpreadsheet },
   { name: "Customers", href: "/dashboard/customers", icon: Users },
   { name: "Engagement", href: "/dashboard/engagement", icon: HeartHandshake },
   { name: "Transactions", href: "/dashboard/transactions", icon: Receipt },
@@ -30,7 +38,7 @@ const navigation = [
   { name: "Loyalty", href: "/dashboard/loyalty", icon: Star },
   { name: "Coupons", href: "/dashboard/coupons", icon: Ticket },
   { name: "Campaigns", href: "/dashboard/campaigns", icon: Megaphone },
-  { name: "AI Campaign Assistant", href: "/dashboard/ai-campaigns", icon: Sparkles },
+  { name: "AI Assistant", href: "/dashboard/ai-campaigns", icon: Sparkles },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Stores", href: "/dashboard/stores", icon: Store },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -51,7 +59,7 @@ export default function DashboardLayout({
         <div className="flex h-16 items-center border-b px-6">
           <h1 className="text-xl font-bold">BillFree</h1>
         </div>
-        <nav className="space-y-1 p-4">
+        <nav className="space-y-1 p-4 flex-1 overflow-y-auto max-h-[calc(100vh-8rem)]">
           {navigation.map((item) => {
             const isActive = pathname === item.href;
             return (

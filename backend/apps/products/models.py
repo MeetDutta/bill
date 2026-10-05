@@ -1,5 +1,6 @@
+from decimal import Decimal
 from django.db import models
-
+from django.utils import timezone
 from common.models import TenantModel, TimeStampedModel, UUIDModel
 
 
@@ -27,8 +28,10 @@ class Product(UUIDModel, TenantModel, TimeStampedModel):
     external_id = models.CharField(max_length=100, db_index=True)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
+    brand = models.CharField(max_length=150, blank=True)
     sku = models.CharField(max_length=100, blank=True)
-    barcode = models.CharField(max_length=100, blank=True)
+    barcode = models.CharField(max_length=100, blank=True, db_index=True)
+    qr_code = models.CharField(max_length=255, blank=True)
     category = models.ForeignKey(
         ProductCategory,
         on_delete=models.SET_NULL,
@@ -36,16 +39,169 @@ class Product(UUIDModel, TenantModel, TimeStampedModel):
         blank=True,
         related_name="products",
     )
-    unit_price = models.DecimalField(max_digits=12, decimal_places=2)
-    cost_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2)  # Selling price
+    cost_price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))  # Purchase price
+    mrp = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)  # Maximum Retail Price
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))  # GST %
     hsn_code = models.CharField(max_length=20, blank=True)
+    unit = models.CharField(max_length=30, default="PCS")  # PCS, KG, GM, LTR, MTR, BOX, etc.
+    current_stock = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    min_stock = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    max_stock = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    supplier = models.CharField(max_length=255, blank=True)
+    product_attributes = models.JSONField(default=dict, blank=True)  # Business-specific specs (metal, purity, vehicle model, size, color, etc.)
+    track_inventory = models.BooleanField(default=True)
     image = models.ImageField(upload_to="products/", null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["name"]
         unique_together = [("organization", "external_id")]
+        indexes = [
+            models.Index(fields=["organization", "barcode"]),
+            models.Index(fields=["organization", "sku"]),
+            models.Index(fields=["organization", "name"]),
+        ]
+
+    def __init__(self, *args, **kwargs):
+        if "selling_price" in kwargs and "unit_price" not in kwargs:
+            kwargs["unit_price"] = kwargs.pop("selling_price")
+        if "purchase_price" in kwargs and "cost_price" not in kwargs:
+            kwargs["cost_price"] = kwargs.pop("purchase_price")
+        super().__init__(*args, **kwargs)
+
+    @property
+    def selling_price(self):
+        return self.unit_price
+
+    @selling_price.setter
+    def selling_price(self, val):
+        self.unit_price = val
+
+    @property
+    def purchase_price(self):
+        return self.cost_price
+
+    @purchase_price.setter
+    def purchase_price(self, val):
+        self.cost_price = val
+
+    def save(self, *args, **kwargs):
+        import secrets
+        if not self.external_id:
+            self.external_id = self.sku or f"PROD-{secrets.token_hex(4).upper()}"
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.name} (₹{self.unit_price})"
+
+    @property
+    def is_low_stock(self):
+        return self.track_inventory and self.current_stock <= self.min_stock
+
+
+class InventoryMovement(UUIDModel, TenantModel, TimeStampedModel):
+    """
+    Immutable ledger of all stock changes: Sales, Purchases, Returns, Adjustments, Damage.
+    """
+    MOVEMENT_CHOICES = [
+        ("SALE", "POS / Online Sale"),
+        ("PURCHASE", "Purchase Order Stock In"),
+        ("RETURN", "Customer Return Restock"),
+        ("ADJUSTMENT", "Manual Stock Adjustment"),
+        ("DAMAGE", "Damaged / Expired Goods"),
+        ("OPENING_STOCK", "Opening Stock Entry"),
+        ("TRANSFER", "Inter-Store Transfer"),
+    ]
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="inventory_movements",
+    )
+    store = models.ForeignKey(
+        "stores.Store",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="inventory_movements",
+    )
+    movement_type = models.CharField(max_length=20, choices=MOVEMENT_CHOICES, db_index=True)
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)  # Negative for deductions, positive for additions
+    previous_stock = models.DecimalField(max_digits=12, decimal_places=2)
+    new_stock = models.DecimalField(max_digits=12, decimal_places=2)
+    reference_type = models.CharField(max_length=50, blank=True)
+    reference_id = models.CharField(max_length=100, blank=True, db_index=True)  # Invoice number, return number, PO number
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "movement_type"]),
+            models.Index(fields=["product", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.movement_type} {self.product.name}: {self.previous_stock} → {self.new_stock}"
+
+
+class PurchaseOrder(UUIDModel, TenantModel, TimeStampedModel):
+    """
+    Supplier purchase order & stock-in document.
+    """
+    STATUS_CHOICES = [
+        ("received", "Received & Stocked"),
+        ("ordered", "Ordered / Pending Delivery"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    po_number = models.CharField(max_length=100, db_index=True)
+    supplier_name = models.CharField(max_length=255)
+    supplier_invoice = models.CharField(max_length=100, blank=True)
+    store = models.ForeignKey(
+        "stores.Store",
+        on_delete=models.CASCADE,
+        related_name="purchase_orders",
+    )
+    purchase_date = models.DateField(default=timezone.now)
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="received")
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["-purchase_date", "-created_at"]
+
+    def __str__(self):
+        return f"PO #{self.po_number} - {self.supplier_name} (₹{self.total_amount})"
+
+
+class PurchaseOrderItem(UUIDModel, TimeStampedModel):
+    purchase_order = models.ForeignKey(
+        PurchaseOrder,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="purchase_items",
+    )
+    quantity = models.DecimalField(max_digits=10, decimal_places=2)
+    purchase_price = models.DecimalField(max_digits=12, decimal_places=2)
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
+    total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    def __str__(self):
+        return f"{self.product.name} x {self.quantity}"

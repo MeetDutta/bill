@@ -45,6 +45,9 @@ export interface Customer {
   segment: string;
   last_purchase_at: string;
   portal_token?: string;
+  credit_limit?: number | string;
+  outstanding_credit?: number | string;
+  is_walk_in?: boolean;
 }
 
 export interface Transaction {
@@ -57,6 +60,7 @@ export interface Transaction {
   status: string;
   transaction_date: string;
   item_count: number;
+  items?: any[];
 }
 
 export interface Product {
@@ -358,3 +362,286 @@ export interface CustomerPortalData {
     affinity_insight: string;
   }[];
 }
+
+// ==========================================
+// UNIVERSAL BUSINESS POS & BILLING TYPES
+// ==========================================
+
+export interface CustomFieldDefinition {
+  key: string;
+  field_name?: string;
+  label: string;
+  type: "text" | "number" | "select" | string;
+  required?: boolean;
+  searchable?: boolean;
+  options?: string[];
+}
+
+export interface BusinessTypeSchema {
+  key: string;
+  label: string;
+  name?: string;
+  description: string;
+  default_tax_rate: number;
+  supported_units: string[];
+  custom_fields: CustomFieldDefinition[];
+}
+
+export interface BusinessConfig {
+  id: string;
+  business_type: string;
+  business_type_display: string;
+  schema: BusinessTypeSchema;
+  gst_enabled: boolean;
+  tax_mode: "exclusive" | "inclusive";
+  default_tax_rate: string | number;
+  gstin: string;
+  trade_name: string;
+  allow_credit_sales: boolean;
+  default_credit_limit: string | number;
+  default_invoice_format: "a4" | "thermal_80mm" | "thermal_58mm";
+  invoice_prefix: string;
+  invoice_terms_and_conditions: string;
+  invoice_footer: string;
+  allow_negative_stock: boolean;
+  max_cashier_discount_percent: string | number;
+  require_customer: boolean;
+  auto_print_bill: boolean;
+  auto_send_digital_bill: boolean;
+  low_stock_threshold: string | number;
+  updated_at: string;
+}
+
+export interface POSProduct {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string;
+  qr_code?: string;
+  category?: string;
+  brand?: string;
+  description?: string;
+  selling_price: string | number;
+  purchase_price: string | number;
+  mrp?: string | number | null;
+  tax_rate: string | number;
+  hsn_code?: string;
+  unit: string;
+  current_stock: string | number;
+  min_stock?: string | number;
+  max_stock?: string | number;
+  supplier?: string;
+  track_inventory: boolean;
+  is_active: boolean;
+  is_low_stock?: boolean;
+  product_attributes: Record<string, any>;
+}
+
+export interface POSCartItem {
+  product_id?: string;
+  sku?: string;
+  barcode?: string;
+  name: string;
+  quantity: number;
+  unit_price: number;
+  discount: number;
+  discount_type?: "fixed" | "percentage";
+  tax_rate: number;
+  hsn_code?: string;
+  unit?: string;
+  attributes?: Record<string, any>;
+  current_stock?: number;
+  track_inventory?: boolean;
+  line_subtotal?: number;
+  taxable_amount?: number;
+  cgst_amount?: number;
+  sgst_amount?: number;
+  igst_amount?: number;
+  tax?: number;
+  total?: number;
+}
+
+export interface POSCalculateResponse {
+  items: POSCartItem[];
+  subtotal: string;
+  item_discount: string;
+  order_discount: string;
+  coupon_discount: string;
+  total_discount: string;
+  taxable_amount: string;
+  cgst: string;
+  sgst: string;
+  igst: string;
+  tax: string;
+  tax_breakup: {
+    total_taxable: string;
+    total_cgst: string;
+    total_sgst: string;
+    total_igst: string;
+    total_tax: string;
+    rates: {
+      rate: string;
+      taxable_amount: string;
+      cgst_amount: string;
+      sgst_amount: string;
+      igst_amount: string;
+      total_tax: string;
+    }[];
+  };
+  round_off: string;
+  grand_total: string;
+}
+
+export interface POSPaymentLine {
+  payment_method: string;
+  amount: number;
+  reference?: string;
+  notes?: string;
+}
+
+export interface POSCheckoutPayload {
+  store_id?: string;
+  items: POSCartItem[];
+  overall_discount_type?: "fixed" | "percentage";
+  overall_discount_value?: number;
+  coupon_discount?: number;
+  is_interstate?: boolean;
+  is_walk_in?: boolean;
+  customer?: {
+    id?: string;
+    name?: string;
+    first_name?: string;
+    last_name?: string;
+    phone?: string;
+    email?: string;
+  };
+  payments: POSPaymentLine[];
+  due_date?: string;
+  idempotency_key?: string;
+}
+
+export interface POSCheckoutResponse {
+  id: string;
+  invoice_number: string;
+  transaction_date: string;
+  customer: {
+    id: string | null;
+    name: string;
+    phone: string;
+    outstanding_credit: string;
+    is_walk_in: boolean;
+  } | null;
+  store: {
+    id: string | null;
+    name: string;
+  } | null;
+  subtotal: string;
+  discount: string;
+  tax: string;
+  round_off: string;
+  total: string;
+  amount_paid: string;
+  outstanding_amount: string;
+  payment_status: "paid" | "partial" | "credit";
+  payment_method: string;
+  tax_breakup: any;
+  items: any[];
+  payments: any[];
+  invoice: {
+    id: string | null;
+    invoice_number: string;
+    invoice_type: string;
+    template_format: string;
+    web_url: string;
+    pdf_url: string;
+    secure_token: string;
+  } | null;
+}
+
+export interface HeldCart {
+  id: string;
+  hold_reference: string;
+  customer_name?: string;
+  customer_phone?: string;
+  cart_data: any;
+  subtotal: string;
+  item_count: number;
+  notes?: string;
+  store_name?: string;
+  cashier_name?: string;
+  created_at: string;
+}
+
+export interface CashRegister {
+  id: string;
+  store_id?: string;
+  store_name?: string;
+  opened_by: string;
+  closed_by?: string | null;
+  opened_at: string;
+  closed_at?: string | null;
+  status: "open" | "closed";
+  opening_balance: string;
+  total_cash_sales: string;
+  total_cash_refunds: string;
+  cash_added: string;
+  cash_withdrawn: string;
+  expected_cash: string;
+  actual_cash?: string;
+  difference?: string;
+  notes?: string;
+}
+
+export interface InventoryMovement {
+  id: string;
+  product: string;
+  product_name: string;
+  sku: string;
+  store_name?: string;
+  user_name?: string;
+  movement_type: "SALE" | "PURCHASE" | "RETURN" | "ADJUSTMENT" | "DAMAGE" | "OPENING_STOCK" | "TRANSFER";
+  quantity: string;
+  previous_stock: string;
+  new_stock: string;
+  reference_type?: string;
+  reference_id?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface PurchaseOrderItem {
+  id: string;
+  product: string;
+  product_name: string;
+  quantity: string;
+  purchase_price: string;
+  tax_rate: string;
+  total: string;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  po_number: string;
+  supplier: string;
+  supplier_invoice_number: string;
+  purchase_date: string;
+  total_amount: string;
+  tax_amount: string;
+  status: string;
+  notes: string;
+  created_by_name: string;
+  items: PurchaseOrderItem[];
+  created_at: string;
+}
+
+export interface SalesReturn {
+  id: string;
+  return_number: string;
+  original_invoice_number: string;
+  total_refund_amount: string;
+  refund_method: string;
+  created_at: string;
+  status: string;
+  items_returned_count: number;
+}
+

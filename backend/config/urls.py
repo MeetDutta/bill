@@ -38,6 +38,7 @@ urlpatterns = [
     path("api/v1/alerts/", BusinessAlertsListView.as_view(), name="root-alerts-list"),
     path("api/v1/alerts/<uuid:pk>/acknowledge/", BusinessAlertAcknowledgeView.as_view(), name="root-alert-ack"),
     path("api/v1/alerts/<uuid:pk>/dismiss/", BusinessAlertDismissView.as_view(), name="root-alert-dism"),
+    path("api/v1/pos/", include("apps.billing.urls")),
     path("health/", include("apps.notifications.health_urls")),
 ]
 
