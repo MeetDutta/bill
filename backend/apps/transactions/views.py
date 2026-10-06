@@ -18,6 +18,7 @@ from .serializers import (
 
 
 class TransactionListView(generics.ListAPIView):
+    serializer_class = TransactionListSerializer
     pagination_class = StandardPagination
     search_fields = ["invoice_number", "external_transaction_id"]
     filterset_fields = ["store", "status", "payment_method"]
