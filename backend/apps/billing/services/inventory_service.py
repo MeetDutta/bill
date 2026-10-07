@@ -77,9 +77,23 @@ class InventoryService:
         purchase_date,
         items: list,
         notes: str = "",
+        supplier_id: str = None,
     ) -> dict:
         if not items:
             raise ValidationError("Purchase order must contain at least one item.")
+
+        if not store:
+            from apps.stores.models import Store
+            store = Store.objects.filter(organization=organization).first()
+
+        from apps.products.models import Supplier
+        supplier_obj = None
+        if supplier_id:
+            supplier_obj = Supplier.objects.filter(id=supplier_id, organization=organization).first()
+        elif supplier and supplier != "Supplier":
+            supplier_obj = Supplier.objects.filter(name__iexact=supplier.strip(), organization=organization).first()
+
+        supplier_name_val = supplier_obj.name if supplier_obj else (supplier or "Supplier")
 
         total_amount = Decimal("0.00")
         total_tax = Decimal("0.00")
@@ -122,7 +136,8 @@ class InventoryService:
                 store=store,
                 created_by=user if getattr(user, "is_authenticated", False) else None,
                 po_number=po_number,
-                supplier=supplier,
+                supplier=supplier_name_val,
+                supplier_ref=supplier_obj,
                 supplier_invoice_number=supplier_invoice_number,
                 purchase_date=purchase_date or timezone.now().date(),
                 total_amount=total_amount,
@@ -148,8 +163,8 @@ class InventoryService:
                 locked_prod.current_stock = new_stock
                 # Update purchase price if new
                 if p_it["purchase_price"] > Decimal("0.00"):
-                    locked_prod.purchase_price = p_it["purchase_price"]
-                locked_prod.save(update_fields=["current_stock", "purchase_price"])
+                    locked_prod.cost_price = p_it["purchase_price"]
+                locked_prod.save(update_fields=["current_stock", "cost_price"])
 
                 InventoryMovement.objects.create(
                     organization=organization,

@@ -451,12 +451,21 @@ class POSPurchaseOrderView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        store = request.user.stores.first() if hasattr(request.user, "stores") else None
+        from apps.stores.models import Store
+        store = None
+        store_id = request.data.get("store_id")
+        if store_id:
+            store = Store.objects.filter(id=store_id, organization=request.user.organization).first()
+        if not store and hasattr(request.user, "stores") and request.user.stores.exists():
+            store = request.user.stores.first()
+        if not store:
+            store = Store.objects.filter(organization=request.user.organization).first()
         result = InventoryService.record_purchase_order(
             organization=request.user.organization,
             store=store,
             user=request.user,
             supplier=request.data.get("supplier", "Supplier"),
+            supplier_id=request.data.get("supplier_id") or request.data.get("supplier_ref"),
             supplier_invoice_number=request.data.get("supplier_invoice_number", ""),
             purchase_date=request.data.get("purchase_date"),
             items=request.data.get("items", []),

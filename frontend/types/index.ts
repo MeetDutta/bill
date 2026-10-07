@@ -623,6 +623,8 @@ export interface PurchaseOrder {
   id: string;
   po_number: string;
   supplier: string;
+  supplier_ref?: string | null;
+  supplier_name?: string;
   supplier_invoice_number: string;
   purchase_date: string;
   total_amount: string;
@@ -643,5 +645,93 @@ export interface SalesReturn {
   created_at: string;
   status: string;
   items_returned_count: number;
+}
+
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  invoice_type?: string;
+  template_format?: string;
+  pdf_url?: string;
+  web_url?: string;
+  is_viewed?: boolean;
+  viewed_at?: string;
+  created_at: string;
+  customer_name?: string;
+  customer_phone?: string;
+  store_name?: string;
+  transaction_date?: string;
+  subtotal: string | number;
+  discount: string | number;
+  tax: string | number;
+  total: string | number;
+  payment_status?: string;
+  payment_method?: string;
+  origin_quotation_id?: string;
+  origin_quotation_number?: string;
+  terms_and_conditions?: string;
+  custom_notes?: string;
+  transaction_details?: any;
+}
+
+export interface QuotationItem {
+  id?: string;
+  product?: string | null;
+  product_id?: string | null;
+  name: string;
+  quantity: number | string;
+  unit_price: number | string;
+  discount: number | string;
+  tax_rate: number | string;
+  tax?: number | string;
+  total?: number | string;
+  hsn_code?: string;
+  unit?: string;
+}
+
+export interface Quotation {
+  id: string;
+  quotation_number: string;
+  customer?: string | null;
+  customer_name?: string;
+  customer_phone?: string;
+  customer_email?: string;
+  store?: string | null;
+  store_name?: string;
+  quotation_date: string;
+  valid_until?: string | null;
+  status: "draft" | "sent" | "accepted" | "rejected" | "expired" | "converted";
+  subtotal: string | number;
+  discount: string | number;
+  tax: string | number;
+  total: string | number;
+  notes?: string;
+  terms_and_conditions?: string;
+  items_count?: number;
+  items?: QuotationItem[];
+  converted_invoice?: string | null;
+  converted_invoice_number?: string | null;
+  converted_at?: string | null;
+  created_by_name?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  contact_person?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  gstin?: string;
+  pan?: string;
+  notes?: string;
+  opening_balance?: string | number;
+  is_active: boolean;
+  purchase_orders_count?: number;
+  total_purchases?: string | number;
+  created_at?: string;
+  updated_at?: string;
 }
 

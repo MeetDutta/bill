@@ -198,6 +198,8 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     items = PurchaseOrderItemSerializer(many=True, read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    supplier_name = serializers.SerializerMethodField()
+    tax_amount = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseOrder
@@ -205,6 +207,8 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "id",
             "po_number",
             "supplier",
+            "supplier_ref",
+            "supplier_name",
             "supplier_invoice_number",
             "purchase_date",
             "total_amount",
@@ -218,3 +222,16 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
 
     def get_created_by_name(self, obj):
         return obj.created_by.get_full_name() if obj.created_by else "Staff"
+
+    def get_supplier_name(self, obj):
+        if obj.supplier_ref:
+            return obj.supplier_ref.name
+        return obj.supplier_name or obj.supplier or "Supplier"
+
+    def get_tax_amount(self, obj):
+        total_tax = Decimal("0.00")
+        for it in obj.items.all():
+            line_sub = (it.purchase_price or Decimal("0.00")) * (it.quantity or Decimal("0.00"))
+            rate = it.tax_rate or Decimal("0.00")
+            total_tax += (line_sub * (rate / Decimal("100.00")))
+        return str(round(total_tax, 2))

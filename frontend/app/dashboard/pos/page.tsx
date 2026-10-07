@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import Link from "next/link";
 import {
   Search,
   Barcode,
+  FileText,
   Plus,
   Trash2,
   Minus,
@@ -1185,6 +1187,14 @@ export default function POSPage() {
                     <Printer className="h-3.5 w-3.5" />
                     Print Receipt
                   </Button>
+
+                  <Link
+                    href="/dashboard/invoices"
+                    className="inline-flex items-center gap-1.5 rounded-md border bg-background hover:bg-accent px-3 py-1.5 text-xs font-semibold text-foreground"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-primary" />
+                    <span>View Invoices</span>
+                  </Link>
 
                   {completedSale.customer?.phone && (
                     <Button

@@ -90,6 +90,9 @@ class Product(UUIDModel, TenantModel, TimeStampedModel):
         import secrets
         if not self.external_id:
             self.external_id = self.sku or f"PROD-{secrets.token_hex(4).upper()}"
+        if "update_fields" in kwargs and kwargs["update_fields"] is not None:
+            field_map = {"purchase_price": "cost_price", "selling_price": "unit_price"}
+            kwargs["update_fields"] = [field_map.get(f, f) for f in kwargs["update_fields"]]
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -151,6 +154,29 @@ class InventoryMovement(UUIDModel, TenantModel, TimeStampedModel):
         return f"{self.movement_type} {self.product.name}: {self.previous_stock} → {self.new_stock}"
 
 
+class Supplier(UUIDModel, TenantModel, TimeStampedModel):
+    name = models.CharField(max_length=255, db_index=True)
+    contact_person = models.CharField(max_length=255, blank=True)
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    address = models.TextField(blank=True)
+    gstin = models.CharField(max_length=50, blank=True)
+    pan = models.CharField(max_length=50, blank=True)
+    notes = models.TextField(blank=True)
+    opening_balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["organization", "name"]),
+            models.Index(fields=["organization", "is_active"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class PurchaseOrder(UUIDModel, TenantModel, TimeStampedModel):
     """
     Supplier purchase order & stock-in document.
@@ -162,6 +188,13 @@ class PurchaseOrder(UUIDModel, TenantModel, TimeStampedModel):
     ]
 
     po_number = models.CharField(max_length=100, db_index=True)
+    supplier_ref = models.ForeignKey(
+        Supplier,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="purchase_orders",
+    )
     supplier_name = models.CharField(max_length=255)
     supplier_invoice = models.CharField(max_length=100, blank=True)
     store = models.ForeignKey(
@@ -180,11 +213,41 @@ class PurchaseOrder(UUIDModel, TenantModel, TimeStampedModel):
         blank=True,
     )
 
+    def __init__(self, *args, **kwargs):
+        supplier_kw = kwargs.pop("supplier", None)
+        supplier_inv_kw = kwargs.pop("supplier_invoice_number", None)
+        kwargs.pop("tax_amount", None)
+        super().__init__(*args, **kwargs)
+        if supplier_kw is not None:
+            self.supplier = supplier_kw
+        if supplier_inv_kw is not None:
+            self.supplier_invoice_number = supplier_inv_kw
+
+    @property
+    def supplier(self):
+        return self.supplier_ref.name if self.supplier_ref else self.supplier_name
+
+    @supplier.setter
+    def supplier(self, val):
+        if isinstance(val, Supplier):
+            self.supplier_ref = val
+            self.supplier_name = val.name
+        elif isinstance(val, str):
+            self.supplier_name = val
+
+    @property
+    def supplier_invoice_number(self):
+        return self.supplier_invoice
+
+    @supplier_invoice_number.setter
+    def supplier_invoice_number(self, val):
+        self.supplier_invoice = val
+
     class Meta:
         ordering = ["-purchase_date", "-created_at"]
 
     def __str__(self):
-        return f"PO #{self.po_number} - {self.supplier_name} (₹{self.total_amount})"
+        return f"PO #{self.po_number} - {self.supplier} (₹{self.total_amount})"
 
 
 class PurchaseOrderItem(UUIDModel, TimeStampedModel):

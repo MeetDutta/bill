@@ -9,19 +9,40 @@ class InvoiceSerializer(serializers.ModelSerializer):
     store_name = serializers.CharField(source="transaction.store.name", read_only=True)
     customer_name = serializers.CharField(source="transaction.customer.full_name", read_only=True)
     customer_phone = serializers.CharField(source="transaction.customer.phone", read_only=True)
+    subtotal = serializers.DecimalField(source="transaction.subtotal", max_digits=12, decimal_places=2, read_only=True)
+    discount = serializers.DecimalField(source="transaction.discount", max_digits=12, decimal_places=2, read_only=True)
+    tax = serializers.DecimalField(source="transaction.tax", max_digits=12, decimal_places=2, read_only=True)
+    total = serializers.DecimalField(source="transaction.total", max_digits=12, decimal_places=2, read_only=True)
+    payment_status = serializers.CharField(source="transaction.payment_status", read_only=True)
+    payment_method = serializers.CharField(source="transaction.payment_method", read_only=True)
+    origin_quotation_id = serializers.SerializerMethodField()
+    origin_quotation_number = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
         fields = [
-            "id", "transaction", "invoice_number", "pdf_url", "web_url",
-            "secure_token", "is_viewed", "viewed_at", "organization", "created_at",
+            "id", "transaction", "invoice_number", "invoice_type", "template_format",
+            "pdf_url", "web_url", "secure_token", "is_viewed", "viewed_at",
+            "organization", "created_at", "terms_and_conditions", "custom_notes",
             "transaction_details", "organization_name", "store_name", "customer_name", "customer_phone",
+            "subtotal", "discount", "tax", "total", "payment_status", "payment_method",
+            "origin_quotation_id", "origin_quotation_number",
         ]
         read_only_fields = ["id", "secure_token", "created_at", "organization"]
 
     def get_transaction_details(self, obj):
         from apps.transactions.serializers import TransactionSerializer
         return TransactionSerializer(obj.transaction).data
+
+    def get_origin_quotation_id(self, obj):
+        if hasattr(obj, "origin_quotation") and obj.origin_quotation:
+            return str(obj.origin_quotation.id)
+        return None
+
+    def get_origin_quotation_number(self, obj):
+        if hasattr(obj, "origin_quotation") and obj.origin_quotation:
+            return obj.origin_quotation.quotation_number
+        return None
 
 
 class PublicInvoiceSerializer(serializers.ModelSerializer):
@@ -175,7 +196,127 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
 
 
 
+
 class InvoiceListSerializer(serializers.ModelSerializer):
+    customer_name = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    store_name = serializers.CharField(source="transaction.store.name", read_only=True)
+    transaction_date = serializers.DateTimeField(source="transaction.transaction_date", read_only=True)
+    subtotal = serializers.DecimalField(source="transaction.subtotal", max_digits=12, decimal_places=2, read_only=True)
+    discount = serializers.DecimalField(source="transaction.discount", max_digits=12, decimal_places=2, read_only=True)
+    tax = serializers.DecimalField(source="transaction.tax", max_digits=12, decimal_places=2, read_only=True)
+    total = serializers.DecimalField(source="transaction.total", max_digits=12, decimal_places=2, read_only=True)
+    payment_status = serializers.CharField(source="transaction.payment_status", read_only=True)
+    payment_method = serializers.CharField(source="transaction.payment_method", read_only=True)
+    origin_quotation_id = serializers.SerializerMethodField()
+
     class Meta:
         model = Invoice
-        fields = ["id", "invoice_number", "is_viewed", "viewed_at", "created_at"]
+        fields = [
+            "id", "invoice_number", "invoice_type", "template_format",
+            "pdf_url", "web_url", "is_viewed", "viewed_at", "created_at",
+            "customer_name", "customer_phone", "store_name", "transaction_date",
+            "subtotal", "discount", "tax", "total",
+            "payment_status", "payment_method", "origin_quotation_id",
+        ]
+
+    def get_customer_name(self, obj):
+        if not obj.transaction:
+            return "Walk-in Customer"
+        if obj.transaction.customer:
+            return obj.transaction.customer.full_name or "Customer"
+        return "Walk-in Customer"
+
+    def get_customer_phone(self, obj):
+        if not obj.transaction or not obj.transaction.customer:
+            return ""
+        return obj.transaction.customer.phone or ""
+
+    def get_origin_quotation_id(self, obj):
+        if hasattr(obj, "origin_quotation") and obj.origin_quotation:
+            return str(obj.origin_quotation.id)
+        return None
+
+
+class QuotationItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        from .models import QuotationItem
+        model = QuotationItem
+        fields = [
+            "id", "product", "name", "quantity", "unit_price",
+            "discount", "tax_rate", "tax", "total", "hsn_code", "unit",
+        ]
+
+
+class QuotationSerializer(serializers.ModelSerializer):
+    items = QuotationItemSerializer(many=True, required=False)
+    customer_name = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    store_name = serializers.CharField(source="store.name", read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    converted_invoice_number = serializers.SerializerMethodField()
+
+    class Meta:
+        from .models import Quotation
+        model = Quotation
+        fields = [
+            "id", "quotation_number", "customer", "customer_name", "customer_phone",
+            "customer_email", "store", "store_name", "quotation_date", "valid_until",
+            "status", "subtotal", "discount", "tax", "total", "notes",
+            "terms_and_conditions", "converted_invoice", "converted_invoice_number",
+            "converted_at", "created_by_name", "items", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "quotation_number", "converted_invoice", "converted_at",
+            "created_at", "updated_at",
+        ]
+
+    def get_customer_name(self, obj):
+        if obj.customer:
+            return obj.customer.full_name or "Customer"
+        return obj.customer_name or "Walk-in Customer"
+
+    def get_customer_phone(self, obj):
+        if obj.customer:
+            return obj.customer.phone or ""
+        return obj.customer_phone or ""
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() if obj.created_by else "Staff"
+
+    def get_converted_invoice_number(self, obj):
+        return obj.converted_invoice.invoice_number if obj.converted_invoice else None
+
+
+class QuotationListSerializer(serializers.ModelSerializer):
+    customer_name = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    store_name = serializers.CharField(source="store.name", read_only=True)
+    items_count = serializers.SerializerMethodField()
+    converted_invoice_number = serializers.SerializerMethodField()
+
+    class Meta:
+        from .models import Quotation
+        model = Quotation
+        fields = [
+            "id", "quotation_number", "customer_name", "customer_phone",
+            "store_name", "quotation_date", "valid_until", "status",
+            "subtotal", "discount", "tax", "total", "items_count",
+            "converted_invoice", "converted_invoice_number", "created_at",
+        ]
+
+    def get_customer_name(self, obj):
+        if obj.customer:
+            return obj.customer.full_name or "Customer"
+        return obj.customer_name or "Walk-in Customer"
+
+    def get_customer_phone(self, obj):
+        if obj.customer:
+            return obj.customer.phone or ""
+        return obj.customer_phone or ""
+
+    def get_items_count(self, obj):
+        return obj.items.count()
+
+    def get_converted_invoice_number(self, obj):
+        return obj.converted_invoice.invoice_number if obj.converted_invoice else None

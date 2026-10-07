@@ -37,3 +37,27 @@ class ProductListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = ["id", "external_id", "name", "sku", "unit_price", "tax_rate", "is_active"]
+
+
+class SupplierSerializer(serializers.ModelSerializer):
+    total_purchases = serializers.SerializerMethodField()
+    purchase_orders_count = serializers.SerializerMethodField()
+
+    class Meta:
+        from .models import Supplier
+        model = Supplier
+        fields = [
+            "id", "name", "contact_person", "phone", "email", "address",
+            "gstin", "pan", "notes", "opening_balance", "is_active",
+            "total_purchases", "purchase_orders_count", "created_at",
+        ]
+        read_only_fields = ["id", "created_at", "total_purchases", "purchase_orders_count"]
+
+    def get_total_purchases(self, obj):
+        from django.db.models import Sum
+        from decimal import Decimal
+        res = obj.purchase_orders.aggregate(t=Sum("total_amount"))["t"]
+        return str(res or Decimal("0.00"))
+
+    def get_purchase_orders_count(self, obj):
+        return obj.purchase_orders.count()

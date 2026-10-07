@@ -15,6 +15,10 @@ import type {
   EngagementDashboard,
   Customer360,
   SegmentSummary,
+  Invoice,
+  Quotation,
+  Supplier,
+  PurchaseOrder,
 } from "@/types";
 
 // Auth
@@ -198,6 +202,62 @@ export const posApi = {
   getReturnsReport: (params?: unknown) => api.get("/pos/reports/returns/", { params }),
   getOutstandingReport: (params?: unknown) => api.get("/pos/reports/outstanding/", { params }),
   getDailyClosingReport: (params?: unknown) => api.get("/pos/reports/daily-closing/", { params }),
+};
+
+// Invoice Management
+export const invoiceApi = {
+  list: (params?: {
+    search?: string;
+    customer_id?: string;
+    payment_status?: string;
+    invoice_type?: string;
+    template_format?: string;
+    start_date?: string;
+    end_date?: string;
+    page?: number;
+  }) => api.get<PaginatedResponse<Invoice>>("/invoices/", { params }),
+  get: (id: string) => api.get<Invoice>(`/invoices/${id}/`),
+  getPublic: (token: string) => api.get(`/invoices/view/${token}/`),
+  generatePdf: (id: string) => api.post<{ id: string; invoice_number: string; pdf_url: string; web_url: string }>(`/invoices/${id}/pdf/`),
+};
+
+// Quotation Management
+export const quotationApi = {
+  list: (params?: {
+    search?: string;
+    status?: string;
+    customer_id?: string;
+    start_date?: string;
+    end_date?: string;
+    page?: number;
+  }) => api.get<PaginatedResponse<Quotation>>("/quotations/", { params }),
+  get: (id: string) => api.get<Quotation>(`/quotations/${id}/`),
+  create: (data: unknown) => api.post<Quotation>("/quotations/", data),
+  update: (id: string, data: unknown) => api.patch<Quotation>(`/quotations/${id}/`, data),
+  delete: (id: string) => api.delete(`/quotations/${id}/`),
+  convert: (id: string, data?: { payment_method?: string }) =>
+    api.post<{
+      message: string;
+      invoice_id: string;
+      invoice_number: string;
+      quotation_id: string;
+      quotation_number: string;
+      pdf_url: string;
+      web_url: string;
+      total: string;
+    }>(`/quotations/${id}/convert/`, data),
+};
+
+// Supplier Management
+export const supplierApi = {
+  list: (params?: { search?: string; is_active?: boolean; page?: number }) =>
+    api.get<PaginatedResponse<Supplier>>("/suppliers/", { params }),
+  get: (id: string) => api.get<Supplier>(`/suppliers/${id}/`),
+  create: (data: Partial<Supplier>) => api.post<Supplier>("/suppliers/", data),
+  update: (id: string, data: Partial<Supplier>) => api.patch<Supplier>(`/suppliers/${id}/`, data),
+  delete: (id: string) => api.delete(`/suppliers/${id}/`),
+  getPurchases: (id: string, params?: { page?: number }) =>
+    api.get<PaginatedResponse<PurchaseOrder>>(`/suppliers/${id}/purchases/`, { params }),
 };
 
 

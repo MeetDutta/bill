@@ -89,3 +89,148 @@ class InvoicePipelineTests(TestCase):
         unauth_client = APIClient()
         response = unauth_client.get("/api/v1/invoices/view/invalid-nonexistent-token/")
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_invoice_list_and_detail_management(self):
+        generate_invoice_task(str(self.tx.id))
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get("/api/v1/invoices/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", response.data)
+        self.assertTrue(len(results) >= 1)
+        inv_item = results[0]
+        self.assertIn("invoice_number", inv_item)
+        self.assertIn("total", inv_item)
+        self.assertIn("customer_name", inv_item)
+
+        # Detail view
+        inv_id = inv_item["id"]
+        detail_resp = self.client.get(f"/api/v1/invoices/{inv_id}/")
+        self.assertEqual(detail_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_resp.data["invoice_number"], inv_item["invoice_number"])
+
+    def test_quotation_creation_and_conversion_pipeline(self):
+        from apps.products.models import Product
+        product = Product.objects.create(
+            organization=self.org,
+            name="Wireless Mouse",
+            selling_price=Decimal("500.00"),
+            purchase_price=Decimal("300.00"),
+            tax_rate=Decimal("18.00"),
+            current_stock=Decimal("20.00"),
+            track_inventory=True,
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+        # 1. Create Quotation
+        payload = {
+            "customer_id": str(self.customer.id),
+            "items": [
+                {
+                    "product_id": str(product.id),
+                    "name": "Wireless Mouse",
+                    "quantity": 2,
+                    "unit_price": 500.00,
+                    "discount": 50.00,
+                    "tax_rate": 18.00,
+                }
+            ],
+            "notes": "Valid for 15 days",
+        }
+        create_resp = self.client.post("/api/v1/quotations/", payload, format="json")
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
+        quote_id = create_resp.data["id"]
+        self.assertEqual(create_resp.data["status"], "draft")
+        self.assertIn("QT-", create_resp.data["quotation_number"])
+
+        # 2. List Quotations
+        list_resp = self.client.get("/api/v1/quotations/")
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+
+        # 3. Convert Quotation to Invoice
+        convert_resp = self.client.post(
+            f"/api/v1/quotations/{quote_id}/convert/",
+            {"payment_method": "upi"},
+            format="json",
+        )
+        self.assertEqual(convert_resp.status_code, status.HTTP_201_CREATED)
+        self.assertIn("invoice_id", convert_resp.data)
+        self.assertIn("invoice_number", convert_resp.data)
+
+        # Product inventory should be deducted by 2
+        product.refresh_from_db()
+        self.assertEqual(product.current_stock, Decimal("18.00"))
+
+        # 4. Check quotation status is converted
+        detail_resp = self.client.get(f"/api/v1/quotations/{quote_id}/")
+        self.assertEqual(detail_resp.data["status"], "converted")
+        self.assertEqual(detail_resp.data["converted_invoice_number"], convert_resp.data["invoice_number"])
+
+        # 5. Prevent duplicate conversion
+        duplicate_resp = self.client.post(
+            f"/api/v1/quotations/{quote_id}/convert/",
+            {"payment_method": "cash"},
+            format="json",
+        )
+        self.assertEqual(duplicate_resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_supplier_management_and_purchase_orders(self):
+        from apps.products.models import Supplier, Product
+        self.client.force_authenticate(user=self.user)
+
+        # 1. Create Supplier
+        sup_resp = self.client.post(
+            "/api/v1/suppliers/",
+            {
+                "name": "Apex Electronics Ltd",
+                "contact_person": "Vikram Mehta",
+                "phone": "9123456780",
+                "email": "apex@example.com",
+                "gstin": "27AAAAA0000A1Z5",
+            },
+            format="json",
+        )
+        self.assertEqual(sup_resp.status_code, status.HTTP_201_CREATED)
+        sup_id = sup_resp.data["id"]
+        self.assertEqual(sup_resp.data["name"], "Apex Electronics Ltd")
+
+        # 2. Record Purchase with this Supplier
+        prod = Product.objects.create(
+            organization=self.org,
+            name="Mechanical Keyboard",
+            selling_price=Decimal("2000.00"),
+            purchase_price=Decimal("1200.00"),
+            current_stock=Decimal("5.00"),
+            track_inventory=True,
+        )
+
+        po_resp = self.client.post(
+            "/api/v1/pos/inventory/purchases/",
+            {
+                "supplier_id": sup_id,
+                "supplier_invoice_number": "APEX-INV-101",
+                "purchase_date": "2026-10-01",
+                "items": [
+                    {
+                        "product_id": str(prod.id),
+                        "quantity": 10,
+                        "purchase_price": 1200.00,
+                        "tax_rate": 18.00,
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(po_resp.status_code, status.HTTP_201_CREATED)
+
+        # Stock should increase from 5 to 15
+        prod.refresh_from_db()
+        self.assertEqual(prod.current_stock, Decimal("15.00"))
+
+        # Check supplier purchases list
+        sup_purchases = self.client.get(f"/api/v1/suppliers/{sup_id}/purchases/")
+        self.assertEqual(sup_purchases.status_code, status.HTTP_200_OK)
+        results = sup_purchases.data.get("results", sup_purchases.data)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["supplier_name"], "Apex Electronics Ltd")
