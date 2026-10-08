@@ -301,3 +301,30 @@ class CashRegister(UUIDModel, TenantModel, TimeStampedModel):
             self.notes = f"{self.notes}\nClosing Notes: {notes}".strip()
         self.save(update_fields=["actual_cash", "expected_cash", "difference", "status", "closed_at", "notes"])
 
+
+class InvoiceSequence(UUIDModel, TenantModel, TimeStampedModel):
+    """
+    Organization and store-aware sequential invoice counter.
+    Guarantees concurrency-safe sequential invoice numbers (e.g. INV-20261008-000001).
+    """
+    store = models.ForeignKey(
+        "stores.Store",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="invoice_sequences",
+    )
+    prefix = models.CharField(max_length=20, default="INV")
+    period_key = models.CharField(max_length=30, default="global", db_index=True)
+    last_number = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = [("organization", "store", "prefix", "period_key")]
+        indexes = [
+            models.Index(fields=["organization", "prefix", "period_key"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization.name} - {self.prefix} ({self.period_key}): {self.last_number}"
+
+

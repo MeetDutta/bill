@@ -1,3 +1,5 @@
+import logging
+import secrets
 import uuid
 from decimal import Decimal
 
@@ -9,7 +11,10 @@ from rest_framework.views import APIView
 
 from common.pagination import StandardPagination
 
-from .models import Transaction, TransactionItem
+from .models import Transaction, TransactionItem, TransactionPayment
+from apps.invoices.models import Invoice
+
+logger = logging.getLogger(__name__)
 from .serializers import (
     TransactionIngestSerializer,
     TransactionListSerializer,
@@ -146,17 +151,27 @@ class TransactionIngestView(APIView):
                         event_type="created",
                     )
 
+            subtotal_val = data["subtotal"]
+            discount_val = data.get("discount", Decimal("0"))
+            tax_val = data["tax"]
+            total_val = data["total"]
+            round_off_val = total_val - (subtotal_val - discount_val + tax_val)
+
             tx = Transaction.objects.create(
                 organization=org,
                 store=store,
                 customer=customer,
                 invoice_number=data["invoice_number"],
                 transaction_date=data["transaction_date"],
-                subtotal=data["subtotal"],
-                discount=data.get("discount", Decimal("0")),
-                tax=data["tax"],
-                total=data["total"],
-                payment_method=data.get("payment_method", ""),
+                subtotal=subtotal_val,
+                discount=discount_val,
+                tax=tax_val,
+                round_off=round_off_val,
+                total=total_val,
+                amount_paid=total_val,
+                outstanding_amount=Decimal("0.00"),
+                payment_status="paid",
+                payment_method=data.get("payment_method", "cash"),
                 external_source=data.get("external_source", ""),
                 external_transaction_id=external_tx_id,
             )
@@ -174,8 +189,30 @@ class TransactionIngestView(APIView):
                     hsn_code=item_data.get("hsn_code", ""),
                 )
 
+            # Create payment record
+            TransactionPayment.objects.create(
+                organization=org,
+                transaction=tx,
+                payment_method=data.get("payment_method") or "cash",
+                amount=total_val,
+                status="success",
+                notes=f"API Ingest Invoice #{tx.invoice_number}",
+            )
+
+            # Synchronously create Invoice record to maintain immutable financial relationship
+            secure_token = secrets.token_urlsafe(24)
+            Invoice.objects.get_or_create(
+                transaction=tx,
+                defaults={
+                    "organization": org,
+                    "invoice_number": tx.invoice_number,
+                    "secure_token": secure_token,
+                    "web_url": f"/bills/{secure_token}",
+                },
+            )
+
             if customer:
-                customer.update_stats(Decimal(str(data["total"])))
+                customer.update_stats(total_val)
                 event_type = (
                     "repeat_purchase"
                     if not customer_created and customer.total_purchases > 1
@@ -190,14 +227,23 @@ class TransactionIngestView(APIView):
                 )
 
         # 5. Background Pipeline
-        from apps.invoices.tasks import generate_invoice_task
-        generate_invoice_task.delay(str(tx.id))
+        try:
+            from apps.invoices.tasks import generate_invoice_task
+            generate_invoice_task.delay(str(tx.id))
+        except Exception as e:
+            logger.warning("Failed to enqueue generate_invoice_task: %s", e)
 
-        from apps.loyalty.tasks import calculate_loyalty_task
-        calculate_loyalty_task.delay(str(tx.id), str(org.id))
+        try:
+            from apps.loyalty.tasks import calculate_loyalty_task
+            calculate_loyalty_task.delay(str(tx.id), str(org.id))
+        except Exception as e:
+            logger.warning("Failed to enqueue calculate_loyalty_task: %s", e)
 
-        from apps.whatsapp.tasks import send_digital_bill_task
-        send_digital_bill_task.delay(str(tx.id))
+        try:
+            from apps.whatsapp.tasks import send_digital_bill_task
+            send_digital_bill_task.delay(str(tx.id))
+        except Exception as e:
+            logger.warning("Failed to enqueue send_digital_bill_task: %s", e)
 
         return Response(
             TransactionSerializer(tx).data,

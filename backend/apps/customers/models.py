@@ -80,10 +80,16 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
         super().save(*args, **kwargs)
 
     def update_stats(self, amount):
+        from decimal import Decimal, ROUND_HALF_UP
         from django.utils import timezone
         self.total_purchases += 1
-        self.total_spend += amount
-        self.average_order_value = self.total_spend / self.total_purchases
+        self.total_spend += Decimal(str(amount or 0))
+        if self.total_purchases > 0:
+            self.average_order_value = (self.total_spend / Decimal(self.total_purchases)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        else:
+            self.average_order_value = Decimal("0.00")
         self.last_purchase_at = timezone.now()
         self.save(update_fields=["total_purchases", "total_spend", "average_order_value", "last_purchase_at"])
 

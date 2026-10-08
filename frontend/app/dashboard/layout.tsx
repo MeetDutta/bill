@@ -67,26 +67,25 @@ const navSections: NavSection[] = [
       { name: "POS Terminal", href: "/dashboard/pos", icon: ShoppingCart },
       { name: "Invoices", href: "/dashboard/invoices", icon: FileText },
       { name: "Quotations", href: "/dashboard/quotations", icon: FileCheck },
-      { name: "Sales History", href: "/dashboard/transactions", icon: Receipt },
       { name: "Returns", href: "/dashboard/returns", icon: RotateCcw },
-    ],
-  },
-  {
-    title: "INVENTORY",
-    key: "inventory",
-    items: [
-      { name: "Products", href: "/dashboard/products", icon: Tag },
-      { name: "Inventory", href: "/dashboard/inventory", icon: Boxes },
-      { name: "Stock Adjustments", href: "/dashboard/inventory?tab=ledger", icon: SlidersHorizontal, tab: "ledger" },
     ],
   },
   {
     title: "PURCHASING",
     key: "purchasing",
     items: [
-      { name: "Suppliers", href: "/dashboard/suppliers", icon: Truck },
       { name: "Purchase Orders", href: "/dashboard/purchases", icon: ClipboardList },
-      { name: "Purchase History", href: "/dashboard/purchases?tab=history", icon: History, tab: "history" },
+      { name: "Purchase History", href: "/dashboard/purchases/history", icon: History },
+      { name: "Suppliers", href: "/dashboard/suppliers", icon: Truck },
+    ],
+  },
+  {
+    title: "INVENTORY",
+    key: "inventory",
+    items: [
+      { name: "Current Stock", href: "/dashboard/inventory", icon: Boxes },
+      { name: "Stock Movements", href: "/dashboard/inventory/movements", icon: History },
+      { name: "Stock Adjustments", href: "/dashboard/inventory/adjustments", icon: SlidersHorizontal },
     ],
   },
   {
@@ -99,8 +98,27 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: "MARKETING",
-    key: "marketing",
+    title: "FINANCE",
+    key: "finance",
+    items: [
+      { name: "Payment Ledger", href: "/dashboard/finance/payments", icon: CreditCard },
+      { name: "Receivables (Udhaar)", href: "/dashboard/finance/receivables", icon: AlertCircle },
+      { name: "Payables", href: "/dashboard/finance/payables", icon: FileSpreadsheet },
+      { name: "Cash Register", href: "/dashboard/register", icon: Landmark },
+    ],
+  },
+  {
+    title: "REPORTS",
+    key: "reports",
+    items: [
+      { name: "Sales Report", href: "/dashboard/reports/sales", icon: TrendingUp },
+      { name: "POS / Register Report", href: "/dashboard/reports/pos", icon: FileSpreadsheet },
+      { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+    ],
+  },
+  {
+    title: "GROWTH",
+    key: "growth",
     items: [
       { name: "Coupons", href: "/dashboard/coupons", icon: Ticket },
       { name: "Campaigns", href: "/dashboard/campaigns", icon: Megaphone },
@@ -108,26 +126,8 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: "FINANCE",
-    key: "finance",
-    items: [
-      { name: "Cash Register", href: "/dashboard/register", icon: Landmark },
-      { name: "Payments", href: "/dashboard/reports?tab=payments", icon: CreditCard, tab: "payments" },
-      { name: "Outstanding", href: "/dashboard/reports?tab=outstanding", icon: AlertCircle, tab: "outstanding" },
-    ],
-  },
-  {
-    title: "REPORTS",
-    key: "reports",
-    items: [
-      { name: "Sales Reports", href: "/dashboard/reports?tab=sales", icon: TrendingUp, tab: "sales" },
-      { name: "POS Reports", href: "/dashboard/reports", icon: FileSpreadsheet },
-      { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-    ],
-  },
-  {
-    title: "BUSINESS",
-    key: "business",
+    title: "ADMINISTRATION",
+    key: "administration",
     items: [
       { name: "Stores", href: "/dashboard/stores", icon: Store },
       { name: "Settings", href: "/dashboard/settings", icon: Settings },

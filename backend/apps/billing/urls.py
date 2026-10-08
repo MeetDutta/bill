@@ -18,6 +18,15 @@ from .views import (
     POSInventoryMovementListView,
     POSInventoryAdjustView,
     POSPurchaseOrderView,
+    POSPurchaseOrderDetailView,
+    POSPurchaseOrderReceiveView,
+    POSPurchaseOrderCancelView,
+    POSManualAdjustmentsListView,
+    POSPaymentLedgerView,
+    POSReceivablesView,
+    POSPayablesView,
+    POSSupplierPaymentCreateView,
+    POSRegisterOperationalReportView,
     POSSalesReportView,
     POSPaymentReportView,
     POSProductSalesReportView,
@@ -68,7 +77,17 @@ urlpatterns = [
     # Inventory
     path("inventory/movements/", POSInventoryMovementListView.as_view(), name="pos-inventory-movements"),
     path("inventory/adjust/", POSInventoryAdjustView.as_view(), name="pos-inventory-adjust"),
+    path("inventory/adjustments/", POSManualAdjustmentsListView.as_view(), name="pos-inventory-adjustments"),
     path("inventory/purchases/", POSPurchaseOrderView.as_view(), name="pos-inventory-purchases"),
+    path("inventory/purchases/<uuid:pk>/", POSPurchaseOrderDetailView.as_view(), name="pos-inventory-purchase-detail"),
+    path("inventory/purchases/<uuid:pk>/receive/", POSPurchaseOrderReceiveView.as_view(), name="pos-inventory-purchase-receive"),
+    path("inventory/purchases/<uuid:pk>/cancel/", POSPurchaseOrderCancelView.as_view(), name="pos-inventory-purchase-cancel"),
+
+    # Finance (Payment Ledger, Receivables, Payables)
+    path("finance/payments/", POSPaymentLedgerView.as_view(), name="pos-finance-payments"),
+    path("finance/receivables/", POSReceivablesView.as_view(), name="pos-finance-receivables"),
+    path("finance/payables/", POSPayablesView.as_view(), name="pos-finance-payables"),
+    path("finance/supplier-payments/", POSSupplierPaymentCreateView.as_view(), name="pos-finance-supplier-payments"),
 
     # Reports
     path("reports/sales/", POSSalesReportView.as_view(), name="pos-report-sales"),
@@ -78,4 +97,5 @@ urlpatterns = [
     path("reports/returns/", POSReturnsReportView.as_view(), name="pos-report-returns"),
     path("reports/outstanding/", POSOutstandingReportView.as_view(), name="pos-report-outstanding"),
     path("reports/daily-closing/", POSDailyClosingReportView.as_view(), name="pos-report-daily-closing"),
+    path("reports/pos-register/", POSRegisterOperationalReportView.as_view(), name="pos-report-pos-register"),
 ]

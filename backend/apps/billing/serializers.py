@@ -211,7 +211,12 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "supplier_name",
             "supplier_invoice_number",
             "purchase_date",
+            "expected_delivery",
+            "due_date",
             "total_amount",
+            "paid_amount",
+            "outstanding_amount",
+            "payment_status",
             "tax_amount",
             "status",
             "notes",
@@ -235,3 +240,31 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             rate = it.tax_rate or Decimal("0.00")
             total_tax += (line_sub * (rate / Decimal("100.00")))
         return str(round(total_tax, 2))
+
+
+class SupplierPaymentSerializer(serializers.ModelSerializer):
+    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+    po_number = serializers.CharField(source="purchase_order.po_number", read_only=True, default="")
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        from apps.products.models import SupplierPayment
+        model = SupplierPayment
+        fields = [
+            "id",
+            "supplier",
+            "supplier_name",
+            "purchase_order",
+            "po_number",
+            "amount",
+            "payment_method",
+            "payment_date",
+            "reference",
+            "notes",
+            "created_by_name",
+            "created_at",
+        ]
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() if obj.created_by else "Staff"
+

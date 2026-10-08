@@ -28,15 +28,19 @@ class InventoryService:
         if quantity_delta == Decimal("0.00"):
             raise ValidationError("Quantity delta cannot be zero.")
 
-        if movement_type not in dict(InventoryMovement.MOVEMENT_TYPES):
+        valid_types = dict(getattr(InventoryMovement, "MOVEMENT_TYPES", getattr(InventoryMovement, "MOVEMENT_CHOICES", [])))
+        if movement_type not in valid_types:
             raise ValidationError(f"Invalid movement type '{movement_type}'.")
 
         with transaction.atomic():
-            product = Product.objects.select_for_update().get(id=product_id, organization=organization)
+            try:
+                product = Product.objects.select_for_update().get(id=product_id, organization=organization)
+            except Product.DoesNotExist:
+                raise ValidationError("Product not found.")
             prev_stock = product.current_stock
             new_stock = prev_stock + quantity_delta
 
-            if new_stock < Decimal("0.00") and not movement_type == "ADJUSTMENT":
+            if new_stock < Decimal("0.00") and movement_type != "ADJUSTMENT":
                 raise ValidationError(f"Stock cannot become negative ({new_stock}).")
 
             product.current_stock = new_stock
@@ -78,6 +82,9 @@ class InventoryService:
         items: list,
         notes: str = "",
         supplier_id: str = None,
+        status: str = "received",
+        expected_delivery = None,
+        due_date = None,
     ) -> dict:
         if not items:
             raise ValidationError("Purchase order must contain at least one item.")
@@ -127,6 +134,10 @@ class InventoryService:
                 "total": line_total,
             })
 
+        po_status = status.lower() if status else "received"
+        if po_status not in ["draft", "sent", "ordered", "partially_received", "received", "cancelled"]:
+            po_status = "received"
+
         with transaction.atomic():
             import secrets
             po_number = f"PO-{timezone.now().strftime('%Y%m')}-{secrets.token_hex(3).upper()}"
@@ -140,9 +151,11 @@ class InventoryService:
                 supplier_ref=supplier_obj,
                 supplier_invoice_number=supplier_invoice_number,
                 purchase_date=purchase_date or timezone.now().date(),
+                expected_delivery=expected_delivery,
+                due_date=due_date,
                 total_amount=total_amount,
                 tax_amount=total_tax,
-                status="received",
+                status=po_status,
                 notes=notes,
             )
 
@@ -156,29 +169,29 @@ class InventoryService:
                     total=p_it["total"],
                 )
 
-                # Increase inventory
-                locked_prod = Product.objects.select_for_update().get(id=p_it["product"].id)
-                prev_stock = locked_prod.current_stock
-                new_stock = prev_stock + p_it["quantity"]
-                locked_prod.current_stock = new_stock
-                # Update purchase price if new
-                if p_it["purchase_price"] > Decimal("0.00"):
-                    locked_prod.cost_price = p_it["purchase_price"]
-                locked_prod.save(update_fields=["current_stock", "cost_price"])
+                # Only increase inventory if status is received
+                if po_status == "received":
+                    locked_prod = Product.objects.select_for_update().get(id=p_it["product"].id)
+                    prev_stock = locked_prod.current_stock
+                    new_stock = prev_stock + p_it["quantity"]
+                    locked_prod.current_stock = new_stock
+                    if p_it["purchase_price"] > Decimal("0.00"):
+                        locked_prod.cost_price = p_it["purchase_price"]
+                    locked_prod.save(update_fields=["current_stock", "cost_price"])
 
-                InventoryMovement.objects.create(
-                    organization=organization,
-                    product=locked_prod,
-                    store=store,
-                    user=user if getattr(user, "is_authenticated", False) else None,
-                    movement_type="PURCHASE",
-                    quantity=p_it["quantity"],
-                    previous_stock=prev_stock,
-                    new_stock=new_stock,
-                    reference_type="purchase_order",
-                    reference_id=str(po.id),
-                    notes=f"Supplier Stock-in PO #{po_number} (Inv: {supplier_invoice_number})",
-                )
+                    InventoryMovement.objects.create(
+                        organization=organization,
+                        product=locked_prod,
+                        store=store,
+                        user=user if getattr(user, "is_authenticated", False) else None,
+                        movement_type="PURCHASE",
+                        quantity=p_it["quantity"],
+                        previous_stock=prev_stock,
+                        new_stock=new_stock,
+                        reference_type="purchase_order",
+                        reference_id=str(po.id),
+                        notes=f"Supplier Stock-in PO #{po_number} (Inv: {supplier_invoice_number})",
+                    )
 
         return {
             "id": str(po.id),
@@ -190,3 +203,85 @@ class InventoryService:
             "status": po.status,
             "created_at": po.created_at.isoformat(),
         }
+
+    @classmethod
+    def receive_purchase_order(
+        cls,
+        organization,
+        purchase_order_id: str,
+        user,
+        supplier_invoice_number: str = None,
+        notes: str = None,
+    ) -> dict:
+        """
+        Receives goods for an existing Purchase Order, increasing stock and recording movements.
+        """
+        try:
+            po = PurchaseOrder.objects.prefetch_related("items__product").get(
+                id=purchase_order_id,
+                organization=organization,
+            )
+        except PurchaseOrder.DoesNotExist:
+            raise ValidationError("Purchase order not found.")
+
+        if po.status == "received":
+            raise ValidationError("Purchase order has already been received.")
+        if po.status == "cancelled":
+            raise ValidationError("Cannot receive a cancelled purchase order.")
+
+        with transaction.atomic():
+            if supplier_invoice_number:
+                po.supplier_invoice_number = supplier_invoice_number
+            if notes:
+                po.notes = f"{po.notes}\n{notes}".strip() if po.notes else notes
+            po.status = "received"
+            po.save(update_fields=["status", "supplier_invoice", "notes"])
+
+            for it in po.items.all():
+                locked_prod = Product.objects.select_for_update().get(id=it.product_id)
+                prev_stock = locked_prod.current_stock
+                new_stock = prev_stock + it.quantity
+                locked_prod.current_stock = new_stock
+                if it.purchase_price > Decimal("0.00"):
+                    locked_prod.cost_price = it.purchase_price
+                locked_prod.save(update_fields=["current_stock", "cost_price"])
+
+                InventoryMovement.objects.create(
+                    organization=organization,
+                    product=locked_prod,
+                    store=po.store,
+                    user=user if getattr(user, "is_authenticated", False) else None,
+                    movement_type="PURCHASE",
+                    quantity=it.quantity,
+                    previous_stock=prev_stock,
+                    new_stock=new_stock,
+                    reference_type="purchase_order",
+                    reference_id=str(po.id),
+                    notes=f"Received PO #{po.po_number} (Inv: {po.supplier_invoice_number})",
+                )
+
+        return {
+            "id": str(po.id),
+            "po_number": po.po_number,
+            "status": po.status,
+            "supplier_invoice_number": po.supplier_invoice_number,
+            "total_amount": str(po.total_amount),
+        }
+
+    @classmethod
+    def cancel_purchase_order(cls, organization, purchase_order_id: str, user, reason: str = None) -> dict:
+        try:
+            po = PurchaseOrder.objects.get(id=purchase_order_id, organization=organization)
+        except PurchaseOrder.DoesNotExist:
+            raise ValidationError("Purchase order not found.")
+
+        if po.status == "received":
+            raise ValidationError("Cannot cancel a purchase order that has already been received.")
+
+        po.status = "cancelled"
+        if reason:
+            po.notes = f"{po.notes}\nCancelled: {reason}".strip() if po.notes else f"Cancelled: {reason}"
+        po.save(update_fields=["status", "notes"])
+
+        return {"id": str(po.id), "po_number": po.po_number, "status": po.status}
+

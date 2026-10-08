@@ -627,13 +627,80 @@ export interface PurchaseOrder {
   supplier_name?: string;
   supplier_invoice_number: string;
   purchase_date: string;
+  expected_delivery?: string | null;
+  due_date?: string | null;
   total_amount: string;
+  paid_amount?: string;
+  outstanding_amount?: string;
+  payment_status?: string;
   tax_amount: string;
   status: string;
   notes: string;
   created_by_name: string;
   items: PurchaseOrderItem[];
   created_at: string;
+}
+
+export interface PaymentLedgerItem {
+  id: string;
+  date: string;
+  direction: "incoming" | "outgoing";
+  entity_type: "customer" | "supplier";
+  entity_name: string;
+  invoice_or_ref: string;
+  payment_method: string;
+  amount: string;
+  reference?: string;
+  status: string;
+  notes?: string;
+  cashier_name?: string;
+}
+
+export interface ReceivableItem {
+  transaction_id: string;
+  customer_id?: string | null;
+  customer_name: string;
+  customer_phone?: string;
+  invoice_number: string;
+  invoice_date: string;
+  due_date: string;
+  total: string;
+  paid: string;
+  outstanding: string;
+  days_overdue: number;
+  status: "CURRENT" | "DUE_SOON" | "OVERDUE";
+  store_name?: string;
+}
+
+export interface PayableItem {
+  po_id: string;
+  po_number: string;
+  supplier_id?: string | null;
+  supplier_name: string;
+  supplier_invoice_number?: string;
+  purchase_date: string;
+  due_date: string;
+  total: string;
+  paid: string;
+  outstanding: string;
+  days_overdue: number;
+  status: "CURRENT" | "DUE_SOON" | "OVERDUE";
+}
+
+export interface POSRegisterReportSession {
+  register_id: string;
+  store_name: string;
+  cashier_name: string;
+  status: string;
+  opened_at: string;
+  closed_at?: string | null;
+  opening_balance: string;
+  cash_sales: string;
+  cash_refunds: string;
+  expected_closing_cash: string;
+  actual_closing_cash: string;
+  cash_variance: string;
+  notes?: string;
 }
 
 export interface SalesReturn {

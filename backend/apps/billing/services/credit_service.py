@@ -32,18 +32,18 @@ class CreditService:
         if amount <= Decimal("0.00"):
             raise ValidationError("Payment amount must be greater than zero.")
 
-        try:
-            customer = Customer.objects.get(id=customer_id, organization=organization)
-        except Customer.DoesNotExist:
-            raise ValidationError("Customer not found.")
-
-        if customer.outstanding_credit <= Decimal("0.00"):
-            raise ValidationError(f"Customer {customer.full_name} has no outstanding balance.")
-
         with transaction.atomic():
+            try:
+                customer = Customer.objects.select_for_update().get(id=customer_id, organization=organization)
+            except Customer.DoesNotExist:
+                raise ValidationError("Customer not found.")
+
+            if customer.outstanding_credit <= Decimal("0.00"):
+                raise ValidationError(f"Customer {customer.full_name} has no outstanding balance.")
+
             specific_tx = None
             if transaction_id:
-                specific_tx = Transaction.objects.filter(
+                specific_tx = Transaction.objects.select_for_update().filter(
                     id=transaction_id,
                     organization=organization,
                     customer=customer,
@@ -64,13 +64,15 @@ class CreditService:
             customer.outstanding_credit = max(Decimal("0.00"), customer.outstanding_credit - amount)
             customer.save(update_fields=["outstanding_credit"])
 
-            # Settle invoices: if specific transaction given, settle it; otherwise FIFO settle
+            # Settle invoices: if specific transaction given, settle it; otherwise FIFO settle with row lock
             remaining_to_settle = amount
-            tx_to_settle = [specific_tx] if specific_tx else Transaction.objects.filter(
-                organization=organization,
-                customer=customer,
-                outstanding_amount__gt=Decimal("0.00"),
-            ).order_by("transaction_date")
+            tx_to_settle = [specific_tx] if specific_tx else list(
+                Transaction.objects.select_for_update().filter(
+                    organization=organization,
+                    customer=customer,
+                    outstanding_amount__gt=Decimal("0.00"),
+                ).order_by("transaction_date")
+            )
 
             for tx in tx_to_settle:
                 if not tx or remaining_to_settle <= Decimal("0.00"):

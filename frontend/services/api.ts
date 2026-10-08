@@ -193,8 +193,15 @@ export const posApi = {
   closeRegister: (data: { actual_cash: number; notes?: string }) => api.post("/pos/register/close/", data),
   getInventoryMovements: (params?: unknown) => api.get("/pos/inventory/movements/", { params }),
   adjustInventory: (data: unknown) => api.post("/pos/inventory/adjust/", data),
+  getManualAdjustments: (params?: unknown) => api.get("/pos/inventory/adjustments/", { params }),
   getPurchaseOrders: (params?: unknown) => api.get("/pos/inventory/purchases/", { params }),
   createPurchaseOrder: (data: unknown) => api.post("/pos/inventory/purchases/", data),
+  receivePurchaseOrder: (id: string, data?: unknown) => api.post(`/pos/inventory/purchases/${id}/receive/`, data),
+  cancelPurchaseOrder: (id: string, data?: unknown) => api.post(`/pos/inventory/purchases/${id}/cancel/`, data),
+  getPaymentLedger: (params?: unknown) => api.get("/pos/finance/payments/", { params }),
+  getReceivables: (params?: unknown) => api.get("/pos/finance/receivables/", { params }),
+  getPayables: (params?: unknown) => api.get("/pos/finance/payables/", { params }),
+  recordSupplierPayment: (data: unknown) => api.post("/pos/finance/supplier-payments/", data),
   getSalesReport: (params?: unknown) => api.get("/pos/reports/sales/", { params }),
   getPaymentsReport: (params?: unknown) => api.get("/pos/reports/payments/", { params }),
   getProductSalesReport: (params?: unknown) => api.get("/pos/reports/product-sales/", { params }),
@@ -202,6 +209,7 @@ export const posApi = {
   getReturnsReport: (params?: unknown) => api.get("/pos/reports/returns/", { params }),
   getOutstandingReport: (params?: unknown) => api.get("/pos/reports/outstanding/", { params }),
   getDailyClosingReport: (params?: unknown) => api.get("/pos/reports/daily-closing/", { params }),
+  getPOSRegisterReport: (params?: unknown) => api.get("/pos/reports/pos-register/", { params }),
 };
 
 // Invoice Management

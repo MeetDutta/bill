@@ -1,3 +1,4 @@
+import logging
 import secrets
 from decimal import Decimal
 from django.db import models, transaction
@@ -9,11 +10,16 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
 
 from common.pagination import StandardPagination
+from apps.billing.models import BusinessConfig
 from apps.billing.services.cart_engine import round_decimal
+from apps.billing.services.tax_engine import TaxEngine
+from apps.billing.services.invoice_number_service import InvoiceNumberService
 from apps.products.models import Product, InventoryMovement
-from apps.transactions.models import Transaction, TransactionItem
-from apps.customers.models import Customer
+from apps.transactions.models import Transaction, TransactionItem, TransactionPayment
+from apps.customers.models import Customer, CustomerTimeline
 from apps.stores.models import Store
+
+logger = logging.getLogger(__name__)
 
 from .models import Invoice, Quotation, QuotationItem
 from .serializers import (
@@ -231,16 +237,20 @@ class QuotationListView(APIView):
             hsn_code = it.get("hsn_code") or (p.hsn_code if p else "")
             unit = it.get("unit") or (p.unit if p else "pcs")
 
-            line_sub = round_decimal(unit_price * qty) - disc
-            if line_sub < Decimal("0.00"):
-                line_sub = Decimal("0.00")
-            line_tax = round_decimal(line_sub * (tax_rate / Decimal("100.00")))
-            line_total = line_sub + line_tax
+            tax_calc = TaxEngine.calculate_item_tax(
+                unit_price=unit_price,
+                quantity=qty,
+                discount=disc,
+                tax_rate=tax_rate,
+                is_tax_inclusive=False,
+                is_interstate=False,
+                gst_enabled=True,
+            )
 
             tot_subtotal += (unit_price * qty)
             tot_discount += disc
-            tot_tax += line_tax
-            tot_grand += line_total
+            tot_tax += tax_calc["total_tax"]
+            tot_grand += tax_calc["line_total"]
 
             parsed_items.append({
                 "product": p,
@@ -249,8 +259,8 @@ class QuotationListView(APIView):
                 "unit_price": unit_price,
                 "discount": disc,
                 "tax_rate": tax_rate,
-                "tax": line_tax,
-                "total": line_total,
+                "tax": tax_calc["total_tax"],
+                "total": tax_calc["line_total"],
                 "hsn_code": hsn_code,
                 "unit": unit,
             })
@@ -324,13 +334,16 @@ class QuotationDetailView(generics.RetrieveUpdateDestroyAPIView):
 class QuotationConvertView(APIView):
     """
     Converts an existing Quotation into an official Transaction + Invoice.
-    Deducts inventory for tracked products and links the quotation.
-    Prevents duplicate conversion.
+    Deducts inventory for tracked products, creates TransactionPayment records,
+    updates customer statistics and credit ledger, and links the quotation.
+    Prevents duplicate conversion and handles concurrency/idempotency.
     """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
         org = request.user.organization
+        idempotency_key = request.headers.get("Idempotency-Key") or request.data.get("idempotency_key")
+
         quotation = get_object_or_404(
             Quotation.objects.select_related("customer", "store").prefetch_related("items__product"),
             id=pk,
@@ -343,17 +356,37 @@ class QuotationConvertView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        payment_method = request.data.get("payment_method", "cash")
+        payment_method = (request.data.get("payment_method") or "cash").lower()
         store = quotation.store or Store.objects.filter(organization=org).first()
 
-        with transaction.atomic():
-            # 1. Generate sequential Invoice Number
-            date_part = timezone.now().strftime("%Y%m%d")
-            seq = secrets.token_hex(3).upper()
-            invoice_number = f"INV-{date_part}-{seq}"
+        config = BusinessConfig.objects.filter(organization=org).first()
+        allow_negative_stock = config.allow_negative_stock if config else False
 
-            # 2. Create Transaction
-            payment_status = "credit" if payment_method == "credit" else "paid"
+        with transaction.atomic():
+            # 1. Validate Stock Availability
+            if not allow_negative_stock:
+                for q_item in quotation.items.all():
+                    if q_item.product and q_item.product.track_inventory:
+                        locked_prod = Product.objects.select_for_update().get(id=q_item.product.id)
+                        if locked_prod.current_stock < q_item.quantity:
+                            raise ValidationError(
+                                f"Insufficient stock for '{locked_prod.name}'. "
+                                f"Available: {locked_prod.current_stock}, Requested: {q_item.quantity}."
+                            )
+
+            # 2. Generate sequential organization-isolated Invoice Number
+            invoice_number = InvoiceNumberService.generate_invoice_number(
+                organization=org,
+                store=store,
+                prefix=config.invoice_prefix if config else "INV",
+            )
+
+            # 3. Create Transaction
+            is_credit = payment_method == "credit"
+            payment_status = "credit" if is_credit else "paid"
+            amount_paid = Decimal("0.00") if is_credit else quotation.total
+            outstanding_amount = quotation.total if is_credit else Decimal("0.00")
+
             tx = Transaction.objects.create(
                 organization=org,
                 store=store,
@@ -367,13 +400,14 @@ class QuotationConvertView(APIView):
                 total=quotation.total,
                 payment_method=payment_method,
                 payment_status=payment_status,
-                amount_paid=quotation.total if payment_status == "paid" else Decimal("0.00"),
-                outstanding_amount=Decimal("0.00") if payment_status == "paid" else quotation.total,
+                amount_paid=amount_paid,
+                outstanding_amount=outstanding_amount,
                 external_source="quotation",
+                external_transaction_id=idempotency_key or "",
                 notes=f"Converted from Quote #{quotation.quotation_number}. {quotation.notes}".strip(),
             )
 
-            # 3. Create TransactionItems and deduct stock
+            # 4. Create TransactionItems and deduct stock
             for q_item in quotation.items.all():
                 prod = q_item.product
                 TransactionItem.objects.create(
@@ -411,7 +445,39 @@ class QuotationConvertView(APIView):
                         notes=f"Converted from Quotation #{quotation.quotation_number}",
                     )
 
-            # 4. Create Invoice
+            # 5. Create Payment Record
+            TransactionPayment.objects.create(
+                organization=org,
+                transaction=tx,
+                payment_method=payment_method,
+                amount=quotation.total,
+                status="success" if not is_credit else "credit",
+                notes=f"Converted from Quote #{quotation.quotation_number}",
+            )
+
+            # 6. Update Customer stats & credit ledger
+            customer = quotation.customer
+            if customer and not customer.is_walk_in:
+                if is_credit:
+                    customer.outstanding_credit += quotation.total
+                    customer.save(update_fields=["outstanding_credit"])
+                    CustomerTimeline.objects.create(
+                        organization=org,
+                        customer=customer,
+                        event_type="credit_sale",
+                        reference_id=str(tx.id),
+                        metadata={"invoice_number": invoice_number, "credit_amount": str(quotation.total)},
+                    )
+                customer.update_stats(tx.total)
+                CustomerTimeline.objects.create(
+                    organization=org,
+                    customer=customer,
+                    event_type="purchase",
+                    reference_id=str(tx.id),
+                    metadata={"invoice_number": invoice_number, "total": str(tx.total)},
+                )
+
+            # 7. Create Invoice Record
             secure_token = secrets.token_urlsafe(24)
             invoice = Invoice.objects.create(
                 organization=org,
@@ -425,21 +491,21 @@ class QuotationConvertView(APIView):
                 web_url=f"/bills/{secure_token}",
             )
 
-            # 5. Link quotation and mark converted
+            # 8. Link quotation and mark converted
             quotation.converted_invoice = invoice
             quotation.converted_at = timezone.now()
             quotation.status = "converted"
             quotation.save(update_fields=["converted_invoice", "converted_at", "status"])
 
-            # 6. Generate PDF
+            # 9. Generate PDF
             try:
                 from apps.invoices.pdf import generate_invoice_pdf
                 pdf_url = generate_invoice_pdf(invoice)
                 if pdf_url:
                     invoice.pdf_url = pdf_url
                     invoice.save(update_fields=["pdf_url"])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("PDF generation failed on quote conversion: %s", e)
 
         return Response(
             {

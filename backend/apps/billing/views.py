@@ -100,7 +100,9 @@ class POSProductSearchView(APIView):
             )
 
         if category and category != "all":
-            products = products.filter(category__iexact=category)
+            products = products.filter(
+                Q(category__name__iexact=category) | Q(category__id__iexact=category)
+            )
 
         if low_stock_only:
             products = products.filter(
@@ -428,12 +430,15 @@ class POSInventoryAdjustView(APIView):
 
     def post(self, request):
         store = request.user.stores.first() if hasattr(request.user, "stores") else None
+        qty_delta = request.data.get("quantity_delta")
+        if qty_delta is None:
+            qty_delta = request.data.get("quantity", 0)
         result = InventoryService.adjust_stock(
             organization=request.user.organization,
             store=store,
             user=request.user,
             product_id=request.data.get("product_id"),
-            quantity_delta=Decimal(str(request.data.get("quantity_delta") or 0)),
+            quantity_delta=Decimal(str(qty_delta)),
             movement_type=request.data.get("movement_type", "ADJUSTMENT"),
             notes=request.data.get("notes", ""),
         )
@@ -447,6 +452,23 @@ class POSPurchaseOrderView(APIView):
         qs = PurchaseOrder.objects.filter(
             organization=request.user.organization
         ).prefetch_related("items__product").order_by("-created_at")
+
+        status_param = request.GET.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param.lower())
+
+        supplier_id = request.GET.get("supplier_id")
+        if supplier_id:
+            qs = qs.filter(Q(supplier_ref_id=supplier_id) | Q(supplier_ref__id=supplier_id))
+
+        search = request.GET.get("search")
+        if search:
+            qs = qs.filter(
+                Q(po_number__icontains=search) |
+                Q(supplier_invoice__icontains=search) |
+                Q(supplier_name__icontains=search)
+            )
+
         serializer = PurchaseOrderSerializer(qs[:100], many=True)
         return Response(serializer.data)
 
@@ -468,10 +490,351 @@ class POSPurchaseOrderView(APIView):
             supplier_id=request.data.get("supplier_id") or request.data.get("supplier_ref"),
             supplier_invoice_number=request.data.get("supplier_invoice_number", ""),
             purchase_date=request.data.get("purchase_date"),
+            expected_delivery=request.data.get("expected_delivery"),
+            due_date=request.data.get("due_date"),
+            status=request.data.get("status", "received"),
             items=request.data.get("items", []),
             notes=request.data.get("notes", ""),
         )
         return Response(result, status=status.HTTP_201_CREATED)
+
+
+class POSPurchaseOrderDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            po = PurchaseOrder.objects.prefetch_related("items__product").get(
+                id=pk, organization=request.user.organization
+            )
+        except PurchaseOrder.DoesNotExist:
+            return Response({"error": "Purchase order not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = PurchaseOrderSerializer(po)
+        return Response(serializer.data)
+
+
+class POSPurchaseOrderReceiveView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            result = InventoryService.receive_purchase_order(
+                organization=request.user.organization,
+                purchase_order_id=str(pk),
+                user=request.user,
+                supplier_invoice_number=request.data.get("supplier_invoice_number"),
+                notes=request.data.get("notes"),
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class POSPurchaseOrderCancelView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            result = InventoryService.cancel_purchase_order(
+                organization=request.user.organization,
+                purchase_order_id=str(pk),
+                user=request.user,
+                reason=request.data.get("reason"),
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class POSManualAdjustmentsListView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        manual_types = ["ADJUSTMENT", "DAMAGE", "LOSS", "FOUND", "CORRECTION", "COUNT_ADJUSTMENT", "OTHER", "OPENING_STOCK"]
+        qs = InventoryMovement.objects.filter(
+            organization=request.user.organization,
+            movement_type__in=manual_types,
+        ).select_related("product", "store", "user").order_by("-created_at")
+
+        product_id = request.GET.get("product_id")
+        if product_id:
+            qs = qs.filter(product_id=product_id)
+
+        movement_type = request.GET.get("movement_type")
+        if movement_type:
+            qs = qs.filter(movement_type=movement_type.upper())
+
+        serializer = InventoryMovementSerializer(qs[:100], many=True)
+        return Response(serializer.data)
+
+
+class POSPaymentLedgerView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from apps.transactions.models import TransactionPayment, CustomerCreditPayment
+        from apps.products.models import SupplierPayment
+
+        org = request.user.organization
+        direction = request.GET.get("direction")  # incoming, outgoing, or all
+        method = request.GET.get("payment_method")
+
+        ledger = []
+
+        # 1. Incoming: Transaction Payments (POS & Invoices)
+        if direction != "outgoing":
+            tx_pays = TransactionPayment.objects.filter(
+                organization=org,
+                status="success",
+            ).select_related("transaction__customer", "transaction__store").order_by("-created_at")[:150]
+            for p in tx_pays:
+                if method and p.payment_method.lower() != method.lower():
+                    continue
+                tx = p.transaction
+                cust = tx.customer.full_name if tx.customer else "Walk-in Customer"
+                ledger.append({
+                    "id": str(p.id),
+                    "date": p.created_at.isoformat(),
+                    "direction": "incoming",
+                    "entity_type": "customer",
+                    "entity_name": cust,
+                    "invoice_or_ref": tx.invoice_number,
+                    "payment_method": p.payment_method.upper(),
+                    "amount": str(p.amount),
+                    "reference": p.reference,
+                    "status": p.status,
+                    "notes": p.notes or f"Payment for invoice {tx.invoice_number}",
+                    "cashier_name": tx.cashier.get_full_name() if tx.cashier else "Staff",
+                })
+
+            # 2. Incoming: Customer Udhaar / Credit Settlements
+            credit_pays = CustomerCreditPayment.objects.filter(
+                organization=org,
+            ).select_related("customer", "received_by").order_by("-created_at")[:100]
+            for cp in credit_pays:
+                if method and cp.payment_method.lower() != method.lower():
+                    continue
+                ledger.append({
+                    "id": str(cp.id),
+                    "date": cp.created_at.isoformat(),
+                    "direction": "incoming",
+                    "entity_type": "customer",
+                    "entity_name": cp.customer.full_name,
+                    "invoice_or_ref": f"Udhaar Settlement ({cp.customer.phone})",
+                    "payment_method": cp.payment_method.upper(),
+                    "amount": str(cp.amount),
+                    "reference": cp.reference,
+                    "status": "success",
+                    "notes": cp.notes or "Credit account settlement",
+                    "cashier_name": cp.received_by.get_full_name() if cp.received_by else "Staff",
+                })
+
+        # 3. Outgoing: Supplier Payments
+        if direction != "incoming":
+            sup_pays = SupplierPayment.objects.filter(
+                organization=org,
+            ).select_related("supplier", "purchase_order", "created_by").order_by("-payment_date", "-created_at")[:100]
+            for sp in sup_pays:
+                if method and sp.payment_method.lower() != method.lower():
+                    continue
+                po_ref = sp.purchase_order.po_number if sp.purchase_order else "Vendor Payout"
+                ledger.append({
+                    "id": str(sp.id),
+                    "date": sp.payment_date.isoformat(),
+                    "direction": "outgoing",
+                    "entity_type": "supplier",
+                    "entity_name": sp.supplier.name,
+                    "invoice_or_ref": po_ref,
+                    "payment_method": sp.payment_method.upper(),
+                    "amount": str(sp.amount),
+                    "reference": sp.reference,
+                    "status": "success",
+                    "notes": sp.notes or f"Supplier payment to {sp.supplier.name}",
+                    "cashier_name": sp.created_by.get_full_name() if sp.created_by else "Staff",
+                })
+
+        # Sort all combined transactions by date descending
+        ledger.sort(key=lambda x: x["date"], reverse=True)
+        return Response(ledger[:150])
+
+
+class POSReceivablesView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from apps.transactions.models import Transaction
+        from django.utils import timezone
+
+        org = request.user.organization
+        now = timezone.now().date()
+
+        unpaid_txs = Transaction.objects.filter(
+            organization=org,
+            status="completed",
+            outstanding_amount__gt=Decimal("0.00"),
+        ).select_related("customer", "store").order_by("-transaction_date")
+
+        results = []
+        for tx in unpaid_txs[:100]:
+            tx_date = tx.transaction_date.date() if hasattr(tx.transaction_date, "date") else tx.transaction_date
+            days_overdue = max(0, (now - tx_date).days)
+            aging_status = "CURRENT"
+            if days_overdue > 30:
+                aging_status = "OVERDUE"
+            elif days_overdue > 7:
+                aging_status = "DUE_SOON"
+
+            results.append({
+                "transaction_id": str(tx.id),
+                "customer_id": str(tx.customer_id) if tx.customer else None,
+                "customer_name": tx.customer.full_name if tx.customer else "Walk-in",
+                "customer_phone": tx.customer.phone if tx.customer else "",
+                "invoice_number": tx.invoice_number,
+                "invoice_date": tx_date.isoformat(),
+                "due_date": tx_date.isoformat(),
+                "total": str(tx.total),
+                "paid": str(tx.amount_paid),
+                "outstanding": str(tx.outstanding_amount),
+                "days_overdue": days_overdue,
+                "status": aging_status,
+                "store_name": tx.store.name if tx.store else "",
+            })
+
+        return Response(results)
+
+
+class POSPayablesView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.utils import timezone
+        org = request.user.organization
+        now = timezone.now().date()
+
+        pos = PurchaseOrder.objects.filter(
+            organization=org,
+            status="received",
+        ).select_related("supplier_ref", "store").order_by("-purchase_date")
+
+        results = []
+        for po in pos:
+            if po.outstanding_amount <= Decimal("0.00"):
+                continue
+            due_d = po.due_date or po.purchase_date
+            days_overdue = max(0, (now - due_d).days) if due_d else 0
+            aging_status = "CURRENT"
+            if days_overdue > 30:
+                aging_status = "OVERDUE"
+            elif days_overdue > 7:
+                aging_status = "DUE_SOON"
+
+            results.append({
+                "po_id": str(po.id),
+                "po_number": po.po_number,
+                "supplier_id": str(po.supplier_ref_id) if po.supplier_ref else None,
+                "supplier_name": po.supplier,
+                "supplier_invoice_number": po.supplier_invoice_number,
+                "purchase_date": po.purchase_date.isoformat() if po.purchase_date else "",
+                "due_date": due_d.isoformat() if due_d else "",
+                "total": str(po.total_amount),
+                "paid": str(po.paid_amount),
+                "outstanding": str(po.outstanding_amount),
+                "days_overdue": days_overdue,
+                "status": aging_status,
+            })
+
+        return Response(results)
+
+
+class POSSupplierPaymentCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from apps.products.models import Supplier, PurchaseOrder, SupplierPayment
+        from django.utils import timezone
+        from rest_framework.exceptions import ValidationError
+
+        supplier_id = request.data.get("supplier_id")
+        po_id = request.data.get("purchase_order_id")
+        amount = Decimal(str(request.data.get("amount") or 0))
+        payment_method = request.data.get("payment_method", "bank_transfer")
+        reference = request.data.get("reference", "")
+        notes = request.data.get("notes", "")
+
+        if amount <= Decimal("0.00"):
+            raise ValidationError("Payment amount must be greater than zero.")
+
+        supplier = Supplier.objects.filter(id=supplier_id, organization=request.user.organization).first()
+        po = None
+        if po_id:
+            po = PurchaseOrder.objects.filter(id=po_id, organization=request.user.organization).first()
+            if not supplier and po and po.supplier_ref:
+                supplier = po.supplier_ref
+
+        if not supplier:
+            raise ValidationError("Valid supplier is required.")
+
+        with transaction.atomic():
+            payment = SupplierPayment.objects.create(
+                organization=request.user.organization,
+                supplier=supplier,
+                purchase_order=po,
+                amount=amount,
+                payment_method=payment_method,
+                payment_date=timezone.now().date(),
+                reference=reference,
+                notes=notes,
+                created_by=request.user,
+            )
+            if po:
+                po.paid_amount += amount
+                po.save(update_fields=["paid_amount"])
+
+        return Response({
+            "id": str(payment.id),
+            "supplier": supplier.name,
+            "amount": str(payment.amount),
+            "payment_method": payment.payment_method,
+            "po_number": po.po_number if po else None,
+        }, status=status.HTTP_201_CREATED)
+
+
+class POSRegisterOperationalReportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from apps.billing.models import CashRegister
+        org = request.user.organization
+        store_id = request.GET.get("store_id")
+
+        qs = CashRegister.objects.filter(organization=org).select_related("store", "cashier")
+        if store_id:
+            qs = qs.filter(store_id=store_id)
+
+        rows = []
+        for reg in qs.order_by("-opened_at")[:50]:
+            expected = reg.calculate_expected_cash()
+            actual = reg.actual_cash or Decimal("0.00")
+            variance = actual - expected if reg.status == "closed" else Decimal("0.00")
+
+            rows.append({
+                "register_id": str(reg.id),
+                "store_name": reg.store.name if reg.store else "Main Store",
+                "cashier_name": reg.cashier.get_full_name() if reg.cashier else "Cashier",
+                "status": reg.status,
+                "opened_at": reg.opened_at.isoformat(),
+                "closed_at": reg.closed_at.isoformat() if reg.closed_at else None,
+                "opening_balance": str(reg.opening_balance),
+                "cash_sales": str(reg.cash_sales),
+                "cash_refunds": str(reg.cash_refunds),
+                "expected_closing_cash": str(expected),
+                "actual_closing_cash": str(actual),
+                "cash_variance": str(variance),
+                "notes": reg.notes,
+            })
+
+        return Response({"registers": rows})
+
 
 
 # POS Reports Views

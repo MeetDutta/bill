@@ -10,7 +10,7 @@ class Invoice(UUIDModel, TenantModel, TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="invoice",
     )
-    invoice_number = models.CharField(max_length=100, unique=True, db_index=True)
+    invoice_number = models.CharField(max_length=100, db_index=True)
     pdf_url = models.URLField(blank=True)
     web_url = models.URLField(blank=True)
     secure_token = models.CharField(max_length=100, unique=True, db_index=True)
@@ -41,6 +41,12 @@ class Invoice(UUIDModel, TenantModel, TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "invoice_number"],
+                name="unique_org_invoice_number",
+            )
+        ]
 
     def __str__(self):
         return f"Invoice {self.invoice_number}"

@@ -116,6 +116,7 @@ class InventoryMovement(UUIDModel, TenantModel, TimeStampedModel):
         ("OPENING_STOCK", "Opening Stock Entry"),
         ("TRANSFER", "Inter-Store Transfer"),
     ]
+    MOVEMENT_TYPES = MOVEMENT_CHOICES
 
     product = models.ForeignKey(
         Product,
@@ -182,8 +183,11 @@ class PurchaseOrder(UUIDModel, TenantModel, TimeStampedModel):
     Supplier purchase order & stock-in document.
     """
     STATUS_CHOICES = [
-        ("received", "Received & Stocked"),
+        ("draft", "Draft"),
+        ("sent", "Sent / Ordered"),
         ("ordered", "Ordered / Pending Delivery"),
+        ("partially_received", "Partially Received"),
+        ("received", "Received & Stocked"),
         ("cancelled", "Cancelled"),
     ]
 
@@ -203,7 +207,10 @@ class PurchaseOrder(UUIDModel, TenantModel, TimeStampedModel):
         related_name="purchase_orders",
     )
     purchase_date = models.DateField(default=timezone.now)
+    expected_delivery = models.DateField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="received")
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(
@@ -243,11 +250,59 @@ class PurchaseOrder(UUIDModel, TenantModel, TimeStampedModel):
     def supplier_invoice_number(self, val):
         self.supplier_invoice = val
 
+    @property
+    def outstanding_amount(self):
+        return max(Decimal("0.00"), self.total_amount - self.paid_amount)
+
+    @property
+    def payment_status(self):
+        if self.paid_amount >= self.total_amount and self.total_amount > Decimal("0.00"):
+            return "paid"
+        elif self.paid_amount > Decimal("0.00"):
+            return "partial"
+        return "unpaid"
+
     class Meta:
         ordering = ["-purchase_date", "-created_at"]
 
     def __str__(self):
         return f"PO #{self.po_number} - {self.supplier} (₹{self.total_amount})"
+
+
+class SupplierPayment(UUIDModel, TenantModel, TimeStampedModel):
+    """
+    Payments made to suppliers for purchase orders.
+    """
+    supplier = models.ForeignKey(
+        Supplier,
+        on_delete=models.CASCADE,
+        related_name="payments",
+    )
+    purchase_order = models.ForeignKey(
+        PurchaseOrder,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments",
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    payment_method = models.CharField(max_length=50, default="bank_transfer")  # cash, bank_transfer, upi, cheque, other
+    payment_date = models.DateField(default=timezone.now)
+    reference = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["-payment_date", "-created_at"]
+
+    def __str__(self):
+        return f"Supplier Payment: ₹{self.amount} to {self.supplier.name}"
+
 
 
 class PurchaseOrderItem(UUIDModel, TimeStampedModel):

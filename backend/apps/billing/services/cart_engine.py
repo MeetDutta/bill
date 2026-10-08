@@ -97,7 +97,7 @@ class CartEngine:
         else:
             pre_round = max(Decimal("0.00"), raw_subtotal - total_discount + total_tax)
 
-        rounded_total = Decimal(str(round(float(pre_round), 0))).quantize(Decimal("0.01"))
+        rounded_total = pre_round.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))
         round_off = round_decimal(rounded_total - pre_round)
 
         return {

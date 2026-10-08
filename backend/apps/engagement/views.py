@@ -104,9 +104,12 @@ class EngagementDashboardView(APIView):
         inactive_qs=qs.filter(last_purchase_at__lt=now-timedelta(days=60))
         vip_qs=qs.filter(total_spend__gte=10000)
         birthdays=qs.filter(date_of_birth__month=now.month,date_of_birth__day=now.day)
-        rewards=0
-        try: rewards=LoyaltyAccount.objects.filter(organization=org,balance__gt=0).count()
-        except Exception: pass
+        rewards = 0
+        try:
+            rewards = LoyaltyAccount.objects.filter(organization=org, balance__gt=0).count()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Failed to count active loyalty accounts: %s", e)
         reviews=Review.objects.filter(organization=org)
         return Response({
             "opportunities":[

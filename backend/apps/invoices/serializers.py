@@ -157,8 +157,8 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
         return LoyaltyTierService.get_customer_tier(cust)
 
     def get_portal_token(self, obj):
-        cust = obj.transaction.customer
-        return cust.portal_token if cust else None
+        # Security: Do not expose customer portal credentials over public invoices
+        return None
 
     def get_smart_offer(self, obj):
         from apps.coupons.models import Coupon

@@ -10,8 +10,12 @@ from apps.products.models import Product, InventoryMovement
 from apps.transactions.models import Transaction, TransactionItem, TransactionPayment
 from apps.customers.models import Customer, CustomerTimeline
 from apps.customers.utils import normalize_phone
+import logging
 from apps.invoices.models import Invoice
 from .cart_engine import CartEngine, round_decimal
+from .invoice_number_service import InvoiceNumberService
+
+logger = logging.getLogger(__name__)
 
 
 class CheckoutService:
@@ -287,10 +291,11 @@ class CheckoutService:
                                 )
 
             # 8b. Safe Sequential Invoice Number Generation
-            prefix = config.invoice_prefix or "INV"
-            date_part = timezone.now().strftime("%Y%m%d")
-            seq = secrets.token_hex(3).upper()
-            invoice_number = f"{prefix}-{date_part}-{seq}"
+            invoice_number = InvoiceNumberService.generate_invoice_number(
+                organization=organization,
+                store=store,
+                prefix=config.invoice_prefix,
+            )
 
             # 8c. Create Transaction
             primary_method = parsed_payments[0]["payment_method"] if parsed_payments else "cash"
@@ -429,21 +434,21 @@ class CheckoutService:
         try:
             from apps.invoices.tasks import generate_invoice_task
             generate_invoice_task.delay(str(tx.id))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to enqueue generate_invoice_task: %s", e)
 
         try:
             from apps.loyalty.tasks import calculate_loyalty_task
             calculate_loyalty_task.delay(str(tx.id), str(organization.id))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to enqueue calculate_loyalty_task: %s", e)
 
         if config.auto_send_digital_bill:
             try:
                 from apps.whatsapp.tasks import send_digital_bill_task
                 send_digital_bill_task.delay(str(tx.id))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to enqueue send_digital_bill_task: %s", e)
 
         return cls._format_checkout_response(tx)
 

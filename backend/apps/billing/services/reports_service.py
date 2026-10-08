@@ -43,7 +43,9 @@ class ReportsService:
                 e_d = datetime.strptime(end_date, "%Y-%m-%d").date()
                 start_dt = timezone.make_aware(datetime.combine(s_d, time.min))
                 end_dt = timezone.make_aware(datetime.combine(e_d, time.max))
-            except Exception:
+            except (ValueError, TypeError) as e:
+                import logging
+                logging.getLogger(__name__).warning("Invalid date format in reports query (%s, %s): %s. Falling back to today.", start_date, end_date, e)
                 start_dt = timezone.make_aware(datetime.combine(today, time.min))
                 end_dt = timezone.make_aware(datetime.combine(today, time.max))
         else:

@@ -39,6 +39,9 @@ class ReturnService:
         except Transaction.DoesNotExist:
             raise ValidationError("Original transaction not found.")
 
+        if original_tx.status in ["cancelled", "refunded"]:
+            raise ValidationError(f"Cannot process return on a transaction with status '{original_tx.status}'.")
+
         if not items_to_return:
             raise ValidationError("No items specified for return.")
 
@@ -69,9 +72,11 @@ class ReturnService:
                     f"Max returnable: {available_to_return}."
                 )
 
-            # Pro-rated refund calculation
-            item_unit_net = round_decimal(tx_item.total / tx_item.quantity)
-            item_refund_total = round_decimal(item_unit_net * qty_to_return)
+            # High-precision pro-rated refund calculation
+            if qty_to_return == tx_item.quantity and tx_item.returned_quantity == Decimal("0.00"):
+                item_refund_total = tx_item.total
+            else:
+                item_refund_total = round_decimal((tx_item.total * qty_to_return) / tx_item.quantity)
 
             # Proportionate tax refund
             item_tax_rate = tx_item.tax_rate
