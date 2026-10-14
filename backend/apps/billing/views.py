@@ -303,6 +303,19 @@ class POSReturnProcessView(APIView):
             notes=request.data.get("notes", ""),
             restock_inventory=request.data.get("restock_inventory", True),
         )
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=request.user.organization,
+                event_type="return_completed",
+                payload={
+                    "return_number": result.get("return_number"),
+                    "refund_amount": str(result.get("total_refund_amount", "0.00")),
+                    "refund_method": request.data.get("refund_method", "cash"),
+                },
+            )
+        except Exception:
+            pass
         return Response(result, status=status.HTTP_201_CREATED)
 
 
@@ -322,6 +335,21 @@ class POSCreditPaymentView(APIView):
             transaction_id=request.data.get("transaction_id"),
             store=store,
         )
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=request.user.organization,
+                store=store,
+                event_type="payment_recorded",
+                payload={
+                    "customer_id": str(request.data.get("customer_id")),
+                    "amount": str(request.data.get("amount")),
+                    "payment_method": request.data.get("payment_method", "cash"),
+                    "remaining_balance": str(result.get("remaining_balance", "0.00")),
+                },
+            )
+        except Exception:
+            pass
         return Response(result, status=status.HTTP_201_CREATED)
 
 
@@ -442,6 +470,20 @@ class POSInventoryAdjustView(APIView):
             movement_type=request.data.get("movement_type", "ADJUSTMENT"),
             notes=request.data.get("notes", ""),
         )
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=request.user.organization,
+                store=store,
+                event_type="stock_adjusted",
+                payload={
+                    "product_id": str(request.data.get("product_id")),
+                    "quantity_delta": str(qty_delta),
+                    "movement_type": request.data.get("movement_type", "ADJUSTMENT"),
+                },
+            )
+        except Exception:
+            pass
         return Response(result, status=status.HTTP_201_CREATED)
 
 
@@ -525,6 +567,18 @@ class POSPurchaseOrderReceiveView(APIView):
                 supplier_invoice_number=request.data.get("supplier_invoice_number"),
                 notes=request.data.get("notes"),
             )
+            try:
+                from apps.billing.services.realtime_service import RealtimeService
+                RealtimeService.publish_event(
+                    organization=request.user.organization,
+                    event_type="purchase_received",
+                    payload={
+                        "po_id": str(pk),
+                        "supplier_invoice_number": request.data.get("supplier_invoice_number"),
+                    },
+                )
+            except Exception:
+                pass
             return Response(result, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -926,3 +980,138 @@ class POSDailyClosingReportView(APIView):
             store_id=request.GET.get("store_id"),
         )
         return Response(result)
+
+
+class POSRealtimeTicketView(APIView):
+    """
+    Issues a short-lived (60s) single-use stream ticket for authenticated users
+    to prevent exposing long-lived JWT access tokens in SSE query parameters.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from django.core.cache import cache
+        ticket = f"stkt_{secrets.token_urlsafe(32)}"
+        cache.set(
+            f"sse_ticket:{ticket}",
+            {"user_id": str(request.user.id), "org_id": str(request.user.organization.id)},
+            timeout=60,
+        )
+        return Response({"ticket": ticket, "expires_in": 60})
+
+
+class POSRealtimeEventStreamView(APIView):
+    """
+    Server-Sent Events (SSE) streaming endpoint for live dashboard & POS synchronization.
+    Supports secure single-use stream ticket, standard Bearer header, or JWT query token,
+    replay from Last-Event-ID, and automatic keepalive comments.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        import json
+        import time
+        from django.http import StreamingHttpResponse
+        from apps.billing.models import RealtimeEvent
+
+        user = request.user
+        ticket = request.GET.get("ticket")
+        if ticket:
+            from django.core.cache import cache
+            cached_data = cache.get(f"sse_ticket:{ticket}")
+            if cached_data:
+                cache.delete(f"sse_ticket:{ticket}")  # Single use
+                from apps.users.models import User
+                try:
+                    user = User.objects.get(id=cached_data["user_id"], is_active=True)
+                except User.DoesNotExist:
+                    user = None
+
+        if not user or not user.is_authenticated:
+            token = request.GET.get("token")
+            if token:
+                from rest_framework_simplejwt.authentication import JWTAuthentication
+                try:
+                    jwt_auth = JWTAuthentication()
+                    validated_token = jwt_auth.get_validated_token(token)
+                    user = jwt_auth.get_user(validated_token)
+                except Exception:
+                    user = None
+
+        if not user or not user.is_authenticated:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        org = user.organization
+        last_id = request.headers.get("Last-Event-ID") or request.GET.get("last_id")
+
+        def event_stream():
+            last_check = timezone.now()
+            seen_ids = set()
+
+            # If last_id provided, replay events since then
+            if last_id:
+                try:
+                    prior_event = RealtimeEvent.objects.filter(id=last_id, organization=org).first()
+                    if prior_event:
+                        replays = RealtimeEvent.objects.filter(
+                            organization=org,
+                            created_at__gt=prior_event.created_at,
+                        ).order_by("created_at")[:50]
+                        for ev in replays:
+                            seen_ids.add(str(ev.id))
+                            data_json = json.dumps(ev.payload)
+                            yield f"id: {ev.id}\nevent: {ev.event_type}\ndata: {data_json}\n\n"
+                except Exception:
+                    pass
+
+            yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'organization': org.name})}\n\n"
+
+            # 40-second active stream loop before client safely reconnects
+            start_time = time.time()
+            while time.time() - start_time < 40:
+                events = RealtimeEvent.objects.filter(
+                    organization=org,
+                    created_at__gt=last_check,
+                ).order_by("created_at")[:20]
+
+                for ev in events:
+                    if str(ev.id) not in seen_ids:
+                        seen_ids.add(str(ev.id))
+                        data_json = json.dumps(ev.payload)
+                        yield f"id: {ev.id}\nevent: {ev.event_type}\ndata: {data_json}\n\n"
+
+                last_check = timezone.now()
+                yield ":keepalive\n\n"
+                time.sleep(2)
+
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+
+class POSRealtimeRecentEventsView(APIView):
+    """
+    Returns recent events for fast initial hydration or polling fallback.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from apps.billing.models import RealtimeEvent
+        org = request.user.organization
+        since = request.GET.get("since")
+        qs = RealtimeEvent.objects.filter(organization=org)
+        if since:
+            qs = qs.filter(created_at__gt=since)
+        events = qs.order_by("-created_at")[:50]
+        data = [
+            {
+                "id": str(e.id),
+                "event_type": e.event_type,
+                "payload": e.payload,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in reversed(list(events))
+        ]
+        return Response(data)
+

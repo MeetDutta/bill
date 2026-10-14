@@ -117,6 +117,32 @@ export interface GrowthPoint {
   total_customers: number;
 }
 
+export interface PaymentMethodBreakdownItem {
+  payment_method: string;
+  total: number;
+  count: number;
+  percentage: number;
+}
+
+export interface HourlySalesItem {
+  hour: number;
+  time_label: string;
+  sales: number;
+  count: number;
+}
+
+export interface LiveSalesActivityItem {
+  id: string;
+  invoice_number: string;
+  time: string;
+  customer: string;
+  cashier: string;
+  amount: number;
+  payment_status: string;
+  payment_methods: string[];
+  items_count: number;
+}
+
 export interface DashboardData {
   total_revenue: string;
   total_transactions: number;
@@ -129,6 +155,20 @@ export interface DashboardData {
   has_customer_data: boolean;
   revenue_trend: TrendPoint[];
   customer_growth: GrowthPoint[];
+  today_gross_sales?: number;
+  today_discounts?: number;
+  today_taxes?: number;
+  today_returns?: number;
+  today_net_sales?: number;
+  today_transactions_count?: number;
+  today_collected?: number;
+  today_outstanding?: number;
+  low_stock_count?: number;
+  pending_invoices_count?: number;
+  estimated_gross_profit?: number;
+  payment_methods_breakdown?: PaymentMethodBreakdownItem[];
+  hourly_sales?: HourlySalesItem[];
+  live_sales_activity?: LiveSalesActivityItem[];
 }
 
 export interface PaginatedResponse<T> {

@@ -1082,6 +1082,12 @@ export default function POSPage() {
                     ₹{remainingDue.toFixed(2)}
                   </span>
                 </div>
+                {totalPaidSoFar > grandTotalNum && (
+                  <div className="flex justify-between font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded mt-1">
+                    <span>Cash Change:</span>
+                    <span>₹{(totalPaidSoFar - grandTotalNum).toFixed(2)}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1166,8 +1172,14 @@ export default function POSPage() {
                   {Number(completedSale.discount) > 0 && <p>Discount: -₹{completedSale.discount}</p>}
                   <p>Tax: ₹{completedSale.tax}</p>
                   <p className="font-bold text-sm">Grand Total: ₹{completedSale.total}</p>
+                  {completedSale.tendered_amount && Number(completedSale.tendered_amount) > Number(completedSale.total) && (
+                    <p className="text-xs text-muted-foreground">Tendered: ₹{completedSale.tendered_amount}</p>
+                  )}
+                  {completedSale.change_amount && Number(completedSale.change_amount) > 0 && (
+                    <p className="text-xs font-bold text-amber-600">Change Returned: ₹{completedSale.change_amount}</p>
+                  )}
                   <p className="text-[10px] text-muted-foreground uppercase">
-                    Paid via {completedSale.payment_method}
+                    Paid via {completedSale.payments?.map((p: any) => `${p.payment_method}: ₹${p.amount}`).join(", ") || completedSale.payment_method}
                   </p>
                 </div>
                 <div className="text-center border-t mt-2 pt-1 text-[10px]">

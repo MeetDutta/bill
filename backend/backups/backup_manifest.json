@@ -1,0 +1,97 @@
+{
+  "last_backup": {
+    "filename": "unit_test_backup.dump",
+    "timestamp": "2026-10-14T05:28:41.743193+00:00",
+    "size_bytes": 102400,
+    "status": "success",
+    "database_name": "digitalbill_db",
+    "checksum": "",
+    "error_message": ""
+  },
+  "last_verified_restoration": {
+    "backup_filename": "unit_test_backup.dump",
+    "timestamp": "2026-10-14T05:28:41.745507+00:00",
+    "duration_seconds": 0.85,
+    "status": "verified",
+    "verified_records": {
+      "transactions": 5,
+      "invoices": 5
+    },
+    "error_message": ""
+  },
+  "backups": [
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-14T05:28:41.743193+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-14T05:17:05.794580+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-14T04:36:35.956059+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-14T04:36:11.567697+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-14T04:35:00.114094+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-14T04:33:42.379098+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-14T04:27:55.560973+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "billmeet_backup_20261014_040020.dump",
+      "timestamp": "2026-10-14T04:00:21.152902+00:00",
+      "size_bytes": 398188,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "6dceaca85a536c3ebe1004d54cd052d7d32ff95f067785d4fb9a57366c65924e",
+      "error_message": ""
+    }
+  ],
+  "retention_days": 7
+}

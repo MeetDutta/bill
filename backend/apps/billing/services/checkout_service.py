@@ -1,7 +1,7 @@
 import uuid
 import secrets
 from decimal import Decimal
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -156,7 +156,16 @@ class CheckoutService:
         # 6. Customer Identification
         customer_info = cart_data.get("customer") or {}
         customer = None
-        is_walk_in = cart_data.get("is_walk_in", False) or not bool(customer_info.get("phone"))
+        customer_id = customer_info.get("id")
+        if customer_id:
+            customer = Customer.objects.filter(organization=organization, id=customer_id).first()
+
+        is_walk_in = cart_data.get("is_walk_in", False)
+        if not customer:
+            if is_walk_in or not bool(customer_info.get("phone")):
+                is_walk_in = True
+            else:
+                is_walk_in = False
 
         if is_walk_in:
             # Walk-in customer strategy: Single tenant-scoped walk-in record or null
@@ -164,31 +173,38 @@ class CheckoutService:
                 raise ValidationError("Customer information is required for this business.")
             customer = Customer.objects.filter(organization=organization, is_walk_in=True).first()
             if not customer:
-                customer = Customer.objects.create(
-                    organization=organization,
-                    customer_id=f"WALKIN-{secrets.token_hex(4).upper()}",
-                    first_name="Walk-in",
-                    last_name="Customer",
-                    phone=f"walkin-{organization.id.hex[:6]}",
-                    is_walk_in=True,
-                    source="pos",
-                )
-        else:
+                try:
+                    customer = Customer.objects.create(
+                        organization=organization,
+                        customer_id=f"WALKIN-{secrets.token_hex(4).upper()}",
+                        first_name="Walk-in",
+                        last_name="Customer",
+                        phone=f"walkin-{organization.id.hex[:6]}",
+                        is_walk_in=True,
+                        source="pos",
+                    )
+                except IntegrityError:
+                    customer = Customer.objects.filter(organization=organization, is_walk_in=True).first()
+        elif not customer:
             raw_phone = customer_info.get("phone", "")
             phone = normalize_phone(raw_phone)
             if not phone:
                 raise ValidationError("A valid customer phone number is required.")
 
-            customer, created = Customer.objects.get_or_create(
-                organization=organization,
-                phone=phone,
-                defaults={
-                    "first_name": customer_info.get("first_name") or customer_info.get("name", "Customer").split()[0],
-                    "last_name": customer_info.get("last_name") or " ".join(customer_info.get("name", "").split()[1:]),
-                    "email": customer_info.get("email", ""),
-                    "source": "pos",
-                },
-            )
+            try:
+                customer, created = Customer.objects.get_or_create(
+                    organization=organization,
+                    phone=phone,
+                    defaults={
+                        "first_name": customer_info.get("first_name") or customer_info.get("name", "Customer").split()[0],
+                        "last_name": customer_info.get("last_name") or " ".join(customer_info.get("name", "").split()[1:]),
+                        "email": customer_info.get("email", ""),
+                        "source": "pos",
+                    },
+                )
+            except IntegrityError:
+                customer = Customer.objects.filter(organization=organization, phone=phone).first()
+                created = False
             if created:
                 from apps.loyalty.models import LoyaltyAccount
                 LoyaltyAccount.objects.get_or_create(
@@ -236,6 +252,40 @@ class CheckoutService:
                 f"Payment amount (₹{total_paid_tendered}) is less than bill total (₹{grand_total})."
             )
 
+        # Handle Cash Change & Excess Tender
+        cash_change = Decimal("0.00")
+        if total_paid_tendered > grand_total:
+            excess = total_paid_tendered - grand_total
+            if cash_paid >= excess:
+                cash_change = excess
+            else:
+                raise ValidationError(
+                    f"Overpayment of ₹{excess} is only permitted in Cash (change return). "
+                    f"Total electronic payment cannot exceed the payable amount."
+                )
+
+        # Build applied payment allocations (deducting cash change so allocations sum to amount_paid)
+        applied_payments = []
+        remaining_change = cash_change
+        for p in parsed_payments:
+            p_amt = p["amount"]
+            p_notes = p["notes"]
+            if p["payment_method"] == "cash" and remaining_change > Decimal("0.00"):
+                deduction = min(p_amt, remaining_change)
+                p_amt = p_amt - deduction
+                remaining_change -= deduction
+                p_notes = (p_notes + f" [Tendered: ₹{p['amount']}, Change: ₹{deduction}]").strip()
+
+            if p_amt > Decimal("0.00") or p["payment_method"] == "cash":
+                applied_payments.append({
+                    "payment_method": p["payment_method"],
+                    "amount": p_amt,
+                    "reference": p["reference"],
+                    "notes": p_notes,
+                })
+
+        cash_applied = cash_paid - cash_change
+
         # Credit validation
         if credit_amount > Decimal("0.00"):
             if not config.allow_credit_sales:
@@ -265,172 +315,208 @@ class CheckoutService:
             outstanding_amount = Decimal("0.00")
 
         # 8. ATOMIC DATABASE EXECUTION
-        with transaction.atomic():
-            # 8a. Lock & Validate Products Stock
-            db_products = {}
-            p_ids_to_lock = [item["product"].id for item in prepared_items if item.get("product")]
-            if p_ids_to_lock:
-                locked_qs = Product.objects.select_for_update().filter(
-                    organization=organization,
-                    id__in=p_ids_to_lock,
-                )
-                for lp in locked_qs:
-                    db_products[lp.id] = lp
+        try:
+            with transaction.atomic():
+                # 8a. Lock & Validate Products Stock
+                db_products = {}
+                p_ids_to_lock = [item["product"].id for item in prepared_items if item.get("product")]
+                if p_ids_to_lock:
+                    locked_qs = Product.objects.select_for_update().filter(
+                        organization=organization,
+                        id__in=p_ids_to_lock,
+                    )
+                    for lp in locked_qs:
+                        db_products[lp.id] = lp
 
-            # Validate stock availability
-            if not config.allow_negative_stock:
-                for item in prepared_items:
-                    prod = item.get("product")
+                # Validate stock availability
+                if not config.allow_negative_stock:
+                    for item in prepared_items:
+                        prod = item.get("product")
+                        if prod and prod.id in db_products:
+                            locked_prod = db_products[prod.id]
+                            if locked_prod.track_inventory:
+                                if locked_prod.current_stock < item["quantity"]:
+                                    raise ValidationError(
+                                        f"Insufficient stock for '{locked_prod.name}'. "
+                                        f"Available: {locked_prod.current_stock}, Requested: {item['quantity']}."
+                                    )
+
+                # 8b. Safe Sequential Invoice Number Generation
+                invoice_number = InvoiceNumberService.generate_invoice_number(
+                    organization=organization,
+                    store=store,
+                    prefix=config.invoice_prefix,
+                )
+
+                # 8c. Create Transaction
+                primary_method = parsed_payments[0]["payment_method"] if parsed_payments else "cash"
+                tx = Transaction.objects.create(
+                    organization=organization,
+                    store=store,
+                    customer=customer,
+                    cashier=user if getattr(user, "is_authenticated", False) else None,
+                    invoice_number=invoice_number,
+                    transaction_date=timezone.now(),
+                    subtotal=cart_calc["subtotal"],
+                    discount=cart_calc["total_discount"],
+                    tax=cart_calc["tax"],
+                    round_off=cart_calc["round_off"],
+                    total=grand_total,
+                    payment_method=primary_method,
+                    payment_status=payment_status,
+                    amount_paid=amount_paid,
+                    outstanding_amount=outstanding_amount,
+                    tendered_amount=total_paid_tendered,
+                    change_amount=cash_change,
+                    due_date=cart_data.get("due_date"),
+                    tax_breakup=cart_calc["tax_breakup"],
+                    external_source="pos",
+                    external_transaction_id=idempotency_key or "",
+                )
+
+                # 8d. Create Transaction Items & Deduct Inventory
+                for calc_item in cart_calc["items"]:
+                    prod = calc_item.get("product")
+                    t_item = TransactionItem.objects.create(
+                        transaction=tx,
+                        product=prod,
+                        external_product_id=str(prod.id) if prod else "",
+                        name=calc_item["name"],
+                        quantity=calc_item["quantity"],
+                        unit_price=calc_item["unit_price"],
+                        discount=calc_item["discount"],
+                        tax=calc_item["tax"],
+                        tax_rate=calc_item["tax_rate"],
+                        cgst_amount=calc_item["cgst_amount"],
+                        sgst_amount=calc_item["sgst_amount"],
+                        igst_amount=calc_item["igst_amount"],
+                        total=calc_item["total"],
+                        hsn_code=calc_item["hsn_code"],
+                        attributes=calc_item.get("attributes", {}),
+                    )
+
+                    # Deduct inventory & record movement
                     if prod and prod.id in db_products:
                         locked_prod = db_products[prod.id]
                         if locked_prod.track_inventory:
-                            if locked_prod.current_stock < item["quantity"]:
-                                raise ValidationError(
-                                    f"Insufficient stock for '{locked_prod.name}'. "
-                                    f"Available: {locked_prod.current_stock}, Requested: {item['quantity']}."
-                                )
+                            prev_stock = locked_prod.current_stock
+                            new_stock = prev_stock - calc_item["quantity"]
+                            locked_prod.current_stock = new_stock
+                            locked_prod.save(update_fields=["current_stock"])
 
-            # 8b. Safe Sequential Invoice Number Generation
-            invoice_number = InvoiceNumberService.generate_invoice_number(
-                organization=organization,
-                store=store,
-                prefix=config.invoice_prefix,
-            )
+                            InventoryMovement.objects.create(
+                                organization=organization,
+                                product=locked_prod,
+                                store=store,
+                                user=user if getattr(user, "is_authenticated", False) else None,
+                                movement_type="SALE",
+                                quantity=-calc_item["quantity"],
+                                previous_stock=prev_stock,
+                                new_stock=new_stock,
+                                reference_type="transaction",
+                                reference_id=str(tx.id),
+                                notes=f"POS Sale Invoice #{invoice_number}",
+                            )
 
-            # 8c. Create Transaction
-            primary_method = parsed_payments[0]["payment_method"] if parsed_payments else "cash"
-            tx = Transaction.objects.create(
-                organization=organization,
-                store=store,
-                customer=customer,
-                cashier=user if getattr(user, "is_authenticated", False) else None,
-                invoice_number=invoice_number,
-                transaction_date=timezone.now(),
-                subtotal=cart_calc["subtotal"],
-                discount=cart_calc["total_discount"],
-                tax=cart_calc["tax"],
-                round_off=cart_calc["round_off"],
-                total=grand_total,
-                payment_method=primary_method,
-                payment_status=payment_status,
-                amount_paid=amount_paid,
-                outstanding_amount=outstanding_amount,
-                due_date=cart_data.get("due_date"),
-                tax_breakup=cart_calc["tax_breakup"],
-                external_source="pos",
-                external_transaction_id=idempotency_key or "",
-            )
+                # 8e. Create Transaction Payment Records
+                for p in applied_payments:
+                    TransactionPayment.objects.create(
+                        organization=organization,
+                        transaction=tx,
+                        payment_method=p["payment_method"],
+                        amount=p["amount"],
+                        reference=p["reference"],
+                        notes=p["notes"],
+                        status="success",
+                    )
 
-            # 8d. Create Transaction Items & Deduct Inventory
-            for calc_item in cart_calc["items"]:
-                prod = calc_item.get("product")
-                t_item = TransactionItem.objects.create(
-                    transaction=tx,
-                    product=prod,
-                    external_product_id=str(prod.id) if prod else "",
-                    name=calc_item["name"],
-                    quantity=calc_item["quantity"],
-                    unit_price=calc_item["unit_price"],
-                    discount=calc_item["discount"],
-                    tax=calc_item["tax"],
-                    tax_rate=calc_item["tax_rate"],
-                    cgst_amount=calc_item["cgst_amount"],
-                    sgst_amount=calc_item["sgst_amount"],
-                    igst_amount=calc_item["igst_amount"],
-                    total=calc_item["total"],
-                    hsn_code=calc_item["hsn_code"],
-                    attributes=calc_item.get("attributes", {}),
-                )
+                # 8f. Update Customer Outstanding & Stats
+                if customer and not customer.is_walk_in:
+                    if credit_amount > Decimal("0.00"):
+                        customer.outstanding_credit += credit_amount
+                        customer.save(update_fields=["outstanding_credit"])
 
-                # Deduct inventory & record movement
-                if prod and prod.id in db_products:
-                    locked_prod = db_products[prod.id]
-                    if locked_prod.track_inventory:
-                        prev_stock = locked_prod.current_stock
-                        new_stock = prev_stock - calc_item["quantity"]
-                        locked_prod.current_stock = new_stock
-                        locked_prod.save(update_fields=["current_stock"])
-
-                        InventoryMovement.objects.create(
+                        CustomerTimeline.objects.create(
                             organization=organization,
-                            product=locked_prod,
-                            store=store,
-                            user=user if getattr(user, "is_authenticated", False) else None,
-                            movement_type="SALE",
-                            quantity=-calc_item["quantity"],
-                            previous_stock=prev_stock,
-                            new_stock=new_stock,
-                            reference_type="transaction",
+                            customer=customer,
+                            event_type="credit_sale",
                             reference_id=str(tx.id),
-                            notes=f"POS Sale Invoice #{invoice_number}",
+                            metadata={
+                                "invoice_number": tx.invoice_number,
+                                "credit_amount": str(credit_amount),
+                                "total": str(tx.total),
+                            },
                         )
 
-            # 8e. Create Transaction Payment Records
-            for p in parsed_payments:
-                TransactionPayment.objects.create(
-                    organization=organization,
-                    transaction=tx,
-                    payment_method=p["payment_method"],
-                    amount=p["amount"],
-                    reference=p["reference"],
-                    notes=p["notes"],
-                    status="success",
-                )
-
-            # 8f. Update Customer Outstanding & Stats
-            if customer and not customer.is_walk_in:
-                if credit_amount > Decimal("0.00"):
-                    customer.outstanding_credit += credit_amount
-                    customer.save(update_fields=["outstanding_credit"])
-
+                    customer.update_stats(tx.total)
+                    event_type = "repeat_purchase" if customer.total_purchases > 1 else "purchase"
                     CustomerTimeline.objects.create(
                         organization=organization,
                         customer=customer,
-                        event_type="credit_sale",
+                        event_type=event_type,
                         reference_id=str(tx.id),
-                        metadata={
-                            "invoice_number": tx.invoice_number,
-                            "credit_amount": str(credit_amount),
-                            "total": str(tx.total),
-                        },
+                        metadata={"invoice_number": tx.invoice_number, "total": str(tx.total)},
                     )
 
-                customer.update_stats(tx.total)
-                event_type = "repeat_purchase" if customer.total_purchases > 1 else "purchase"
-                CustomerTimeline.objects.create(
+                # 8g. Create Invoice Record
+                secure_token = secrets.token_urlsafe(24)
+                invoice_type = "gst" if config.gst_enabled else "non_gst"
+                invoice = Invoice.objects.create(
                     organization=organization,
-                    customer=customer,
-                    event_type=event_type,
-                    reference_id=str(tx.id),
-                    metadata={"invoice_number": tx.invoice_number, "total": str(tx.total)},
+                    transaction=tx,
+                    invoice_number=invoice_number,
+                    invoice_type=invoice_type,
+                    template_format=config.default_invoice_format or "a4",
+                    terms_and_conditions=config.invoice_terms_and_conditions or "",
+                    custom_notes=config.invoice_footer or "",
+                    secure_token=secure_token,
+                    web_url=f"/bills/{secure_token}",
                 )
 
-            # 8g. Create Invoice Record
-            secure_token = secrets.token_urlsafe(24)
-            invoice_type = "gst" if config.gst_enabled else "non_gst"
-            invoice = Invoice.objects.create(
-                organization=organization,
-                transaction=tx,
-                invoice_number=invoice_number,
-                invoice_type=invoice_type,
-                template_format=config.default_invoice_format or "a4",
-                terms_and_conditions=config.invoice_terms_and_conditions or "",
-                custom_notes=config.invoice_footer or "",
-                secure_token=secure_token,
-                web_url=f"/bills/{secure_token}",
-            )
+                # 8h. Update Open Cash Register if Cash Payment Involved
+                if cash_applied > Decimal("0.00") and store:
+                    active_register = CashRegister.objects.filter(
+                        organization=organization,
+                        store=store,
+                        status="open",
+                    ).first()
+                    if active_register:
+                        active_register.record_sale(cash_applied)
 
-            # 8h. Update Open Cash Register if Cash Payment Involved
-            if cash_paid > Decimal("0.00") and store:
-                active_register = CashRegister.objects.filter(
+        except IntegrityError:
+            if idempotency_key:
+                existing = Transaction.objects.filter(
                     organization=organization,
-                    store=store,
-                    status="open",
-                ).first()
-                if active_register:
-                    active_register.record_sale(cash_paid)
+                    external_transaction_id=idempotency_key,
+                ).select_related("invoice", "customer", "store").first()
+                if existing:
+                    return cls._format_checkout_response(existing)
+            raise
 
         # 9. Asynchronous Pipeline / Background Tasks
+        try:
+            from .realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=organization,
+                store=store,
+                event_type="sale_completed",
+                payload={
+                    "transaction_id": str(tx.id),
+                    "invoice_number": tx.invoice_number,
+                    "total": str(tx.total),
+                    "amount_paid": str(tx.amount_paid),
+                    "tendered_amount": str(tx.tendered_amount),
+                    "change_amount": str(tx.change_amount),
+                    "payment_status": tx.payment_status,
+                    "payment_method": tx.payment_method,
+                    "cashier": tx.cashier.get_full_name() if tx.cashier else "Staff",
+                    "customer_name": tx.customer.full_name if tx.customer else "Walk-in",
+                    "items_count": tx.items.count(),
+                    "created_at": tx.transaction_date.isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.warning("Failed to publish sale_completed realtime event: %s", e)
         try:
             from apps.invoices.tasks import generate_invoice_task
             generate_invoice_task.delay(str(tx.id))
@@ -507,6 +593,8 @@ class CheckoutService:
             "total": str(tx.total),
             "amount_paid": str(tx.amount_paid),
             "outstanding_amount": str(tx.outstanding_amount),
+            "tendered_amount": str(tx.tendered_amount),
+            "change_amount": str(tx.change_amount),
             "payment_status": tx.payment_status,
             "payment_method": tx.payment_method,
             "tax_breakup": tx.tax_breakup,

@@ -31,7 +31,8 @@ class TransactionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "store", "customer", "invoice_number", "transaction_date",
             "status", "subtotal", "discount", "tax", "total",
-            "payment_method", "payment_reference", "external_source",
+            "amount_paid", "outstanding_amount", "tendered_amount", "change_amount",
+            "payment_method", "payment_status", "payment_reference", "external_source",
             "external_transaction_id", "notes", "loyalty_points_earned",
             "loyalty_points_redeemed", "bill_sent", "bill_sent_at",
             "items", "item_count", "organization", "created_at",
@@ -49,7 +50,8 @@ class TransactionListSerializer(serializers.ModelSerializer):
         model = Transaction
         fields = [
             "id", "invoice_number", "customer", "store", "total",
-            "payment_method", "status", "transaction_date", "item_count",
+            "amount_paid", "outstanding_amount", "tendered_amount", "change_amount",
+            "payment_method", "payment_status", "status", "transaction_date", "item_count",
         ]
 
 

@@ -31,6 +31,8 @@ import {
   TrendingUp,
   Store,
   Settings,
+  Activity,
+  CalendarCheck,
   LogOut,
   ChevronDown,
   ChevronRight,
@@ -113,6 +115,7 @@ const navSections: NavSection[] = [
     items: [
       { name: "Sales Report", href: "/dashboard/reports/sales", icon: TrendingUp },
       { name: "POS / Register Report", href: "/dashboard/reports/pos", icon: FileSpreadsheet },
+      { name: "Daily Business Closing", href: "/dashboard/reports/daily-closing", icon: CalendarCheck },
       { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     ],
   },
@@ -130,6 +133,7 @@ const navSections: NavSection[] = [
     key: "administration",
     items: [
       { name: "Stores", href: "/dashboard/stores", icon: Store },
+      { name: "System Health", href: "/dashboard/health", icon: Activity },
       { name: "Settings", href: "/dashboard/settings", icon: Settings },
     ],
   },
@@ -346,6 +350,19 @@ export default function DashboardLayout({
 
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col lg:pl-64 min-w-0">
+        {/* Controlled Pilot Mode Monitored Banner */}
+        <div className="bg-gradient-to-r from-blue-900/90 via-indigo-900/90 to-purple-900/90 border-b border-indigo-700/50 px-4 py-1.5 text-xs text-indigo-100 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30">
+              PILOT v1.0
+            </span>
+            <span className="font-medium text-xs">Controlled Business Pilot Deployment — Real-time Financial & System Integrity Monitored</span>
+          </div>
+          <Link href="/dashboard/health" className="underline font-semibold hover:text-white transition-colors text-[11px] flex items-center gap-1">
+            System Health & Backups →
+          </Link>
+        </div>
+
         {/* Top Header */}
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/80 px-4 md:px-6 backdrop-blur-md">
           <div className="flex items-center gap-3">

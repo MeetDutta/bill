@@ -79,6 +79,8 @@ class BusinessConfig(UUIDModel, TenantModel, TimeStampedModel):
     auto_print = models.BooleanField(default=False)
     auto_send_whatsapp = models.BooleanField(default=False)
     require_customer = models.BooleanField(default=False)
+    is_pilot_mode = models.BooleanField(default=True)
+    pilot_notes = models.TextField(blank=True, default="Controlled Pilot Deployment - Monitored Mode")
 
     class Meta:
         verbose_name = "Business Configuration"
@@ -326,5 +328,32 @@ class InvoiceSequence(UUIDModel, TenantModel, TimeStampedModel):
 
     def __str__(self):
         return f"{self.organization.name} - {self.prefix} ({self.period_key}): {self.last_number}"
+
+
+class RealtimeEvent(UUIDModel, TenantModel, TimeStampedModel):
+    """
+    Transactional event outbox for real-time frontend updates across connected clients.
+    Carries minimal identifiers and event summaries, strictly scoped by organization and store.
+    """
+    store = models.ForeignKey(
+        "stores.Store",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="realtime_events",
+    )
+    event_type = models.CharField(max_length=100, db_index=True)
+    payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "created_at"]),
+            models.Index(fields=["organization", "event_type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization.name} - {self.event_type} @ {self.created_at}"
+
 
 

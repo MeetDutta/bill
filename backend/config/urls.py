@@ -10,6 +10,7 @@ from apps.analytics.views import (
     BusinessAlertsListView,
     CustomerPortalPublicView,
 )
+from apps.reports.views import SystemHealthView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -41,6 +42,8 @@ urlpatterns = [
     path("api/v1/alerts/<uuid:pk>/acknowledge/", BusinessAlertAcknowledgeView.as_view(), name="root-alert-ack"),
     path("api/v1/alerts/<uuid:pk>/dismiss/", BusinessAlertDismissView.as_view(), name="root-alert-dism"),
     path("api/v1/pos/", include("apps.billing.urls")),
+    path("api/v1/health/system/", SystemHealthView.as_view(), name="root-system-health"),
+    path("api/v1/health/", include("apps.notifications.health_urls")),
     path("health/", include("apps.notifications.health_urls")),
 ]
 

@@ -47,6 +47,8 @@ class Transaction(UUIDModel, TenantModel, TimeStampedModel):
     total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     outstanding_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    tendered_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    change_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     due_date = models.DateField(null=True, blank=True)
     payment_method = models.CharField(max_length=50, blank=True)  # Primary payment mode or 'split'
     payment_reference = models.CharField(max_length=100, blank=True)

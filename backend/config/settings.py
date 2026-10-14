@@ -122,6 +122,9 @@ else:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
+            "OPTIONS": {
+                "timeout": 30,
+            },
         }
     }
 
@@ -191,10 +194,27 @@ CORS_ALLOW_CREDENTIALS = True
 # Frontend URL
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 
+# Production Security & Cookie Hardening
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=False, cast=bool)
+SESSION_COOKIE_SECURE = config("SESSION_COOKIE_SECURE", default=False, cast=bool)
+CSRF_COOKIE_SECURE = config("CSRF_COOKIE_SECURE", default=False, cast=bool)
+SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=0, cast=int)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = config("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False, cast=bool)
+SECURE_HSTS_PRELOAD = config("SECURE_HSTS_PRELOAD", default=False, cast=bool)
+
+# Controlled Pilot Configuration
+PILOT_MODE = config("PILOT_MODE", default=True, cast=bool)
+PILOT_VERSION = config("PILOT_VERSION", default="1.0-pilot")
+PILOT_NAME = config("PILOT_NAME", default="Controlled Pilot Deployment")
+
 # Redis & Celery
-REDIS_URL = config("REDIS_URL", default="redis://redis:6379/0")
-CELERY_BROKER_URL = config("CELERY_BROKER_URL", default=config("REDIS_URL", default="redis://redis:6379/1"))
-CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default="redis://redis:6379/2")
+REDIS_HOST = "redis" if os.environ.get("DOCKER_CONTAINER") or os.path.exists("/.dockerenv") else "127.0.0.1"
+REDIS_URL = config("REDIS_URL", default=f"redis://{REDIS_HOST}:6379/0")
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default=f"redis://{REDIS_HOST}:6379/1")
+CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default=f"redis://{REDIS_HOST}:6379/2")
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_ENABLE_UTC = True
 CELERY_ACCEPT_CONTENT = ["json"]

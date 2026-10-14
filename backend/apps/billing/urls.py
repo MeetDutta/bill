@@ -34,6 +34,9 @@ from .views import (
     POSReturnsReportView,
     POSOutstandingReportView,
     POSDailyClosingReportView,
+    POSRealtimeEventStreamView,
+    POSRealtimeRecentEventsView,
+    POSRealtimeTicketView,
 )
 
 app_name = "billing"
@@ -98,4 +101,9 @@ urlpatterns = [
     path("reports/outstanding/", POSOutstandingReportView.as_view(), name="pos-report-outstanding"),
     path("reports/daily-closing/", POSDailyClosingReportView.as_view(), name="pos-report-daily-closing"),
     path("reports/pos-register/", POSRegisterOperationalReportView.as_view(), name="pos-report-pos-register"),
+
+    # Real-time Events (SSE Stream, Single-Use Ticket & Recent Polling Fallback)
+    path("realtime/ticket/", POSRealtimeTicketView.as_view(), name="pos-realtime-ticket"),
+    path("realtime/stream/", POSRealtimeEventStreamView.as_view(), name="pos-realtime-stream"),
+    path("realtime/recent/", POSRealtimeRecentEventsView.as_view(), name="pos-realtime-recent"),
 ]

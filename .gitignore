@@ -22,6 +22,8 @@ __pycache__/
 # Database
 *.sqlite3
 backend/db.sqlite3
+*.dump
+backend/backups/*.dump
 
 # Build
 .next/

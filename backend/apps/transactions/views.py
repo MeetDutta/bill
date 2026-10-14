@@ -74,12 +74,19 @@ class TransactionIngestView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # 2. Store lookup scoped strictly to organization
+        # 2. Store lookup scoped strictly to organization (by code or UUID)
         from apps.stores.models import Store
-        store = Store.objects.filter(organization=org, code=data["store_id"]).first()
+        store_val = str(data["store_id"]).strip()
+        store_qs = Store.objects.filter(organization=org)
+        store = None
+        if len(store_val) == 36 and "-" in store_val:
+            store = store_qs.filter(id=store_val).first()
+        if not store:
+            store = store_qs.filter(code=store_val).first()
+
         if not store:
             return Response(
-                {"error": f"Store with code '{data['store_id']}' not found in your organization"},
+                {"error": f"Store '{data['store_id']}' not found in your organization"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -157,37 +164,98 @@ class TransactionIngestView(APIView):
             total_val = data["total"]
             round_off_val = total_val - (subtotal_val - discount_val + tax_val)
 
-            tx = Transaction.objects.create(
-                organization=org,
-                store=store,
-                customer=customer,
-                invoice_number=data["invoice_number"],
-                transaction_date=data["transaction_date"],
-                subtotal=subtotal_val,
-                discount=discount_val,
-                tax=tax_val,
-                round_off=round_off_val,
-                total=total_val,
-                amount_paid=total_val,
-                outstanding_amount=Decimal("0.00"),
-                payment_status="paid",
-                payment_method=data.get("payment_method", "cash"),
-                external_source=data.get("external_source", ""),
-                external_transaction_id=external_tx_id,
-            )
+            try:
+                tx = Transaction.objects.create(
+                    organization=org,
+                    store=store,
+                    customer=customer,
+                    invoice_number=data["invoice_number"],
+                    transaction_date=data["transaction_date"],
+                    subtotal=subtotal_val,
+                    discount=discount_val,
+                    tax=tax_val,
+                    round_off=round_off_val,
+                    total=total_val,
+                    amount_paid=total_val,
+                    outstanding_amount=Decimal("0.00"),
+                    tendered_amount=total_val,
+                    change_amount=Decimal("0.00"),
+                    payment_status="paid",
+                    payment_method=data.get("payment_method", "cash"),
+                    external_source=data.get("external_source", ""),
+                    external_transaction_id=external_tx_id,
+                )
+            except IntegrityError:
+                if external_tx_id:
+                    existing = Transaction.objects.filter(organization=org, external_transaction_id=external_tx_id).first()
+                    if existing:
+                        return Response(TransactionSerializer(existing).data, status=status.HTTP_200_OK)
+                raise
+
+            from apps.products.models import Product, InventoryMovement
 
             for item_data in data.get("items", []):
+                ext_prod_id = str(item_data.get("external_product_id") or "").strip()
+                item_name = str(item_data.get("name") or "").strip()
+                item_qty = Decimal(str(item_data.get("quantity") or 1))
+
+                if item_qty <= Decimal("0"):
+                    return Response(
+                        {"error": f"Invalid item quantity '{item_qty}' for '{item_name}': must be greater than zero."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                prod = None
+                if ext_prod_id:
+                    prod_qs = Product.objects.select_for_update().filter(organization=org)
+                    if len(ext_prod_id) == 36 and "-" in ext_prod_id:
+                        prod = prod_qs.filter(id=ext_prod_id).first()
+                    if not prod:
+                        prod = prod_qs.filter(external_id=ext_prod_id).first()
+                    if not prod:
+                        prod = prod_qs.filter(sku=ext_prod_id).first()
+                    if not prod:
+                        prod = prod_qs.filter(barcode=ext_prod_id).first()
+
+                if not prod and item_name:
+                    name_candidates = Product.objects.select_for_update().filter(organization=org, name__iexact=item_name)
+                    if name_candidates.count() == 1:
+                        prod = name_candidates.first()
+                    else:
+                        # Ambiguous match (multiple products with same name): do not guess
+                        prod = None
+
                 TransactionItem.objects.create(
                     transaction=tx,
-                    external_product_id=item_data.get("external_product_id", ""),
+                    product=prod,
+                    external_product_id=ext_prod_id,
                     name=item_data["name"],
-                    quantity=item_data.get("quantity", 1),
+                    quantity=item_qty,
                     unit_price=item_data["unit_price"],
                     discount=item_data.get("discount", Decimal("0")),
                     tax=item_data.get("tax", Decimal("0")),
                     total=item_data["total"],
                     hsn_code=item_data.get("hsn_code", ""),
                 )
+
+                if prod and prod.track_inventory:
+                    prev_stock = prod.current_stock
+                    new_stock = prev_stock - item_qty
+                    prod.current_stock = new_stock
+                    prod.save(update_fields=["current_stock"])
+
+                    InventoryMovement.objects.create(
+                        organization=org,
+                        product=prod,
+                        store=store,
+                        movement_type="SALE",
+                        quantity=-item_qty,
+                        previous_stock=prev_stock,
+                        new_stock=new_stock,
+                        reference_type="transaction",
+                        reference_id=str(tx.id),
+                        notes=f"API Ingest Invoice #{tx.invoice_number}",
+                    )
 
             # Create payment record
             TransactionPayment.objects.create(
@@ -244,6 +312,30 @@ class TransactionIngestView(APIView):
             send_digital_bill_task.delay(str(tx.id))
         except Exception as e:
             logger.warning("Failed to enqueue send_digital_bill_task: %s", e)
+
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=org,
+                store=store,
+                event_type="sale_completed",
+                payload={
+                    "transaction_id": str(tx.id),
+                    "invoice_number": tx.invoice_number,
+                    "total": str(tx.total),
+                    "amount_paid": str(tx.amount_paid),
+                    "tendered_amount": str(tx.tendered_amount),
+                    "change_amount": str(tx.change_amount),
+                    "payment_status": tx.payment_status,
+                    "payment_method": tx.payment_method,
+                    "cashier": "API Ingest",
+                    "customer_name": tx.customer.full_name if tx.customer else "Walk-in",
+                    "items_count": tx.items.count(),
+                    "created_at": tx.transaction_date.isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.warning("Failed to publish sale_completed event: %s", e)
 
         return Response(
             TransactionSerializer(tx).data,
