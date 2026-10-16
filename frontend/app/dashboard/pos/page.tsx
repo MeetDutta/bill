@@ -621,6 +621,17 @@ export default function POSPage() {
             )}
           </Button>
 
+          {/* Ask Copilot Button in POS Header Toolbar */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.dispatchEvent(new CustomEvent("open-copilot"))}
+            className="h-8 gap-1.5 text-xs font-semibold border-indigo-200 text-indigo-700 bg-indigo-50/50 hover:bg-indigo-100 hover:text-indigo-800 shadow-xs"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+            <span className="hidden sm:inline">Ask Copilot</span>
+          </Button>
+
           {/* Keyboard Shortcut Hints */}
           <div className="hidden lg:flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F2</span> Search

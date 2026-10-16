@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { copilotApi } from "@/services/api";
 import { Sparkles, X, Send, Bot, User, ArrowRight, Lightbulb, TrendingUp, AlertTriangle } from "lucide-react";
 
@@ -15,6 +16,15 @@ export function CopilotDrawer() {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
+  const pathname = usePathname();
+  const isPos = pathname?.startsWith("/dashboard/pos");
+
+  useEffect(() => {
+    const handleOpen = () => setIsOpen(true);
+    window.addEventListener("open-copilot", handleOpen);
+    return () => window.removeEventListener("open-copilot", handleOpen);
+  }, []);
+
   const [messages, setMessages] = useState<
     Array<{ sender: "user" | "copilot"; text: string; action?: string }>
   >([
@@ -65,14 +75,16 @@ export function CopilotDrawer() {
 
   return (
     <>
-      {/* Floating Toggle Button */}
-      <button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-4 py-3 text-sm font-semibold text-white shadow-xl hover:shadow-indigo-500/25 transition-all hover:scale-105 active:scale-95"
-      >
-        <Sparkles className="h-5 w-5 animate-pulse" />
-        <span>Ask Copilot</span>
-      </button>
+      {/* Floating Toggle Button (hidden on POS page so it does not block the checkout Pay button) */}
+      {!isPos && (
+        <button
+          onClick={() => setIsOpen(true)}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-4 py-3 text-sm font-semibold text-white shadow-xl hover:shadow-indigo-500/25 transition-all hover:scale-105 active:scale-95"
+        >
+          <Sparkles className="h-5 w-5 animate-pulse" />
+          <span>Ask Copilot</span>
+        </button>
+      )}
 
       {/* Drawer Overlay */}
       {isOpen && (
