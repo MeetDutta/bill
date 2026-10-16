@@ -1,16 +1,94 @@
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
 from decouple import config
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = config("DJANGO_SECRET_KEY", default="django-insecure-change-me")
+TESTING = "test" in sys.argv or "pytest" in sys.modules or any("pytest" in arg for arg in sys.argv)
 
-DEBUG = config("DJANGO_DEBUG", default=True, cast=bool)
+# Production security hardening validator
+KNOWN_INSECURE_SECRETS = {
+    "django-insecure-change-me",
+    "change-me-to-a-random-secret-key",
+    "insecure-default-key",
+    "secret",
+    "django-insecure-test-key",
+}
 
-allowed_hosts_config = config("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1,backend,web,testserver").split(",")
+def validate_production_settings(
+    *,
+    debug: bool,
+    secret_key: str,
+    database_url: str | None,
+    allowed_hosts: list[str],
+    environment: str,
+) -> None:
+    """
+    Validates that production/staging environments never start with unsafe settings.
+    Raises ImproperlyConfigured if any unsafe configuration is detected.
+    """
+    is_prod_env = environment.lower() in ("production", "prod", "staging") or not debug
+
+    if not is_prod_env:
+        return
+
+    if debug:
+        raise ImproperlyConfigured(
+            f"Production environment (ENVIRONMENT='{environment}') cannot run with DEBUG=True."
+        )
+
+    if (
+        not secret_key
+        or secret_key in KNOWN_INSECURE_SECRETS
+        or secret_key.startswith("django-insecure-")
+        or len(secret_key) < 32
+    ):
+        raise ImproperlyConfigured(
+            "Insecure or default SECRET_KEY detected in production. "
+            "A secure, random secret key of at least 32 characters is required."
+        )
+
+    if not database_url or "sqlite" in database_url.lower():
+        raise ImproperlyConfigured(
+            "Production environment requires a production database (e.g. PostgreSQL). "
+            "DATABASE_URL must be configured."
+        )
+
+    clean_hosts = [h for h in allowed_hosts if h != "testserver"]
+    if not clean_hosts or "*" in clean_hosts:
+        raise ImproperlyConfigured(
+            "ALLOWED_HOSTS must be explicitly defined with valid domain names in production and cannot be empty or '*'."
+        )
+
+# Support both canonical variable names (SECRET_KEY, DEBUG, ALLOWED_HOSTS)
+# and DJANGO_-prefixed names (DJANGO_SECRET_KEY, DJANGO_DEBUG, DJANGO_ALLOWED_HOSTS)
+SECRET_KEY = config(
+    "SECRET_KEY",
+    default=config("DJANGO_SECRET_KEY", default="django-insecure-change-me"),
+)
+
+DEBUG = config(
+    "DEBUG",
+    default=config("DJANGO_DEBUG", default=True, cast=bool),
+    cast=bool,
+)
+
+ENVIRONMENT = config(
+    "ENVIRONMENT",
+    default=config("DJANGO_ENV", default="development"),
+).lower()
+
+allowed_hosts_config = config(
+    "ALLOWED_HOSTS",
+    default=config(
+        "DJANGO_ALLOWED_HOSTS",
+        default="localhost,127.0.0.1,backend,web,testserver",
+    ),
+).split(",")
 ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_config if h.strip()]
 if "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")
@@ -86,6 +164,16 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASE_URL = config("DATABASE_URL", default=None)
 
+# Production security check: validated at import time unless executing tests
+if not TESTING:
+    validate_production_settings(
+        debug=DEBUG,
+        secret_key=SECRET_KEY,
+        database_url=DATABASE_URL,
+        allowed_hosts=ALLOWED_HOSTS,
+        environment=ENVIRONMENT,
+    )
+
 if DATABASE_URL:
     try:
         import dj_database_url
@@ -116,7 +204,7 @@ if DATABASE_URL:
             }
         }
 elif not DEBUG:
-    raise ValueError("DATABASE_URL environment variable must be set in production (DEBUG=False).")
+    raise ImproperlyConfigured("DATABASE_URL environment variable must be set in production (DEBUG=False).")
 else:
     DATABASES = {
         "default": {
@@ -225,8 +313,6 @@ CELERY_TASK_DEFAULT_QUEUE = "celery"
 
 BUSINESS_TIMEZONE = config("BUSINESS_TIMEZONE", default="Asia/Kolkata")
 
-import sys
-TESTING = "test" in sys.argv or "pytest" in sys.modules or any("pytest" in arg for arg in sys.argv)
 CELERY_TASK_ALWAYS_EAGER = config("CELERY_TASK_ALWAYS_EAGER", default=TESTING, cast=bool)
 CELERY_TASK_EAGER_PROPAGATES = True
 
@@ -237,8 +323,8 @@ AWS_STORAGE_BUCKET_NAME = config("AWS_STORAGE_BUCKET_NAME", default="")
 AWS_S3_REGION_NAME = config("AWS_S3_REGION_NAME", default="")
 AWS_S3_ENDPOINT_URL = config("AWS_S3_ENDPOINT_URL", default="")
 
-# WhatsApp
-WHATSAPP_ACCESS_TOKEN = config("WHATSAPP_ACCESS_TOKEN", default="")
+# WhatsApp (supports both canonical WHATSAPP_ACCESS_TOKEN and legacy WHATSAPP_API_TOKEN)
+WHATSAPP_ACCESS_TOKEN = config("WHATSAPP_ACCESS_TOKEN", default=config("WHATSAPP_API_TOKEN", default=""))
 WHATSAPP_PHONE_NUMBER_ID = config("WHATSAPP_PHONE_NUMBER_ID", default="")
 WHATSAPP_BUSINESS_ACCOUNT_ID = config("WHATSAPP_BUSINESS_ACCOUNT_ID", default="")
 WHATSAPP_WEBHOOK_VERIFY_TOKEN = config("WHATSAPP_WEBHOOK_VERIFY_TOKEN", default="")

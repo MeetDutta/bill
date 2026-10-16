@@ -112,10 +112,22 @@ export default function SystemHealthPage() {
     }
   };
 
-  const handleDownloadCsv = (type: "financial" | "inventory") => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-    const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/reports/reconciliation/${type}/export/`;
-    window.open(url, "_blank");
+  const handleDownloadCsv = async (type: "financial" | "inventory") => {
+    try {
+      const response = await api.get(`/reports/reconciliation/${type}/export/`, {
+        responseType: "blob",
+      });
+      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.setAttribute("download", `${type}_reconciliation_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error(`Failed to export ${type} reconciliation CSV`, err);
+    }
   };
 
   const handleAcknowledgeAlert = async (id: string) => {

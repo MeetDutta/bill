@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import api from "@/lib/api";
+import api, { getApiBaseUrl } from "@/lib/api";
 
 export interface RealtimeEventPayload {
   id: string;
@@ -10,8 +10,6 @@ export interface RealtimeEventPayload {
   store_id: string | null;
   payload: Record<string, any>;
 }
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 export const realtimeApi = {
   getStreamTicket: async () => {
@@ -64,12 +62,22 @@ export function useRealtimeSubscription(
       eventSourceRef.current = null;
     }
 
-    // Obtain single-use 60s stream ticket to protect JWT from proxy/URL log exposure
+    // Require short-lived single-use ticket; fail safely without exposing JWT in URLs
     const ticket = await realtimeApi.getStreamTicket();
+    if (!ticket) {
+      setIsConnected(false);
+      setConnectionError("Failed to obtain real-time stream ticket. Retrying in 5s...");
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connect();
+      }, 5000);
+      return;
+    }
 
-    let url = ticket
-      ? `${API_BASE_URL}/pos/realtime/stream/?ticket=${encodeURIComponent(ticket)}`
-      : `${API_BASE_URL}/pos/realtime/stream/?token=${encodeURIComponent(token)}`;
+    const baseUrl = getApiBaseUrl();
+    let url = `${baseUrl}/pos/realtime/stream/?ticket=${encodeURIComponent(ticket)}`;
 
     if (lastEventIdRef.current) {
       url += `&last_event_id=${encodeURIComponent(lastEventIdRef.current)}`;
@@ -86,6 +94,9 @@ export function useRealtimeSubscription(
 
       es.onmessage = (e) => {
         try {
+          if (e.lastEventId) {
+            lastEventIdRef.current = e.lastEventId;
+          }
           const parsed: RealtimeEventPayload = JSON.parse(e.data);
           if (parsed && parsed.id) {
             lastEventIdRef.current = parsed.id;

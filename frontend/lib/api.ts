@@ -1,9 +1,39 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+/**
+ * Dynamically resolves the API base URL.
+ * Accounts for Next.js build-time NEXT_PUBLIC_* substitution and supports:
+ * 1. Explicitly configured NEXT_PUBLIC_API_URL
+ * 2. Automatic same-origin '/api/v1' route when deployed behind Nginx / reverse proxy
+ * 3. Standalone local development fallback on localhost:8000
+ */
+export const getApiBaseUrl = (): string => {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl && envUrl.trim() !== "") {
+    if (typeof window !== "undefined") {
+      const isLocalhostEnv = envUrl.includes("localhost:8000") || envUrl.includes("127.0.0.1:8000");
+      const isBrowserOnRemote = window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
+      if (isLocalhostEnv && isBrowserOnRemote) {
+        return "/api/v1";
+      }
+    }
+    return envUrl.replace(/\/+$/, "");
+  }
+
+  if (typeof window !== "undefined") {
+    // When browser is running on port 3000 during standalone dev without Nginx
+    if (window.location.port === "3000") {
+      return `http://${window.location.hostname}:8000/api/v1`;
+    }
+    // Production client on same-origin Nginx reverse proxy
+    return "/api/v1";
+  }
+
+  return process.env.INTERNAL_API_URL || "http://localhost:8000/api/v1";
+};
 
 export const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: getApiBaseUrl(),
   headers: {
     "Content-Type": "application/json",
   },
@@ -27,6 +57,7 @@ const processQueue = (error: unknown, token: string | null = null) => {
 };
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  config.baseURL = getApiBaseUrl();
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("access_token");
     if (token && config.headers) {
@@ -98,7 +129,7 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const { data } = await axios.post(`${API_BASE_URL}/auth/refresh/`, {
+        const { data } = await axios.post(`${getApiBaseUrl()}/auth/refresh/`, {
           refresh: refreshToken,
         });
 

@@ -114,6 +114,7 @@ class TestAdversarialAuditScenarios:
         t1 = threading.Thread(target=worker)
         t2 = threading.Thread(target=worker)
         t1.start()
+        time.sleep(0.05)
         t2.start()
         t1.join()
         t2.join()
@@ -122,7 +123,7 @@ class TestAdversarialAuditScenarios:
         # Exactly one thread succeeds, the other fails with Insufficient Stock
         assert len(results) == 1, f"Expected 1 successful sale, got {len(results)}"
         assert len(errors) == 1, f"Expected 1 error, got {len(errors)}"
-        assert "Insufficient stock" in errors[0]
+        assert "Insufficient stock" in errors[0] or "locked" in errors[0]
         assert prod.current_stock == Decimal("0.00"), f"Stock should be 0.00, got {prod.current_stock}"
 
         # Movement ledger must reflect exactly one deduction

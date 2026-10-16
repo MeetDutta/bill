@@ -20,6 +20,7 @@ import {
   Star,
 } from "lucide-react";
 import axios from "axios";
+import { getApiBaseUrl } from "@/lib/api";
 
 interface BillItem {
   id: string;
@@ -90,7 +91,7 @@ export default function DigitalBillPage() {
     if (!token) return;
     const fetchBill = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+        const apiUrl = getApiBaseUrl();
         const res = await axios.get(`${apiUrl}/invoices/view/${token}/`);
         setBill(res.data);
       } catch (err: unknown) {

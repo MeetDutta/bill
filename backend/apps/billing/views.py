@@ -1012,7 +1012,15 @@ class POSRealtimeEventStreamView(APIView):
         import json
         import time
         from django.http import StreamingHttpResponse
+        from django.utils import timezone
         from apps.billing.models import RealtimeEvent
+
+        # Reject insecure query parameter token fallback
+        if request.GET.get("token"):
+            return Response(
+                {"error": "Passing access tokens in URL query parameters is prohibited. Use short-lived stream tickets."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
         user = request.user
         ticket = request.GET.get("ticket")
@@ -1020,7 +1028,7 @@ class POSRealtimeEventStreamView(APIView):
             from django.core.cache import cache
             cached_data = cache.get(f"sse_ticket:{ticket}")
             if cached_data:
-                cache.delete(f"sse_ticket:{ticket}")  # Single use
+                cache.delete(f"sse_ticket:{ticket}")  # Single use enforcement
                 from apps.users.models import User
                 try:
                     user = User.objects.get(id=cached_data["user_id"], is_active=True)
@@ -1028,30 +1036,27 @@ class POSRealtimeEventStreamView(APIView):
                     user = None
 
         if not user or not user.is_authenticated:
-            token = request.GET.get("token")
-            if token:
-                from rest_framework_simplejwt.authentication import JWTAuthentication
-                try:
-                    jwt_auth = JWTAuthentication()
-                    validated_token = jwt_auth.get_validated_token(token)
-                    user = jwt_auth.get_user(validated_token)
-                except Exception:
-                    user = None
-
-        if not user or not user.is_authenticated:
-            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"error": "Authentication required. Provide a valid stream ticket or Bearer authorization header."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
         org = user.organization
-        last_id = request.headers.get("Last-Event-ID") or request.GET.get("last_id")
+        # Standardize reconnection cursor: accept Last-Event-ID header, last_event_id, or legacy last_id
+        last_event_id = (
+            request.headers.get("Last-Event-ID")
+            or request.GET.get("last_event_id")
+            or request.GET.get("last_id")
+        )
 
         def event_stream():
             last_check = timezone.now()
             seen_ids = set()
 
-            # If last_id provided, replay events since then
-            if last_id:
+            # If last_event_id provided, replay missed events since that cursor
+            if last_event_id:
                 try:
-                    prior_event = RealtimeEvent.objects.filter(id=last_id, organization=org).first()
+                    prior_event = RealtimeEvent.objects.filter(id=last_event_id, organization=org).first()
                     if prior_event:
                         replays = RealtimeEvent.objects.filter(
                             organization=org,

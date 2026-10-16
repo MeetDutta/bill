@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import axios from "axios";
+import { getApiBaseUrl } from "@/lib/api";
 import {
   Award,
   Gift,
@@ -123,7 +124,7 @@ export default function CustomerMiniPortal() {
     if (!token) return;
     const fetchPortal = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+        const apiUrl = getApiBaseUrl();
         const res = await axios.get(`${apiUrl}/customer-portal/${token}/`);
         setPortalData(res.data);
       } catch (err: unknown) {

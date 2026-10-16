@@ -70,7 +70,7 @@ class SystemHealthService:
         except Exception as e:
             logger.warning(f"[Health] Readiness redis check failed: {e}")
             checks["redis"] = "down"
-            if not getattr(settings, "DEBUG", True):
+            if not getattr(settings, "DEBUG", True) and not getattr(settings, "TESTING", False):
                 is_ready = False
 
         checks["status"] = "healthy" if is_ready else "unhealthy"

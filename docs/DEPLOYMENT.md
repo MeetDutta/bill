@@ -10,24 +10,35 @@
 
 ## 2. Environment Variables
 
-Create `.env` inside `backend/` and `frontend/` based on `.env.example`:
+Create `.env` at the root (or inside `backend/` and `frontend/`) based on `.env.example`:
 
-### Backend (`backend/.env`)
+### Backend (`.env` or `backend/.env`)
 ```bash
+ENVIRONMENT=production
 DEBUG=False
 SECRET_KEY=your-production-secret-key-at-least-50-chars
-ALLOWED_HOSTS=api.yourdomain.com,localhost
-DATABASE_URL=postgres://user:password@localhost:5432/billfree_prod
-REDIS_URL=redis://localhost:6379/0
-CELERY_BROKER_URL=redis://localhost:6379/1
-CORS_ALLOWED_ORIGINS=https://app.yourdomain.com,http://localhost:3000
-WHATSAPP_API_TOKEN=your-whatsapp-cloud-api-token
+ALLOWED_HOSTS=api.yourdomain.com,yourdomain.com
+DATABASE_URL=postgres://digitalbill_user:digitalbill_password@db:5432/digitalbill_db
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/1
+CELERY_RESULT_BACKEND=redis://redis:6379/2
+CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+FRONTEND_URL=https://yourdomain.com
+
+# WhatsApp Cloud API (WHATSAPP_ACCESS_TOKEN or legacy WHATSAPP_API_TOKEN)
+WHATSAPP_ACCESS_TOKEN=your-whatsapp-cloud-api-token
 WHATSAPP_PHONE_NUMBER_ID=your-phone-id
+WHATSAPP_BUSINESS_ACCOUNT_ID=your-business-account-id
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=your-webhook-verify-token
 ```
 
-### Frontend (`frontend/.env.local`)
+> **Security Guard**: When `ENVIRONMENT=production` or `DEBUG=False`, Django will fail startup with `ImproperlyConfigured` if `DEBUG=True`, if a known development secret is used, or if `DATABASE_URL` is missing.
+
+### Frontend (`frontend/.env.local` or Docker Compose environment)
 ```bash
-NEXT_PUBLIC_API_URL=https://api.yourdomain.com/api/v1
+# In production behind Nginx reverse proxy, leave as /api/v1 (same-origin).
+# For separate domain API deployment, set to full URL (e.g. https://api.yourdomain.com/api/v1).
+NEXT_PUBLIC_API_URL=/api/v1
 ```
 
 ---
