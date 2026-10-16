@@ -285,7 +285,7 @@ export default function POSPage() {
         barcode: product.barcode,
         name: product.name,
         quantity: 1,
-        unit_price: Number(product.selling_price) || 0,
+        unit_price: Number(product.selling_price ?? (product as any).unit_price) || 0,
         discount: 0,
         discount_type: "fixed",
         tax_rate: Number(product.tax_rate) || 0,
@@ -450,13 +450,20 @@ export default function POSPage() {
   };
 
   // Payment Calculation & Flow
-  const grandTotalNum = Number(calcSummary?.grand_total) || 0;
+  const localCartSubtotal = cart.reduce(
+    (acc, item) => acc + Math.max(0, item.quantity * item.unit_price - (item.discount || 0)),
+    0
+  );
+  const grandTotalNum = calcSummary && Number(calcSummary.grand_total) > 0
+    ? Number(calcSummary.grand_total)
+    : localCartSubtotal;
 
   const openPaymentModal = () => {
     if (cart.length === 0) return;
+    const payable = grandTotalNum > 0 ? grandTotalNum : localCartSubtotal;
     setCheckoutError("");
-    setPayments([{ method: "CASH", amount: grandTotalNum }]);
-    setPayingCashAmount(grandTotalNum);
+    setPayments([{ method: "CASH", amount: payable }]);
+    setPayingCashAmount(payable);
     setPaymentModalOpen(true);
   };
 
@@ -734,9 +741,9 @@ export default function POSPage() {
                       <div className="mt-2.5 flex items-end justify-between border-t pt-1.5">
                         <div>
                           <div className="text-xs font-bold text-foreground">
-                            ₹{Number(p.selling_price).toFixed(2)}
+                            ₹{Number(p.selling_price ?? (p as any).unit_price).toFixed(2)}
                           </div>
-                          {p.mrp && Number(p.mrp) > Number(p.selling_price) && (
+                          {p.mrp && Number(p.mrp) > Number(p.selling_price ?? (p as any).unit_price) && (
                             <div className="text-[10px] text-muted-foreground line-through">
                               ₹{Number(p.mrp).toFixed(2)}
                             </div>
@@ -895,7 +902,7 @@ export default function POSPage() {
             <div className="space-y-1 rounded bg-muted/40 p-2">
               <div className="flex justify-between text-muted-foreground">
                 <span>Subtotal:</span>
-                <span>₹{calcSummary ? Number(calcSummary.subtotal).toFixed(2) : "0.00"}</span>
+                <span>₹{calcSummary ? Number(calcSummary.subtotal).toFixed(2) : localCartSubtotal.toFixed(2)}</span>
               </div>
               {calcSummary && Number(calcSummary.total_discount) > 0 && (
                 <div className="flex justify-between text-emerald-600 font-medium">
@@ -916,7 +923,7 @@ export default function POSPage() {
               <div className="flex justify-between border-t pt-1 text-sm font-black text-foreground">
                 <span>Grand Total:</span>
                 <span className="text-primary text-base">
-                  ₹{calcSummary ? Number(calcSummary.grand_total).toFixed(2) : "0.00"}
+                  ₹{grandTotalNum.toFixed(2)}
                 </span>
               </div>
             </div>
