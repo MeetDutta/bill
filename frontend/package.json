@@ -2,6 +2,9 @@
   "name": "digitalbill-dpramp-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=18.17.0 <=22.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -19,28 +22,28 @@
     "@radix-ui/react-tabs": "^1.1.0",
     "@radix-ui/react-toast": "^1.2.1",
     "@tanstack/react-query": "^5.56.2",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.4.20",
     "axios": "^1.7.7",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.441.0",
     "next": "14.2.13",
+    "postcss": "^8.4.47",
     "react": "^18",
     "react-dom": "^18",
     "react-hook-form": "^7.53.0",
     "recharts": "^2.12.7",
     "tailwind-merge": "^2.5.2",
+    "tailwindcss": "^3.4.12",
     "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
-    "autoprefixer": "^10.4.20",
     "eslint": "^8",
-    "eslint-config-next": "14.2.13",
-    "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.12",
-    "typescript": "^5"
+    "eslint-config-next": "14.2.13"
   }
 }
