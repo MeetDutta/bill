@@ -154,10 +154,10 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     *(["whitenoise.middleware.WhiteNoiseMiddleware"] if HAS_WHITENOISE else []),
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -317,6 +317,11 @@ for o in raw_cors_origins:
     CORS_ALLOWED_ORIGINS.extend(_normalize_origin(o))
 CORS_ALLOWED_ORIGINS = list(dict.fromkeys(CORS_ALLOWED_ORIGINS))
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https:\/\/.*\.onrender\.com$",
+    r"^http:\/\/localhost(:\d+)?$",
+    r"^http:\/\/127\.0\.0\.1(:\d+)?$",
+]
 
 # Frontend URL
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000").strip()
@@ -336,6 +341,8 @@ if render_hostname:
     for o in _normalize_origin(render_hostname):
         if o not in CSRF_TRUSTED_ORIGINS:
             CSRF_TRUSTED_ORIGINS.append(o)
+if "https://*.onrender.com" not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append("https://*.onrender.com")
 
 # Production Security & Cookie Hardening
 SECURE_BROWSER_XSS_FILTER = True
