@@ -86,6 +86,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    command: npm run dev
     ports:
       - "127.0.0.1:3000:3000"
     volumes:

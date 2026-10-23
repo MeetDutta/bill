@@ -82,6 +82,13 @@ ENVIRONMENT = config(
     default=config("DJANGO_ENV", default="development"),
 ).lower()
 
+# Detect WhiteNoise if installed
+try:
+    import whitenoise  # noqa: F401
+    HAS_WHITENOISE = True
+except ImportError:
+    HAS_WHITENOISE = False
+
 allowed_hosts_config = config(
     "ALLOWED_HOSTS",
     default=config(
@@ -89,9 +96,24 @@ allowed_hosts_config = config(
         default="localhost,127.0.0.1,backend,web,testserver",
     ),
 ).split(",")
-ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_config if h.strip()]
+ALLOWED_HOSTS = []
+for h in allowed_hosts_config:
+    clean_h = h.strip().replace("https://", "").replace("http://", "").split("/")[0]
+    if clean_h and clean_h not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(clean_h)
+
+# Automatically register Render external hostname if set by platform
+render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if render_hostname:
+    clean_render = render_hostname.strip().replace("https://", "").replace("http://", "").split("/")[0]
+    if clean_render not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(clean_render)
+
 if "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")
+
+# Proxy SSL Header (Render terminates SSL at edge reverse proxy)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -133,6 +155,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    *(["whitenoise.middleware.WhiteNoiseMiddleware"] if HAS_WHITENOISE else []),
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -233,6 +256,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+if HAS_WHITENOISE and not DEBUG:
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
@@ -272,15 +298,44 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
+# Origin Normalizer for CORS & CSRF
+def _normalize_origin(url_or_domain: str) -> list[str]:
+    clean = url_or_domain.strip().rstrip("/")
+    if not clean:
+        return []
+    if clean.startswith("http://") or clean.startswith("https://"):
+        return [clean]
+    return [f"https://{clean}", f"http://{clean}"]
+
 # CORS
-CORS_ALLOWED_ORIGINS = config(
+raw_cors_origins = config(
     "CORS_ALLOWED_ORIGINS",
     default="http://localhost:3000",
 ).split(",")
+CORS_ALLOWED_ORIGINS = []
+for o in raw_cors_origins:
+    CORS_ALLOWED_ORIGINS.extend(_normalize_origin(o))
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(CORS_ALLOWED_ORIGINS))
 CORS_ALLOW_CREDENTIALS = True
 
 # Frontend URL
-FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
+FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000").strip()
+for o in _normalize_origin(FRONTEND_URL):
+    if o not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(o)
+
+# CSRF Trusted Origins (required for Render reverse proxy and custom domains)
+raw_csrf_origins = config("CSRF_TRUSTED_ORIGINS", default="").split(",")
+CSRF_TRUSTED_ORIGINS = []
+for o in raw_csrf_origins:
+    CSRF_TRUSTED_ORIGINS.extend(_normalize_origin(o))
+for o in CORS_ALLOWED_ORIGINS:
+    if o not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(o)
+if render_hostname:
+    for o in _normalize_origin(render_hostname):
+        if o not in CSRF_TRUSTED_ORIGINS:
+            CSRF_TRUSTED_ORIGINS.append(o)
 
 # Production Security & Cookie Hardening
 SECURE_BROWSER_XSS_FILTER = True
@@ -301,8 +356,8 @@ PILOT_NAME = config("PILOT_NAME", default="Controlled Pilot Deployment")
 # Redis & Celery
 REDIS_HOST = "redis" if os.environ.get("DOCKER_CONTAINER") or os.path.exists("/.dockerenv") else "127.0.0.1"
 REDIS_URL = config("REDIS_URL", default=f"redis://{REDIS_HOST}:6379/0")
-CELERY_BROKER_URL = config("CELERY_BROKER_URL", default=f"redis://{REDIS_HOST}:6379/1")
-CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default=f"redis://{REDIS_HOST}:6379/2")
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default=REDIS_URL)
+CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default=REDIS_URL)
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_ENABLE_UTC = True
 CELERY_ACCEPT_CONTENT = ["json"]

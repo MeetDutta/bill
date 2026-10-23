@@ -1,0 +1,83 @@
+# Render Blueprint Specification (Infrastructure-as-Code)
+# Learn more: https://render.com/docs/blueprint-spec
+
+version: "1"
+
+databases:
+  - name: billmeet-postgres
+    databaseName: digitalbill_db
+    user: digitalbill_user
+    plan: free
+    ipAllowList: []
+
+services:
+  # ==========================================
+  # Backend API Web Service (Django + Gunicorn)
+  # Uses Docker so WeasyPrint system dependencies (Pango, HarfBuzz) work flawlessly.
+  # ==========================================
+  - type: web
+    name: billmeet-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    healthCheckPath: /health/liveness/
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: billmeet-postgres
+          property: connectionString
+      - key: ALLOWED_HOSTS
+        value: .onrender.com,localhost,127.0.0.1
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: billmeet-frontend
+          property: host
+      - key: CORS_ALLOWED_ORIGINS
+        fromService:
+          type: web
+          name: billmeet-frontend
+          property: host
+      - key: CSRF_TRUSTED_ORIGINS
+        fromService:
+          type: web
+          name: billmeet-frontend
+          property: host
+      # Eager Celery mode executes asynchronous tasks inline so a paid background worker isn't strictly required on Free Tier
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "true"
+      - key: PILOT_MODE
+        value: "true"
+      - key: DJANGO_SUPERUSER_EMAIL
+        value: admin@digitalbill.local
+      - key: DJANGO_SUPERUSER_PASSWORD
+        generateValue: true
+      - key: DJANGO_SUPERUSER_FIRST_NAME
+        value: Admin
+
+  # ==========================================
+  # Frontend Web Service (Next.js 14)
+  # ==========================================
+  - type: web
+    name: billmeet-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    plan: free
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: billmeet-backend
+          property: host
