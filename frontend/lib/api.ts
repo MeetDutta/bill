@@ -10,14 +10,29 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 export const getApiBaseUrl = (): string => {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl && envUrl.trim() !== "") {
+    let clean = envUrl.trim().replace(/\/+$/, "");
+
     if (typeof window !== "undefined") {
-      const isLocalhostEnv = envUrl.includes("localhost:8000") || envUrl.includes("127.0.0.1:8000");
+      const isLocalhostEnv = clean.includes("localhost:8000") || clean.includes("127.0.0.1:8000");
       const isBrowserOnRemote = window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
       if (isLocalhostEnv && isBrowserOnRemote) {
         return "/api/v1";
       }
     }
-    return envUrl.replace(/\/+$/, "");
+
+    if (!clean.startsWith("/") && !clean.startsWith("http://") && !clean.startsWith("https://")) {
+      if (clean.includes("localhost") || clean.includes("127.0.0.1") || !clean.includes(".")) {
+        clean = `http://${clean}`;
+      } else {
+        clean = `https://${clean}`;
+      }
+    }
+
+    if (!clean.startsWith("/") && !clean.endsWith("/api/v1")) {
+      clean = `${clean}/api/v1`;
+    }
+
+    return clean;
   }
 
   if (typeof window !== "undefined") {
