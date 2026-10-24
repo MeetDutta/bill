@@ -312,7 +312,7 @@ export default function RegisterPage() {
 
       {/* MODAL: Open Register */}
       <Dialog open={openModal} onOpenChange={setOpenModal}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
           <DialogHeader>
             <DialogTitle>Open Register</DialogTitle>
           </DialogHeader>
@@ -357,7 +357,7 @@ export default function RegisterPage() {
 
       {/* MODAL: Cash In / Out Float */}
       <Dialog open={movementModal} onOpenChange={setMovementModal}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
           <DialogHeader>
             <DialogTitle>Record Cash Movement</DialogTitle>
           </DialogHeader>
@@ -424,7 +424,7 @@ export default function RegisterPage() {
 
       {/* MODAL: Close Register & Reconciliation */}
       <Dialog open={closeModal} onOpenChange={setCloseModal}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
           <DialogHeader>
             <DialogTitle>Close Register & Reconcile Drawer</DialogTitle>
           </DialogHeader>

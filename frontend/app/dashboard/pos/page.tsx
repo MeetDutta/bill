@@ -43,11 +43,12 @@ import {
   Store,
   CashRegister,
 } from "@/types";
-import { FileCheck } from "lucide-react";
+import { FileCheck, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 export default function POSPage() {
   // Config & Metadata
@@ -99,12 +100,13 @@ export default function POSPage() {
   const [heldCarts, setHeldCarts] = useState<HeldCart[]>([]);
   const [heldModalOpen, setHeldModalOpen] = useState(false);
 
-  // Payment Modal
+  // Payment Modal & Responsive Navigation
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [payments, setPayments] = useState<{ method: string; amount: number; reference?: string }[]>([]);
   const [payingCashAmount, setPayingCashAmount] = useState<number>(0);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
+  const [mobileTab, setMobileTab] = useState<"catalog" | "cart">("catalog");
 
   // Post-Sale Modal
   const [completedSale, setCompletedSale] = useState<any | null>(null);
@@ -556,10 +558,30 @@ export default function POSPage() {
 
   const totalPaidSoFar = payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
   const remainingDue = Math.max(0, grandTotalNum - totalPaidSoFar);
+  const cashChange = totalPaidSoFar > grandTotalNum ? totalPaidSoFar - grandTotalNum : 0;
 
-  const addPaymentMethod = (method: string) => {
-    if (remainingDue <= 0) return;
-    setPayments((prev) => [...prev, { method, amount: remainingDue }]);
+  // Single-click primary payment method switch (sets full amount immediately)
+  const setPrimaryPaymentMethod = (method: string) => {
+    const payable = grandTotalNum > 0 ? grandTotalNum : localCartSubtotal;
+    setPayments([{ method, amount: payable }]);
+    setPayingCashAmount(payable);
+    setCheckoutError("");
+  };
+
+  // Add split payment method row
+  const addSplitPaymentMethod = (method: string) => {
+    const amt = remainingDue > 0 ? remainingDue : 0;
+    setPayments((prev) => [...prev, { method, amount: amt }]);
+    setCheckoutError("");
+  };
+
+  // Update payment line method
+  const updatePaymentMethod = (index: number, newMethod: string) => {
+    setPayments((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], method: newMethod };
+      return updated;
+    });
   };
 
   const updatePaymentAmount = (index: number, val: number) => {
@@ -572,6 +594,20 @@ export default function POSPage() {
 
   const removePaymentLine = (index: number) => {
     setPayments((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Fast Cash Tender Denomination shortcuts
+  const setQuickCashTender = (tenderedAmount: number) => {
+    setPayments((prev) => {
+      const cashIdx = prev.findIndex((p) => p.method === "CASH");
+      if (cashIdx >= 0) {
+        const updated = [...prev];
+        updated[cashIdx] = { ...updated[cashIdx], amount: tenderedAmount };
+        return updated;
+      }
+      return [{ method: "CASH", amount: tenderedAmount }];
+    });
+    setPayingCashAmount(tenderedAmount);
   };
 
   // Checkout Execution
@@ -619,7 +655,21 @@ export default function POSPage() {
       setPaymentModalOpen(false);
       clearCart();
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || err.response?.data?.detail || "Checkout failed. Please check stock or payments.";
+      let errorMsg = "Checkout failed. Please check stock or payments.";
+      if (err.response?.data) {
+        if (typeof err.response.data === "string") {
+          errorMsg = err.response.data;
+        } else if (err.response.data.error) {
+          errorMsg = typeof err.response.data.error === "string" ? err.response.data.error : JSON.stringify(err.response.data.error);
+        } else if (err.response.data.detail) {
+          errorMsg = typeof err.response.data.detail === "string" ? err.response.data.detail : JSON.stringify(err.response.data.detail);
+        } else {
+          const values = Object.values(err.response.data).flat();
+          if (values.length > 0) errorMsg = String(values[0]);
+        }
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
       setCheckoutError(errorMsg);
     } finally {
       setCheckoutLoading(false);
@@ -640,7 +690,7 @@ export default function POSPage() {
   const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(config?.trade_name || "BillFree Store")}&am=${remainingDue > 0 ? remainingDue.toFixed(2) : grandTotalNum.toFixed(2)}&cu=INR&tn=Invoice%20Bill`;
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] flex-col gap-3">
+    <div className="flex flex-col gap-3 min-h-[calc(100vh-8.5rem)] lg:h-[calc(100vh-8rem)] pb-16 lg:pb-0">
       {/* Top POS Header Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3 shadow-sm">
         <div className="flex items-center gap-3">
@@ -757,6 +807,46 @@ export default function POSPage() {
         </div>
       </div>
 
+      {/* Mobile/Tablet Screen View Switcher */}
+      <div className="flex lg:hidden items-center rounded-lg border bg-muted/40 p-1">
+        <button
+          type="button"
+          onClick={() => setMobileTab("catalog")}
+          className={cn(
+            "flex-1 py-1.5 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all",
+            mobileTab === "catalog"
+              ? "bg-background text-foreground shadow-xs border"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <ShoppingBag className="h-3.5 w-3.5" />
+          <span>Catalog & Items</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab("cart")}
+          className={cn(
+            "flex-1 py-1.5 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all relative",
+            mobileTab === "cart"
+              ? "bg-background text-foreground shadow-xs border"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Receipt className="h-3.5 w-3.5" />
+          <span>Cart & Checkout</span>
+          {cart.length > 0 && (
+            <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground leading-none">
+              {cart.length}
+            </span>
+          )}
+          {cart.length > 0 && (
+            <span className="font-bold text-primary text-xs ml-1">
+              ₹{grandTotalNum.toFixed(0)}
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* Quotation Loaded Notification Banner (PDF Page 10) */}
       {loadedQuoteBanner && (
         <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-xs text-blue-900 dark:text-blue-200 flex items-center justify-between shadow-xs animate-in fade-in">
@@ -778,7 +868,7 @@ export default function POSPage() {
       {/* Main Work Area: Left Catalog & Right Cart */}
       <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-12">
         {/* Left Side: Product Search, Category Pills, Grid */}
-        <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-sm lg:col-span-7 xl:col-span-8 overflow-hidden">
+        <div className={cn("flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-sm lg:col-span-7 xl:col-span-8 overflow-hidden", mobileTab === "cart" ? "hidden lg:flex" : "flex")}>
           {/* Search bar + Quick Add Product */}
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
@@ -918,7 +1008,7 @@ export default function POSPage() {
         </div>
 
         {/* Right Side: Cart, Customer, Calculations, and Actions */}
-        <div className="flex flex-col rounded-lg border bg-card p-3 shadow-sm lg:col-span-5 xl:col-span-4 overflow-hidden">
+        <div className={cn("flex flex-col rounded-lg border bg-card p-3 shadow-sm lg:col-span-5 xl:col-span-4 overflow-hidden", mobileTab === "catalog" ? "hidden lg:flex" : "flex")}>
           {/* Customer Selection Header */}
           <div className="flex items-center justify-between border-b pb-2.5">
             <div className="flex items-center gap-2">
@@ -1096,8 +1186,8 @@ export default function POSPage() {
               <Button
                 size="sm"
                 onClick={openPaymentModal}
-                disabled={cart.length === 0 || calcLoading}
-                className="text-xs h-9 font-bold bg-primary text-primary-foreground gap-1 hover:bg-primary/90"
+                disabled={cart.length === 0}
+                className="text-xs h-9 font-bold bg-primary text-primary-foreground gap-1 hover:bg-primary/90 shadow-sm cursor-pointer"
               >
                 <CreditCard className="h-3.5 w-3.5" />
                 Pay (F8)
@@ -1107,68 +1197,173 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* MODAL 1: Payment Checkout Modal (Multi-split, UPI QR, Udhaar) */}
+      {/* Sticky Floating Mobile Checkout Bar (Visible on mobile/tablet catalog view when cart has items) */}
+      {mobileTab === "catalog" && cart.length > 0 && (
+        <div className="lg:hidden fixed bottom-3 left-3 right-3 z-30 flex items-center justify-between rounded-xl bg-slate-900/95 text-white p-3 shadow-2xl border border-slate-700/80 backdrop-blur-md animate-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs shadow-sm">
+              {cart.reduce((s, i) => s + i.quantity, 0)}
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-emerald-400">₹{grandTotalNum.toFixed(2)}</span>
+                <span className="text-[10px] text-slate-400">({cart.length} items)</span>
+              </div>
+              <p className="text-[10px] text-slate-300">
+                {isWalkIn ? "Walk-in Customer" : selectedCustomer?.full_name || "Customer Selected"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setMobileTab("cart")}
+              className="text-xs h-8 px-2.5 font-medium border-slate-600 bg-slate-800 text-white hover:bg-slate-700"
+            >
+              View Cart
+            </Button>
+            <Button
+              size="sm"
+              onClick={openPaymentModal}
+              className="text-xs h-8 px-3 font-bold bg-primary hover:bg-primary/90 text-primary-foreground gap-1 shadow-sm"
+            >
+              <CreditCard className="h-3.5 w-3.5" />
+              Pay Now
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: Payment Checkout Modal (Multi-split, UPI QR, Udhaar, Fast Presets) */}
       <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between text-lg">
-              <span>Checkout & Payment</span>
-              <span className="text-xl font-black text-primary">₹{grandTotalNum.toFixed(2)}</span>
+        <DialogContent className="max-w-2xl w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
+          <DialogHeader className="border-b pb-3 shrink-0">
+            <DialogTitle className="flex items-center justify-between text-base sm:text-lg">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-primary" />
+                <span>Checkout & Settlement</span>
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-normal text-muted-foreground block">Payable Amount</span>
+                <span className="text-xl font-black text-primary">₹{grandTotalNum.toFixed(2)}</span>
+              </div>
             </DialogTitle>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 py-2">
-            {/* Left: Payment Method Selector */}
-            <div className="md:col-span-7 space-y-3">
-              <div className="flex flex-wrap gap-2">
+          <div className="flex-1 overflow-y-auto pr-1 py-2 space-y-4 min-h-0">
+            {/* Primary Payment Method Selector with Instant Single-Click Switch */}
+            <div>
+              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                Select Payment Method
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {[
                   { id: "CASH", label: "Cash", icon: Banknote },
                   { id: "UPI", label: "UPI QR", icon: QrCode },
                   { id: "CARD", label: "Card", icon: CreditCard },
                   { id: "CREDIT", label: "Udhaar / Credit", icon: Receipt },
-                ].map((m) => (
+                ].map((m) => {
+                  const isSelected = payments.length === 1 && payments[0].method === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setPrimaryPaymentMethod(m.id)}
+                      className={cn(
+                        "flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs font-semibold transition-all gap-1 text-center cursor-pointer",
+                        isSelected
+                          ? "border-primary bg-primary/10 text-primary ring-1 ring-primary shadow-xs font-bold"
+                          : "border-border bg-card hover:bg-muted/60 text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <m.icon className={cn("h-4 w-4", isSelected ? "text-primary" : "text-muted-foreground")} />
+                      <span>{m.label}</span>
+                      {isSelected && <span className="text-[10px] text-primary font-bold">✓ Active</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Fast Cash Tender Shortcuts (Visible when Cash is in payment lines) */}
+            {payments.some((p) => p.method === "CASH") && (
+              <div className="rounded-lg border bg-emerald-500/5 border-emerald-500/25 p-2.5 space-y-1.5">
+                <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 block">
+                  ⚡ Fast Cash Tender Shortcuts:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
                   <Button
-                    key={m.id}
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => addPaymentMethod(m.id)}
-                    className="gap-1 text-xs"
+                    onClick={() => setQuickCashTender(grandTotalNum)}
+                    className="h-7 text-xs bg-emerald-100/60 hover:bg-emerald-200/70 border-emerald-300 text-emerald-900 font-bold"
                   >
-                    <m.icon className="h-3.5 w-3.5" />
-                    + {m.label}
+                    Exact ₹{grandTotalNum.toFixed(2)}
                   </Button>
-                ))}
+                  {(() => {
+                    const presets = [100, 200, 500, 1000, 2000].filter((n) => n >= grandTotalNum);
+                    const noteButtons = presets.slice(0, 4);
+                    return noteButtons.map((amt) => (
+                      <Button
+                        key={amt}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setQuickCashTender(amt)}
+                        className="h-7 text-xs bg-white dark:bg-card border-border hover:bg-muted font-semibold"
+                      >
+                        ₹{amt} Note
+                      </Button>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
 
-                {/* PDF Page 10: Exact Amount quick-settle button */}
-                <Button
+            {/* Payment Lines Breakdown (Supports Single & Multi-method Split) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Payment Allocations {payments.length > 1 && "(Split Sale)"}
+                </label>
+                <button
                   type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    const payable = grandTotalNum > 0 ? grandTotalNum : localCartSubtotal;
-                    setPayments([{ method: "CASH", amount: payable }]);
-                  }}
-                  className="gap-1 text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold"
+                  onClick={() => addSplitPaymentMethod(payments.some((p) => p.method === "UPI") ? "CASH" : "UPI")}
+                  className="text-xs text-primary font-semibold hover:underline flex items-center gap-1"
                 >
-                  ⚡ Exact amount!
-                </Button>
+                  <Plus className="h-3 w-3" />
+                  Add Split Method
+                </button>
               </div>
 
-              {/* Payment Split Lines */}
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
                 {payments.map((p, idx) => (
-                  <div key={idx} className="flex items-center gap-2 rounded border p-2 bg-muted/20 text-xs">
-                    <span className="w-20 font-bold uppercase">{p.method}</span>
+                  <div key={idx} className="flex flex-wrap sm:flex-nowrap items-center gap-2 rounded-lg border p-2 bg-muted/20 text-xs">
+                    <select
+                      value={p.method}
+                      onChange={(e) => updatePaymentMethod(idx, e.target.value)}
+                      className="h-8 rounded border bg-background px-2 font-bold uppercase text-xs w-28 shrink-0"
+                    >
+                      <option value="CASH">Cash</option>
+                      <option value="UPI">UPI QR</option>
+                      <option value="CARD">Card</option>
+                      <option value="CREDIT">Udhaar</option>
+                    </select>
+                    <div className="relative flex-1 min-w-[120px]">
+                      <span className="absolute left-2.5 top-2 text-muted-foreground font-bold">₹</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={p.amount}
+                        onChange={(e) => updatePaymentAmount(idx, parseFloat(e.target.value) || 0)}
+                        className="h-8 pl-6 text-xs font-bold font-mono"
+                      />
+                    </div>
                     <Input
-                      type="number"
-                      min="0"
-                      value={p.amount}
-                      onChange={(e) => updatePaymentAmount(idx, parseFloat(e.target.value) || 0)}
-                      className="h-8 text-xs font-semibold"
-                    />
-                    <Input
-                      placeholder="Ref / Note (Optional)"
+                      placeholder="Ref / Note / Auth No"
                       value={p.reference || ""}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1178,61 +1373,55 @@ export default function POSPage() {
                           return updated;
                         });
                       }}
-                      className="h-8 text-xs"
+                      className="h-8 text-xs flex-1 min-w-[120px]"
                     />
-                    <button
-                      onClick={() => removePaymentLine(idx)}
-                      className="text-destructive hover:text-destructive/80"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {payments.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removePaymentLine(idx)}
+                        className="text-destructive hover:text-destructive/80 p-1 rounded hover:bg-destructive/10 shrink-0"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
-
-              {/* Udhaar / Customer Notice */}
-              {payments.some((p) => p.method === "CREDIT") && (
-                <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-800">
-                  <p className="font-semibold">Udhaar / Customer Credit Sale:</p>
-                  {isWalkIn ? (
-                    <p className="text-destructive font-medium mt-1">
-                      ⚠️ Walk-in customers cannot take Credit sales. Please select or register a customer first (F4).
-                    </p>
-                  ) : (
-                    <p className="mt-0.5">
-                      Account: {selectedCustomer?.full_name} | Outstanding: ₹{selectedCustomer?.outstanding_credit || 0}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Checkout Error */}
-              {checkoutError && (
-                <div className="rounded border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive flex items-center gap-1.5">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  <span>{checkoutError}</span>
-                </div>
-              )}
             </div>
 
-            {/* Right: UPI QR Code & Balance Details */}
-            <div className="md:col-span-5 flex flex-col items-center justify-between rounded-lg border bg-muted/30 p-3 text-center">
-              <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Scan to Pay (UPI)
-                </p>
-                <div className="mt-2 flex justify-center bg-white p-2 rounded-lg border shadow-sm">
-                  {/* Standard QR Code Generator Image */}
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(upiUrl)}`}
-                    alt="UPI Payment QR"
-                    className="h-32 w-32"
-                  />
-                </div>
-                <p className="mt-1 text-[11px] font-mono text-muted-foreground">{upiId}</p>
+            {/* Split / Methods Footer & Live Settlement Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
+              {/* Left: Customer Info or Udhaar Notes */}
+              <div className="md:col-span-7 space-y-2">
+                {payments.some((p) => p.method === "CREDIT") && (
+                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <Receipt className="h-3.5 w-3.5 text-amber-600" />
+                      Udhaar / Customer Credit Sale
+                    </p>
+                    {isWalkIn ? (
+                      <p className="text-destructive font-medium mt-1">
+                        ⚠️ Walk-in customers cannot take Credit sales. Please select or register a customer first (F4).
+                      </p>
+                    ) : (
+                      <p className="mt-0.5 text-muted-foreground">
+                        Customer: <strong>{selectedCustomer?.full_name}</strong> • Phone: {selectedCustomer?.phone} • Outstanding: ₹{selectedCustomer?.outstanding_credit || 0}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Checkout Error Alert */}
+                {checkoutError && (
+                  <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive flex items-center gap-1.5 animate-in shake">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{checkoutError}</span>
+                  </div>
+                )}
               </div>
 
-              <div className="w-full border-t pt-2 mt-2 space-y-1 text-xs">
+              {/* Right: Live Payment Balance Calculations */}
+              <div className="md:col-span-5 rounded-lg border bg-muted/30 p-2.5 space-y-1 text-xs">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total Bill:</span>
                   <span className="font-bold">₹{grandTotalNum.toFixed(2)}</span>
@@ -1247,26 +1436,69 @@ export default function POSPage() {
                     ₹{remainingDue.toFixed(2)}
                   </span>
                 </div>
-                {totalPaidSoFar > grandTotalNum && (
-                  <div className="flex justify-between font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded mt-1">
+                {cashChange > 0 && (
+                  <div className="flex justify-between font-bold text-amber-700 dark:text-amber-300 bg-amber-500/15 p-1.5 rounded mt-1">
                     <span>Cash Change:</span>
-                    <span>₹{(totalPaidSoFar - grandTotalNum).toFixed(2)}</span>
+                    <span>₹{cashChange.toFixed(2)}</span>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* UPI QR Display if UPI is in payment lines */}
+            {payments.some((p) => p.method === "UPI") && (
+              <div className="rounded-lg border bg-card p-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white p-1.5 rounded-lg border shadow-xs shrink-0">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(upiUrl)}`}
+                      alt="UPI Payment QR"
+                      className="h-20 w-20"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold block">Scan to Pay via UPI</span>
+                    <span className="text-[11px] font-mono text-muted-foreground block">{upiId}</span>
+                    <span className="text-[11px] font-bold text-emerald-600 block mt-0.5">
+                      Amount: ₹{payments.find((p) => p.method === "UPI")?.amount.toFixed(2) || grandTotalNum.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground text-center sm:text-right">
+                  <span className="inline-block rounded bg-muted px-2 py-1 text-[11px] font-mono">
+                    GooglePay • PhonePe • Paytm • BHIM
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setPaymentModalOpen(false)}>
+          <DialogFooter className="mt-2 pt-2 border-t flex flex-row items-center justify-between sm:justify-end gap-2 shrink-0 bg-background">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPaymentModalOpen(false)}
+              disabled={checkoutLoading}
+            >
               Cancel
             </Button>
             <Button
+              type="button"
               onClick={handleCheckout}
               disabled={checkoutLoading || (payments.some((p) => p.method === "CREDIT") && isWalkIn)}
-              className="font-bold bg-primary text-primary-foreground"
+              className="font-bold bg-primary text-primary-foreground gap-1.5 min-w-[130px]"
             >
-              {checkoutLoading ? "Processing..." : "Complete Sale"}
+              {checkoutLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Processing...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>Complete Sale</span>
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1274,7 +1506,7 @@ export default function POSPage() {
 
       {/* MODAL 2: Post-Sale Receipt & Print Dialog */}
       <Dialog open={!!completedSale} onOpenChange={() => setCompletedSale(null)}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-emerald-600">
               <CheckCircle2 className="h-5 w-5" />
@@ -1411,7 +1643,7 @@ export default function POSPage() {
 
       {/* MODAL 3: Customer Selector & Quick Create */}
       <Dialog open={customerModalOpen} onOpenChange={setCustomerModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
           <DialogHeader>
             <DialogTitle>Select or Add Customer</DialogTitle>
           </DialogHeader>
@@ -1506,7 +1738,7 @@ export default function POSPage() {
 
       {/* MODAL 4: Quick Add Product Dialog */}
       <Dialog open={quickAddModalOpen} onOpenChange={setQuickAddModalOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
           <DialogHeader>
             <DialogTitle>Quick Add Product</DialogTitle>
           </DialogHeader>
@@ -1650,7 +1882,7 @@ export default function POSPage() {
 
       {/* MODAL 5: Held Carts Retrieval */}
       <Dialog open={heldModalOpen} onOpenChange={setHeldModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
           <DialogHeader>
             <DialogTitle>Held Bills ({heldCarts.length})</DialogTitle>
           </DialogHeader>

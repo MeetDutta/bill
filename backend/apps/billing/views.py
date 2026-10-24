@@ -233,15 +233,20 @@ class POSCheckoutView(APIView):
         idempotency_key = request.headers.get("Idempotency-Key") or request.data.get("idempotency_key")
         store = resolve_request_store(request)
 
-        result = CheckoutService.process_checkout(
-            organization=org,
-            store=store,
-            user=request.user,
-            cart_data=request.data,
-            idempotency_key=idempotency_key,
-        )
-
-        return Response(result, status=status.HTTP_201_CREATED)
+        try:
+            result = CheckoutService.process_checkout(
+                organization=org,
+                store=store,
+                user=request.user,
+                cart_data=request.data,
+                idempotency_key=idempotency_key,
+            )
+            return Response(result, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            error_detail = e.detail if hasattr(e, "detail") else str(e)
+            if isinstance(error_detail, list) and len(error_detail) == 1:
+                error_detail = error_detail[0]
+            return Response({"error": error_detail}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class POSHeldCartView(APIView):
