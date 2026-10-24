@@ -7,6 +7,7 @@ export interface User {
   phone: string;
   role: string;
   organization: string;
+  organization_name?: string;
   is_active: boolean;
   is_verified: boolean;
   created_at: string;
@@ -54,22 +55,39 @@ export interface Transaction {
   id: string;
   invoice_number: string;
   customer: string;
+  customer_name?: string;
   store: string;
   total: number;
   payment_method: string;
+  payment_status?: string;
+  amount_paid?: number;
+  subtotal?: number;
+  tax?: number;
   status: string;
   transaction_date: string;
   item_count: number;
   items?: any[];
+  invoice?: {
+    id: string;
+    invoice_number: string;
+    web_url?: string;
+    pdf_url?: string;
+  };
 }
 
 export interface Product {
   id: string;
-  external_id: string;
+  external_id?: string;
   name: string;
   sku: string;
+  barcode?: string;
   unit_price: number;
+  selling_price?: number | string;
+  purchase_price?: number | string;
   tax_rate: number;
+  current_stock?: number | string;
+  track_inventory?: boolean;
+  category?: { id?: string; name?: string } | any;
   is_active: boolean;
 }
 

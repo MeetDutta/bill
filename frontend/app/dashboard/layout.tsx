@@ -38,6 +38,7 @@ import {
   ChevronRight,
   Menu,
   X,
+  Smartphone,
 } from "lucide-react";
 import { CopilotDrawer } from "@/components/CopilotDrawer";
 
@@ -383,7 +384,15 @@ export default function DashboardLayout({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Link
+              href="/m/pos"
+              className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1.5 text-xs font-semibold shadow-sm transition-all"
+              title="Open Dedicated Mobile Smartphone POS"
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+              <span>Mobile POS</span>
+            </Link>
             <Link
               href="/dashboard/pos"
               className="flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all"
@@ -393,6 +402,17 @@ export default function DashboardLayout({
             </Link>
           </div>
         </header>
+
+        {/* Mobile Viewport Prompt Banner (visible only on small mobile viewports) */}
+        <div className="md:hidden bg-blue-50 border-b border-blue-100 px-3 py-1.5 text-xs flex items-center justify-between text-blue-900">
+          <span className="text-[11px] font-medium">Using a phone? Switch to the mobile experience</span>
+          <Link
+            href="/m/dashboard"
+            className="rounded bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm hover:bg-blue-700 shrink-0 ml-2"
+          >
+            Mobile POS →
+          </Link>
+        </div>
 
         {/* Page Content */}
         <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto">
