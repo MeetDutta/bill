@@ -63,7 +63,8 @@ export const productApi = {
 
 // Transactions
 export const transactionApi = {
-  list: () => api.get<PaginatedResponse<Transaction>>("/transactions/"),
+  list: (params?: { search?: string; store?: string; status?: string; payment_method?: string; page?: number }) =>
+    api.get<PaginatedResponse<Transaction>>("/transactions/", { params }),
   get: (id: string) => api.get<Transaction>(`/transactions/${id}/`),
   ingest: (data: unknown) => api.post("/transactions/ingest/", data),
 };
@@ -240,6 +241,7 @@ export const quotationApi = {
     page?: number;
   }) => api.get<PaginatedResponse<Quotation>>("/quotations/", { params }),
   get: (id: string) => api.get<Quotation>(`/quotations/${id}/`),
+  lookupByNumber: (quoteNum: string) => api.get<Quotation>(`/quotations/lookup/${encodeURIComponent(quoteNum)}/`),
   create: (data: unknown) => api.post<Quotation>("/quotations/", data),
   update: (id: string, data: unknown) => api.patch<Quotation>(`/quotations/${id}/`, data),
   delete: (id: string) => api.delete(`/quotations/${id}/`),

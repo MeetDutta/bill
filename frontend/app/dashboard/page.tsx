@@ -35,6 +35,7 @@ import {
   DollarSign,
   PackageX,
   CheckCircle2,
+  Boxes,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -126,6 +127,19 @@ export default function DashboardPage() {
   const lowStockCount = Number(data?.low_stock_count || 0);
   const todayTransactionsCount = Number(data?.today_transactions_count || 0);
   const estimatedGrossProfit = Number(data?.estimated_gross_profit || 0);
+
+  const weekRevenue = Number(data?.week_revenue || 0);
+  const monthRevenue = Number(data?.month_revenue || 0);
+  const allTimeRevenue = Number(data?.all_time_revenue || Number(data?.total_revenue || 0));
+  const avgBillValue = Number(data?.avg_bill_value || (todayTransactionsCount > 0 ? todayNetSales / todayTransactionsCount : 0));
+  const stockValue = Number(data?.stock_value || 0);
+  const totalProducts = Number(data?.total_products_count || 0);
+  const inStockCount = Number(data?.in_stock_count || 0);
+  const outOfStockCount = Number(data?.out_of_stock_count || 0);
+  const totalSuppliers = Number(data?.total_suppliers_count || 0);
+  const supplierDues = Number(data?.supplier_dues || 0);
+  const salesByCategory = data?.sales_by_category || [];
+  const salesTrend30 = data?.sales_trend_30 || [];
 
   const paymentBreakdown = data?.payment_methods_breakdown || [];
   const hourlySales = data?.hourly_sales || [];
@@ -265,86 +279,326 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* PRIMARY EXECUTIVE KPI CARDS */}
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 lg:grid-cols-5">
-        {/* Today's Net Sales */}
-        <Card className="border-primary/30 bg-gradient-to-br from-primary/5 via-background to-background">
-          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3.5 px-4">
-            <span className="text-xs font-semibold text-muted-foreground">Today&apos;s Net Sales</span>
-            <TrendingUp className="h-4 w-4 text-primary" />
+      {/* EXECUTIVE KPI GRID - ROW 1: SALES VELOCITY & REVENUE */}
+      <div>
+        <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Sales Velocity & Performance</h2>
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+          {/* Today's Net Sales */}
+          <Card className="border-primary/30 bg-gradient-to-br from-primary/5 via-background to-background">
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">Today&apos;s Net Sales</span>
+              <TrendingUp className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-foreground">
+                {formatCurrency(todayNetSales)}
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-0.5 flex justify-between">
+                <span>Gross: {formatCurrency(todayGrossSales)}</span>
+                <span>{todayTransactionsCount} bills</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Today's Avg Bill */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">Avg Bill Value</span>
+              <Receipt className="h-4 w-4 text-blue-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-foreground">
+                {formatCurrency(avgBillValue)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Returns: {formatCurrency(todayReturns)}
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* This Week */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">This Week</span>
+              <Activity className="h-4 w-4 text-indigo-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-indigo-600">
+                {formatCurrency(weekRevenue)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Last 7 calendar days</p>
+            </CardContent>
+          </Card>
+
+          {/* This Month */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">This Month</span>
+              <TrendingUp className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-emerald-600">
+                {formatCurrency(monthRevenue)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Month to date gross</p>
+            </CardContent>
+          </Card>
+
+          {/* All-Time Sales */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">All-Time Revenue</span>
+              <Wallet className="h-4 w-4 text-purple-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-purple-600">
+                {formatCurrency(allTimeRevenue)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Lifetime verified sales</p>
+            </CardContent>
+          </Card>
+
+          {/* Gross Profit */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">Est. Gross Profit</span>
+              <DollarSign className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-emerald-600">
+                {formatCurrency(estimatedGrossProfit)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Revenue less purchase cost</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* EXECUTIVE KPI GRID - ROW 2: INVENTORY & WORKING CAPITAL */}
+      <div>
+        <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Inventory Valuation & Dues</h2>
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+          {/* Stock Valuation */}
+          <Card className="border-emerald-500/20 bg-emerald-500/5">
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">Stock Value</span>
+              <Boxes className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-emerald-700 dark:text-emerald-400">
+                {formatCurrency(stockValue)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{totalProducts} active catalog SKUs</p>
+            </CardContent>
+          </Card>
+
+          {/* In-Stock SKUs */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">In Stock</span>
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-emerald-600">
+                {inStockCount}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Healthy on-shelf inventory</p>
+            </CardContent>
+          </Card>
+
+          {/* Low Stock Alerts */}
+          <Card className={lowStockCount > 0 ? "border-amber-500/30 bg-amber-500/5" : ""}>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">Low Stock Alert</span>
+              <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? "text-amber-600" : "text-muted-foreground"}`} />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className={`text-xl font-black ${lowStockCount > 0 ? "text-amber-600" : "text-foreground"}`}>
+                {lowStockCount}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Below reorder threshold</p>
+            </CardContent>
+          </Card>
+
+          {/* Out of Stock */}
+          <Card className={outOfStockCount > 0 ? "border-rose-500/30 bg-rose-500/5" : ""}>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">Out of Stock</span>
+              <PackageX className={`h-4 w-4 ${outOfStockCount > 0 ? "text-rose-600" : "text-muted-foreground"}`} />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className={`text-xl font-black ${outOfStockCount > 0 ? "text-rose-600" : "text-foreground"}`}>
+                {outOfStockCount}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Zero stock items</p>
+            </CardContent>
+          </Card>
+
+          {/* Customer Dues (Udhaar) */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">Customer Dues (Udhaar)</span>
+              <Wallet className="h-4 w-4 text-amber-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-amber-600">
+                {formatCurrency(todayOutstanding)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Total outstanding receivables</p>
+            </CardContent>
+          </Card>
+
+          {/* Supplier Payables */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
+              <span className="text-[11px] font-semibold text-muted-foreground">Supplier Dues</span>
+              <CreditCard className="h-4 w-4 text-blue-600" />
+            </CardHeader>
+            <CardContent className="px-3.5 pb-3">
+              <div className="text-xl font-black text-blue-600">
+                {formatCurrency(supplierDues)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{totalSuppliers} active suppliers</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* 30-DAY SALES TREND & CATEGORY BREAKDOWN (PDF Page 1-2) */}
+      <div className="grid gap-4 md:grid-cols-12">
+        {/* 30-Day Trend Table & Chart (7 Cols) */}
+        <Card className="md:col-span-7 flex flex-col">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-bold flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-primary" />
+                <span>30-Day Sales Trend</span>
+              </div>
+              <Badge variant="outline" className="text-xs font-semibold">
+                Past 30 Days
+              </Badge>
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Daily revenue trajectory and transaction volume
+            </CardDescription>
           </CardHeader>
-          <CardContent className="px-4 pb-3.5">
-            <div className="text-2xl font-black text-foreground">
-              {formatCurrency(todayNetSales)}
-            </div>
-            <div className="text-[11px] text-muted-foreground mt-1 flex items-center justify-between">
-              <span>Gross: {formatCurrency(todayGrossSales)}</span>
-              <span>{todayTransactionsCount} bills</span>
+          <CardContent className="flex-1 space-y-4">
+            {salesTrend30.length > 0 && salesTrend30.some((p) => p.revenue > 0) ? (
+              <div className="h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={salesTrend30} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="trend30Gradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis
+                      dataKey="formatted_date"
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fill: "#64748b", fontSize: 10 }}
+                      interval={4}
+                    />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fill: "#64748b", fontSize: 10 }}
+                      tickFormatter={(val) => `₹${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`}
+                    />
+                    <Tooltip
+                      formatter={(val: number) => [formatCurrency(val), "Sales"]}
+                      labelFormatter={(label) => `Date: ${label}`}
+                      contentStyle={{
+                        backgroundColor: "#ffffff",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                        fontSize: "12px",
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="revenue"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#trend30Gradient)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : null}
+
+            {/* Daily History Mini Table (matching PDF Page 1) */}
+            <div className="rounded-lg border overflow-hidden max-h-48 overflow-y-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-muted/50 border-b font-semibold text-muted-foreground text-[10px] uppercase">
+                  <tr>
+                    <th className="py-2 px-3">Date</th>
+                    <th className="py-2 px-3 text-center">Bills Count</th>
+                    <th className="py-2 px-3 text-right">Gross Revenue</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {salesTrend30.slice().reverse().slice(0, 10).map((row, idx) => (
+                    <tr key={idx} className="hover:bg-muted/20">
+                      <td className="py-1.5 px-3 font-medium">{row.formatted_date}</td>
+                      <td className="py-1.5 px-3 text-center font-mono">{row.transactions}</td>
+                      <td className="py-1.5 px-3 text-right font-mono font-bold text-foreground">
+                        {formatCurrency(row.revenue)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </CardContent>
         </Card>
 
-        {/* Collected Funds */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3.5 px-4">
-            <span className="text-xs font-semibold text-muted-foreground">Amount Collected</span>
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+        {/* Category Breakdown (5 Cols, matching PDF Page 2) */}
+        <Card className="md:col-span-5 flex flex-col">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-bold flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Boxes className="h-4 w-4 text-emerald-600" />
+                <span>Sales by Category</span>
+              </div>
+              <span className="text-xs text-muted-foreground font-normal">Past 30 Days</span>
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Product category revenue contribution and unit volume
+            </CardDescription>
           </CardHeader>
-          <CardContent className="px-4 pb-3.5">
-            <div className="text-2xl font-black text-emerald-600">
-              {formatCurrency(todayCollected)}
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              Cash, UPI & verified card settlements
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Outstanding Receivables */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3.5 px-4">
-            <span className="text-xs font-semibold text-muted-foreground">Outstanding Credit</span>
-            <Wallet className="h-4 w-4 text-amber-600" />
-          </CardHeader>
-          <CardContent className="px-4 pb-3.5">
-            <div className="text-2xl font-black text-amber-600">
-              {formatCurrency(todayOutstanding)}
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              Udhaar & unpaid customer balances
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Estimated Gross Profit */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3.5 px-4">
-            <span className="text-xs font-semibold text-muted-foreground">Est. Gross Profit</span>
-            <DollarSign className="h-4 w-4 text-indigo-600" />
-          </CardHeader>
-          <CardContent className="px-4 pb-3.5">
-            <div className="text-2xl font-black text-indigo-600">
-              {formatCurrency(estimatedGrossProfit)}
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              Net revenue minus item unit purchase costs
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Low Stock Alerts */}
-        <Card className={lowStockCount > 0 ? "border-rose-500/30 bg-rose-500/5" : ""}>
-          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3.5 px-4">
-            <span className="text-xs font-semibold text-muted-foreground">Low Stock Alert</span>
-            <PackageX className="h-4 w-4 text-rose-600" />
-          </CardHeader>
-          <CardContent className="px-4 pb-3.5">
-            <div className={`text-2xl font-black ${lowStockCount > 0 ? "text-rose-600" : "text-foreground"}`}>
-              {lowStockCount}
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              {lowStockCount > 0 ? "SKUs below minimum threshold" : "All inventories healthy"}
-            </p>
+          <CardContent className="flex-1 space-y-3">
+            {salesByCategory.length > 0 ? (
+              salesByCategory.map((cat, idx) => (
+                <div key={idx} className="space-y-1.5 rounded-lg border p-2.5 bg-muted/20 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-foreground">{cat.category}</span>
+                    <span className="font-mono font-bold">{formatCurrency(cat.total)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>{cat.items_sold} units sold</span>
+                    <span>{cat.percentage}% of sales</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(100, Math.max(0, cat.percentage))}%` }}
+                    />
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center h-48 text-center text-muted-foreground">
+                <Boxes className="h-8 w-8 mb-2 opacity-30 stroke-1" />
+                <p className="text-xs font-semibold">No category sales recorded</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Items assigned to categories will reflect their share here upon checkout.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

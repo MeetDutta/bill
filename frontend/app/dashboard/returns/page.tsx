@@ -12,7 +12,7 @@ import {
   Banknote,
   CreditCard,
 } from "lucide-react";
-import { posApi, transactionApi } from "@/services/api";
+import { posApi, transactionApi, invoiceApi } from "@/services/api";
 import { SalesReturn, Transaction } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,15 +64,29 @@ export default function ReturnsPage() {
     setSelectedTxn(null);
 
     try {
-      // Find transaction by invoice number
-      const res = await transactionApi.list();
-      const txns = res.data?.results || [];
-      const match = txns.find(
+      // Find transaction by invoice number with search filter
+      const res = await transactionApi.list({ search: invoiceQuery.trim() });
+      const txns = res.data?.results || (Array.isArray(res.data) ? res.data : []);
+      let match: any = txns.find(
         (t: any) => t.invoice_number?.toLowerCase() === invoiceQuery.trim().toLowerCase()
       );
 
+      // If not in transaction list, check invoices
       if (!match) {
-        setSearchError(`No transaction found for invoice "${invoiceQuery}".`);
+        const invRes = await invoiceApi.list({ search: invoiceQuery.trim() });
+        const invs = invRes.data?.results || [];
+        const invMatch = invs.find(
+          (inv: any) => inv.invoice_number?.toLowerCase() === invoiceQuery.trim().toLowerCase()
+        );
+        if (invMatch && (invMatch as any).transaction?.id) {
+          match = (invMatch as any).transaction;
+        } else if (invMatch && (invMatch as any).id) {
+          match = { id: (invMatch as any).id, invoice_number: invMatch.invoice_number };
+        }
+      }
+
+      if (!match) {
+        setSearchError(`No completed transaction found for bill / invoice "${invoiceQuery}".`);
         return;
       }
 

@@ -258,11 +258,11 @@ export default function DashboardLayout({
         <div className="flex h-16 items-center justify-between border-b px-5">
           <Link href="/dashboard" onClick={closeMobile} className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-black text-lg tracking-wider shadow-sm">
-              BF
+              BM
             </div>
             <div>
-              <span className="text-lg font-bold tracking-tight text-foreground block leading-tight">BillFree</span>
-              <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Universal POS</span>
+              <span className="text-lg font-bold tracking-tight text-foreground block leading-tight">BillMeet</span>
+              <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Retail POS & ERP</span>
             </div>
           </Link>
           <button

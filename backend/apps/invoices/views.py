@@ -331,6 +331,30 @@ class QuotationDetailView(generics.RetrieveUpdateDestroyAPIView):
         serializer.save()
 
 
+class QuotationLookupView(APIView):
+    """
+    Looks up a quotation by exact or partial quotation number (e.g., QT-2026-0001 or 0001)
+    and returns its full details including items and customer info for POS loading.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, number):
+        org = request.user.organization
+        cleaned = number.strip()
+        quotation = Quotation.objects.filter(
+            organization=org
+        ).filter(
+            models.Q(quotation_number__iexact=cleaned) |
+            models.Q(quotation_number__icontains=cleaned)
+        ).select_related("customer", "store", "converted_invoice", "created_by").prefetch_related("items__product").first()
+
+        if not quotation:
+            return Response({"error": f"Quotation '{number}' not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = QuotationSerializer(quotation)
+        return Response(serializer.data)
+
+
 class QuotationConvertView(APIView):
     """
     Converts an existing Quotation into an official Transaction + Invoice.

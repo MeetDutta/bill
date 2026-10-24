@@ -43,15 +43,17 @@ def compute_analytics(org):
     from apps.campaigns.models import Campaign
     from apps.loyalty.models import LoyaltyAccount
     from apps.coupons.models import CouponRedemption
-    from apps.products.models import Product
+    from apps.products.models import Product, Supplier, PurchaseOrder, ProductCategory
     from django.db import models
 
     now = timezone.now()
     today = now.date()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = today.replace(day=1)
+    week_start = today_start - timedelta(days=7)
     days_back = 14
     start_date = today - timedelta(days=days_back - 1)
+    start_date_30 = today - timedelta(days=29)
 
     # 1. Real Today's Sales KPIs
     tx_today_qs = Transaction.objects.filter(
@@ -79,6 +81,30 @@ def compute_analytics(org):
         created_at__gte=today_start,
     ).aggregate(total=Sum("total_refund_amount"))["total"] or Decimal("0.00")
     net_sales_today = max(Decimal("0.00"), gross_sales_today - returns_today)
+    avg_bill_today = float(round((net_sales_today / completed_tx_count_today), 2)) if completed_tx_count_today > 0 else 0.0
+
+    # Sales periods (Week, Month, All-Time)
+    week_sales = Transaction.objects.filter(
+        organization=org,
+        transaction_date__gte=week_start,
+        status="completed",
+    ).aggregate(s=Sum("total"))["s"] or Decimal("0.00")
+
+    month_sales = Transaction.objects.filter(
+        organization=org,
+        transaction_date__gte=month_start,
+        status="completed",
+    ).aggregate(s=Sum("total"))["s"] or Decimal("0.00")
+
+    all_time_stats = Transaction.objects.filter(
+        organization=org,
+        status="completed",
+    ).aggregate(
+        total_rev=Sum("total"),
+        total_cnt=Count("id"),
+    )
+    all_time_sales = all_time_stats["total_rev"] or Decimal("0.00")
+    all_time_transactions = all_time_stats["total_cnt"] or 0
 
     # Payments collected today (from TransactionPayment)
     today_payments_sum = TransactionPayment.objects.filter(
@@ -87,18 +113,41 @@ def compute_analytics(org):
         status="success",
     ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
-    # Total customer outstanding credit
+    # Total customer outstanding credit (Customer Dues / Receivables)
     total_customer_outstanding = Customer.objects.filter(
         organization=org,
     ).aggregate(s=Sum("outstanding_credit"))["s"] or Decimal("0.00")
 
-    # Low stock product count
+    # Inventory Health & Counts
+    total_products_count = Product.objects.filter(organization=org, is_active=True).count()
+    out_of_stock_count = Product.objects.filter(
+        organization=org,
+        is_active=True,
+        track_inventory=True,
+        current_stock__lte=Decimal("0.00"),
+    ).count()
     low_stock_count = Product.objects.filter(
         organization=org,
         is_active=True,
         track_inventory=True,
+        current_stock__gt=Decimal("0.00"),
         current_stock__lte=models.F("min_stock"),
     ).count()
+    in_stock_count = max(0, total_products_count - out_of_stock_count - low_stock_count)
+
+    # Stock valuation (Sum of current_stock * cost_price or unit_price)
+    active_prods = Product.objects.filter(organization=org, is_active=True, current_stock__gt=Decimal("0.00"))
+    stock_value_dec = Decimal("0.00")
+    for prod in active_prods:
+        p_price = prod.cost_price if (prod.cost_price and prod.cost_price > Decimal("0.00")) else prod.unit_price
+        stock_value_dec += (p_price * prod.current_stock)
+
+    # Suppliers & Supplier Dues (Payables)
+    total_suppliers_count = Supplier.objects.filter(organization=org, is_active=True).count()
+    purchase_orders = PurchaseOrder.objects.filter(organization=org)
+    supplier_dues_dec = Decimal("0.00")
+    for po in purchase_orders:
+        supplier_dues_dec += po.outstanding_amount
 
     # Pending invoices count
     pending_invoices_count = Transaction.objects.filter(
@@ -275,6 +324,53 @@ def compute_analytics(org):
             "total_customers": running_total,
         })
 
+    # 8. Sales by Category (Past 30 Days)
+    cat_stats = TransactionItem.objects.filter(
+        transaction__organization=org,
+        transaction__status="completed",
+        transaction__transaction_date__gte=start_date_30,
+    ).values("product__category__name").annotate(
+        cat_total=Sum("total"),
+        items_sold=Sum("quantity"),
+    ).order_by("-cat_total")
+
+    sales_by_category = []
+    cat_grand = sum([c["cat_total"] or Decimal("0.00") for c in cat_stats], Decimal("0.00"))
+    for c in cat_stats:
+        cat_name = c["product__category__name"] or "General / Uncategorized"
+        total_c = c["cat_total"] or Decimal("0.00")
+        pct = float(round((total_c / cat_grand * Decimal("100.00")), 1)) if cat_grand > 0 else 0.0
+        sales_by_category.append({
+            "category": cat_name,
+            "total": float(total_c),
+            "items_sold": float(c["items_sold"] or 0),
+            "percentage": pct,
+        })
+
+    # 9. 30-Day Sales Trend (Line & Table data)
+    tx_in_30_range = Transaction.objects.filter(
+        organization=org,
+        transaction_date__date__gte=start_date_30,
+        transaction_date__date__lte=today,
+        status="completed",
+    ).values("transaction_date__date").annotate(
+        day_revenue=Sum("total"),
+        day_count=Count("id"),
+    )
+    tx_30_by_date = {t["transaction_date__date"]: t for t in tx_in_30_range}
+    sales_trend_30 = []
+    for i in range(30):
+        d = start_date_30 + timedelta(days=i)
+        day_data = tx_30_by_date.get(d)
+        rev = float(day_data["day_revenue"]) if day_data and day_data["day_revenue"] else 0.0
+        cnt = int(day_data["day_count"]) if day_data and day_data["day_count"] else 0
+        sales_trend_30.append({
+            "date": d.isoformat(),
+            "formatted_date": d.strftime("%d %b"),
+            "revenue": rev,
+            "transactions": cnt,
+        })
+
     return {
         "today": {
             "gross_sales": float(gross_sales_today),
@@ -288,6 +384,25 @@ def compute_analytics(org):
             "low_stock_count": low_stock_count,
             "pending_invoices_count": pending_invoices_count,
             "gross_profit": float(today_profit),
+            "avg_bill_value": avg_bill_today,
+        },
+        "kpis": {
+            "today_revenue": float(net_sales_today),
+            "today_sales_count": completed_tx_count_today,
+            "today_avg_bill": avg_bill_today,
+            "today_returns": float(returns_today),
+            "week_revenue": float(week_sales),
+            "month_revenue": float(month_sales),
+            "total_revenue": float(all_time_sales),
+            "total_transactions": all_time_transactions,
+            "stock_value": float(stock_value_dec),
+            "total_products": total_products_count,
+            "in_stock_count": in_stock_count,
+            "low_stock_count": low_stock_count,
+            "out_of_stock_count": out_of_stock_count,
+            "total_suppliers": total_suppliers_count,
+            "supplier_dues": float(supplier_dues_dec),
+            "customer_dues": float(total_customer_outstanding),
         },
         "today_gross_sales": float(gross_sales_today),
         "today_discounts": float(discounts_today),
@@ -297,7 +412,19 @@ def compute_analytics(org):
         "today_transactions_count": completed_tx_count_today,
         "today_collected": float(today_payments_sum),
         "today_outstanding": float(total_customer_outstanding),
+        "week_revenue": float(week_sales),
+        "month_revenue": float(month_sales),
+        "all_time_revenue": float(all_time_sales),
+        "all_time_transactions": all_time_transactions,
+        "avg_bill_value": avg_bill_today,
+        "stock_value": float(stock_value_dec),
+        "total_products_count": total_products_count,
+        "in_stock_count": in_stock_count,
         "low_stock_count": low_stock_count,
+        "out_of_stock_count": out_of_stock_count,
+        "total_suppliers_count": total_suppliers_count,
+        "supplier_dues": float(supplier_dues_dec),
+        "customer_dues": float(total_customer_outstanding),
         "pending_invoices_count": pending_invoices_count,
         "estimated_gross_profit": float(today_profit),
         "payment_methods": payment_methods_data,
@@ -306,12 +433,8 @@ def compute_analytics(org):
         "live_sales_activity": live_activity,
         "hourly_sales": hourly_sales,
         "top_products": top_products,
-        "total_revenue": str(tx_stats.get("total_revenue") or 0),
-        "total_transactions": Transaction.objects.filter(
-            organization=org,
-            transaction_date__date__gte=month_start,
-            status="completed",
-        ).count(),
+        "total_revenue": str(all_time_sales),
+        "total_transactions": all_time_transactions,
         "total_customers": total_customers_count,
         "new_customers_today": new_today,
         "active_campaigns": active_campaigns,
@@ -320,6 +443,8 @@ def compute_analytics(org):
         "has_revenue_data": has_any_revenue,
         "has_customer_data": has_any_customers,
         "revenue_trend": revenue_trend,
+        "sales_trend_30": sales_trend_30,
+        "sales_by_category": sales_by_category,
         "customer_growth": customer_growth,
     }
 

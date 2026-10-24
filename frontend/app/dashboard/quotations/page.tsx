@@ -26,6 +26,8 @@ import {
   CreditCard,
   Edit2,
   ExternalLink,
+  ShoppingCart,
+  Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -531,14 +533,24 @@ export default function QuotationsPage() {
                           </button>
 
                           {!isConverted ? (
-                            <button
-                              onClick={() => handleConvertClick(q)}
-                              className="flex items-center gap-1 rounded bg-emerald-600 hover:bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-white shadow-xs"
-                              title="Convert to Invoice"
-                            >
-                              <span>Convert</span>
-                              <ArrowRight className="h-3 w-3" />
-                            </button>
+                            <>
+                              <Link
+                                href={`/dashboard/pos?quote=${encodeURIComponent(q.quotation_number)}`}
+                                className="flex items-center gap-1 rounded bg-blue-600 hover:bg-blue-700 px-2 py-1 text-[11px] font-semibold text-white shadow-xs"
+                                title="Proceed to Checkout (Load in POS)"
+                              >
+                                <ShoppingCart className="h-3 w-3" />
+                                <span>Checkout</span>
+                              </Link>
+                              <button
+                                onClick={() => handleConvertClick(q)}
+                                className="flex items-center gap-1 rounded bg-emerald-600 hover:bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-white shadow-xs"
+                                title="Convert to Invoice"
+                              >
+                                <span>Convert</span>
+                                <ArrowRight className="h-3 w-3" />
+                              </button>
+                            </>
                           ) : (
                             <span
                               className="text-[11px] font-mono text-muted-foreground px-2 py-1 bg-muted rounded"
@@ -1071,27 +1083,47 @@ export default function QuotationsPage() {
               )}
             </div>
 
-            <div className="border-t pt-4 flex items-center justify-between">
-              {selectedQuotation.status !== "converted" ? (
+            <div className="border-t pt-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedQuotation.status !== "converted" ? (
+                  <>
+                    <Link
+                      href={`/dashboard/pos?quote=${encodeURIComponent(selectedQuotation.quotation_number)}`}
+                      className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 font-semibold shadow-sm text-xs"
+                    >
+                      <ShoppingCart className="h-4 w-4" />
+                      <span>Proceed to POS Checkout</span>
+                    </Link>
+                    <button
+                      onClick={() => {
+                        const q = selectedQuotation;
+                        setSelectedQuotation(null);
+                        handleConvertClick(q);
+                      }}
+                      className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 font-semibold shadow-sm text-xs"
+                    >
+                      <span>Convert to Invoice</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  </>
+                ) : (
+                  <div className="text-xs text-muted-foreground italic">
+                    This quotation has been converted into an invoice.
+                  </div>
+                )}
+
                 <button
-                  onClick={() => {
-                    setSelectedQuotation(null);
-                    handleConvertClick(selectedQuotation);
-                  }}
-                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 font-semibold shadow-sm"
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 rounded-lg border px-3 py-2 font-semibold hover:bg-accent text-xs"
                 >
-                  <span>Convert to Invoice</span>
-                  <ArrowRight className="h-4 w-4" />
+                  <Printer className="h-4 w-4" />
+                  <span>Print Quote</span>
                 </button>
-              ) : (
-                <div className="text-xs text-muted-foreground italic">
-                  This quotation has been converted into an invoice.
-                </div>
-              )}
+              </div>
 
               <button
                 onClick={() => setSelectedQuotation(null)}
-                className="rounded-lg border px-4 py-2 font-semibold hover:bg-accent"
+                className="rounded-lg border px-4 py-2 font-semibold hover:bg-accent text-xs"
               >
                 Close
               </button>

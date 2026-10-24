@@ -169,6 +169,20 @@ export interface DashboardData {
   payment_methods_breakdown?: PaymentMethodBreakdownItem[];
   hourly_sales?: HourlySalesItem[];
   live_sales_activity?: LiveSalesActivityItem[];
+  week_revenue?: number;
+  month_revenue?: number;
+  all_time_revenue?: number;
+  all_time_transactions?: number;
+  avg_bill_value?: number;
+  stock_value?: number;
+  total_products_count?: number;
+  in_stock_count?: number;
+  out_of_stock_count?: number;
+  total_suppliers_count?: number;
+  supplier_dues?: number;
+  customer_dues?: number;
+  sales_by_category?: { category: string; total: number; items_sold: number; percentage: number }[];
+  sales_trend_30?: { date: string; formatted_date: string; revenue: number; transactions: number }[];
 }
 
 export interface PaginatedResponse<T> {

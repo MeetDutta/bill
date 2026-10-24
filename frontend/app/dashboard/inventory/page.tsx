@@ -38,6 +38,24 @@ export default function CurrentStockPage() {
   });
   const [submittingAdjust, setSubmittingAdjust] = useState(false);
 
+  // Add Product Modal
+  const [addProductModalOpen, setAddProductModalOpen] = useState(false);
+  const [newProduct, setNewProduct] = useState({
+    name: "",
+    sku: "",
+    barcode: "",
+    category: "General",
+    unit: "PCS",
+    selling_price: "",
+    purchase_price: "",
+    current_stock: "0",
+    min_stock: "5",
+    tax_rate: "18",
+    hsn_code: "",
+  });
+  const [submittingProduct, setSubmittingProduct] = useState(false);
+  const [productError, setProductError] = useState("");
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -73,6 +91,52 @@ export default function CurrentStockPage() {
       alert("Failed to adjust inventory.");
     } finally {
       setSubmittingAdjust(false);
+    }
+  };
+
+  const handleCreateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProduct.name.trim()) {
+      setProductError("Product name is required.");
+      return;
+    }
+    setSubmittingProduct(true);
+    setProductError("");
+    try {
+      const payload: any = {
+        name: newProduct.name.trim(),
+        sku: newProduct.sku.trim() || `SKU-${Date.now().toString().slice(-6)}`,
+        barcode: newProduct.barcode.trim() || undefined,
+        category: newProduct.category || "General",
+        unit: newProduct.unit || "PCS",
+        selling_price: parseFloat(newProduct.selling_price) || 0,
+        purchase_price: parseFloat(newProduct.purchase_price) || 0,
+        current_stock: parseFloat(newProduct.current_stock) || 0,
+        min_stock: parseFloat(newProduct.min_stock) || 5,
+        tax_rate: parseFloat(newProduct.tax_rate) || 18,
+        hsn_code: newProduct.hsn_code.trim() || undefined,
+      };
+
+      await posApi.quickCreateProduct(payload);
+      setAddProductModalOpen(false);
+      setNewProduct({
+        name: "",
+        sku: "",
+        barcode: "",
+        category: "General",
+        unit: "PCS",
+        selling_price: "",
+        purchase_price: "",
+        current_stock: "0",
+        min_stock: "5",
+        tax_rate: "18",
+        hsn_code: "",
+      });
+      loadData();
+    } catch (err: any) {
+      setProductError(err.response?.data?.error || "Failed to create product. Check required fields.");
+    } finally {
+      setSubmittingProduct(false);
     }
   };
 
@@ -121,7 +185,14 @@ export default function CurrentStockPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={() => setAddProductModalOpen(true)}
+            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm"
+          >
+            <PlusCircle className="w-4 h-4" />
+            + Add Product
+          </Button>
           <Link href="/dashboard/inventory/movements">
             <Button variant="outline" className="gap-2">
               <History className="w-4 h-4" />
@@ -132,12 +203,6 @@ export default function CurrentStockPage() {
             <Button variant="outline" className="gap-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300">
               <SlidersHorizontal className="w-4 h-4" />
               Stock Adjustments
-            </Button>
-          </Link>
-          <Link href="/dashboard/products">
-            <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700">
-              <PlusCircle className="w-4 h-4" />
-              Manage Products
             </Button>
           </Link>
         </div>
@@ -390,6 +455,164 @@ export default function CurrentStockPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Add Product Modal (PDF Page 3-4) */}
+      <Dialog open={addProductModalOpen} onOpenChange={setAddProductModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+              <PlusCircle className="h-5 w-5 text-emerald-600" />
+              Add New Product to Inventory
+            </DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateProduct} className="space-y-4 py-2 text-xs">
+            {productError && (
+              <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-destructive font-medium">
+                {productError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
+                <label className="font-semibold block mb-1">Product / Item Name *</label>
+                <Input
+                  required
+                  placeholder="e.g. Premium White Shirt 40 / PVC Pipe 2 inch"
+                  value={newProduct.name}
+                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">SKU / Item Code</label>
+                <Input
+                  placeholder="Auto-generated if left blank"
+                  value={newProduct.sku}
+                  onChange={(e) => setNewProduct({ ...newProduct, sku: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Barcode / EAN</label>
+                <Input
+                  placeholder="Scan or enter barcode"
+                  value={newProduct.barcode}
+                  onChange={(e) => setNewProduct({ ...newProduct, barcode: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Category</label>
+                <Input
+                  placeholder="e.g. Hardware, Apparel, Groceries"
+                  value={newProduct.category}
+                  onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Unit of Measurement</label>
+                <select
+                  value={newProduct.unit}
+                  onChange={(e) => setNewProduct({ ...newProduct, unit: e.target.value })}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="PCS">PCS (Pieces)</option>
+                  <option value="KG">KG (Kilograms)</option>
+                  <option value="GM">GM (Grams)</option>
+                  <option value="MTR">MTR (Meters)</option>
+                  <option value="LTR">LTR (Liters)</option>
+                  <option value="BOX">BOX (Boxes)</option>
+                  <option value="SET">SET (Sets)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Purchase / Cost Price (₹)</label>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  placeholder="0.00"
+                  value={newProduct.purchase_price}
+                  onChange={(e) => setNewProduct({ ...newProduct, purchase_price: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Selling Price (₹) *</label>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  required
+                  placeholder="0.00"
+                  value={newProduct.selling_price}
+                  onChange={(e) => setNewProduct({ ...newProduct, selling_price: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Opening Stock (Qty)</label>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  placeholder="0"
+                  value={newProduct.current_stock}
+                  onChange={(e) => setNewProduct({ ...newProduct, current_stock: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">Reorder Threshold (Min Stock)</label>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  placeholder="5"
+                  value={newProduct.min_stock}
+                  onChange={(e) => setNewProduct({ ...newProduct, min_stock: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">GST Tax Rate (%)</label>
+                <select
+                  value={newProduct.tax_rate}
+                  onChange={(e) => setNewProduct({ ...newProduct, tax_rate: e.target.value })}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="0">0% (Exempt)</option>
+                  <option value="5">5% (Essential)</option>
+                  <option value="12">12% (Standard)</option>
+                  <option value="18">18% (Standard GST)</option>
+                  <option value="28">28% (Luxury / High)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-semibold block mb-1">HSN / SAC Code</label>
+                <Input
+                  placeholder="e.g. 6205, 8471"
+                  value={newProduct.hsn_code}
+                  onChange={(e) => setNewProduct({ ...newProduct, hsn_code: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="pt-3 border-t">
+              <Button type="button" variant="outline" onClick={() => setAddProductModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submittingProduct} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
+                {submittingProduct ? "Saving Product..." : "Save Product to Catalog"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

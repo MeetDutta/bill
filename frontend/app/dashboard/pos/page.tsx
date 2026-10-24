@@ -31,7 +31,7 @@ import {
   ChevronRight,
   ShieldAlert,
 } from "lucide-react";
-import { posApi, customerApi, storeApi } from "@/services/api";
+import { posApi, customerApi, storeApi, quotationApi } from "@/services/api";
 import {
   POSProduct,
   POSCartItem,
@@ -43,6 +43,7 @@ import {
   Store,
   CashRegister,
 } from "@/types";
+import { FileCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -109,10 +110,88 @@ export default function POSPage() {
   const [completedSale, setCompletedSale] = useState<any | null>(null);
   const [printFormat, setPrintFormat] = useState<"thermal_80mm" | "thermal_58mm" | "a4">("thermal_80mm");
 
+  // Quotation Load State (PDF Page 10)
+  const [quoteInput, setQuoteInput] = useState("");
+  const [loadingQuote, setLoadingQuote] = useState(false);
+  const [loadedQuoteBanner, setLoadedQuoteBanner] = useState<{ number: string; total: string; count: number } | null>(null);
+
   // Barcode / Keyboard input refs
   const searchInputRef = useRef<HTMLInputElement>(null);
   const barcodeBufferRef = useRef<string>("");
   const lastKeyTimeRef = useRef<number>(0);
+
+  const handleLoadQuotation = useCallback(async (quoteNumberToLoad?: string) => {
+    const qNum = (quoteNumberToLoad || quoteInput).trim();
+    if (!qNum) return;
+    setLoadingQuote(true);
+    try {
+      const res = await quotationApi.lookupByNumber(qNum);
+      const q = res.data;
+      if (q.status === "converted") {
+        alert(`Notice: Quotation #${q.quotation_number} was already converted into invoice #${q.converted_invoice_number || ""}.`);
+      }
+      if (!q.items || q.items.length === 0) {
+        alert(`Quotation #${q.quotation_number} has no items.`);
+        return;
+      }
+      const cartItems: POSCartItem[] = q.items.map((it: any) => ({
+        product_id: it.product || it.product_id || it.id,
+        name: it.name,
+        unit_price: Number(it.unit_price) || 0,
+        quantity: Number(it.quantity) || 1,
+        discount: Number(it.discount) || 0,
+        discount_type: "fixed",
+        tax_rate: Number(it.tax_rate) || 0,
+        unit: it.unit || "pcs",
+        hsn_code: it.hsn_code || "",
+        current_stock: 999,
+        track_inventory: true,
+      }));
+      setCart(cartItems);
+
+      if (q.customer) {
+        setIsWalkIn(false);
+        const cId = typeof q.customer === "string" ? q.customer : (q.customer as any).id;
+        setSelectedCustomer({
+          id: cId,
+          customer_id: cId,
+          full_name: q.customer_name || "Customer",
+          phone: q.customer_phone || "",
+          email: q.customer_email || "",
+          outstanding_credit: 0,
+          total_purchases: 0,
+          total_spend: 0,
+          segment: "Standard",
+          last_purchase_at: "",
+        });
+      } else if (q.customer_name && q.customer_name !== "Walk-in Customer") {
+        setIsWalkIn(false);
+        setSelectedCustomer({
+          id: "",
+          customer_id: "",
+          full_name: q.customer_name,
+          phone: q.customer_phone || "",
+          email: q.customer_email || "",
+          outstanding_credit: 0,
+          total_purchases: 0,
+          total_spend: 0,
+          segment: "Standard",
+          last_purchase_at: "",
+        });
+      }
+
+      setLoadedQuoteBanner({
+        number: q.quotation_number,
+        total: String(q.total),
+        count: cartItems.length,
+      });
+      setQuoteInput("");
+    } catch (err: any) {
+      alert(`Quotation "${qNum}" not found or failed to load.`);
+    } finally {
+      setLoadingQuote(false);
+    }
+  }, [quoteInput]);
 
   // Load Initial Setup
   useEffect(() => {
@@ -136,12 +215,20 @@ export default function POSPage() {
         if (cfgRes.data?.default_invoice_format) {
           setPrintFormat(cfgRes.data.default_invoice_format);
         }
+
+        if (typeof window !== "undefined") {
+          const params = new URLSearchParams(window.location.search);
+          const qParam = params.get("quote") || params.get("quotation");
+          if (qParam) {
+            handleLoadQuotation(qParam);
+          }
+        }
       } catch (err) {
         console.error("Failed to load POS config", err);
       }
     }
     init();
-  }, []);
+  }, [handleLoadQuotation]);
 
   // Fetch Products on search/category change
   const fetchProducts = useCallback(async (query: string, cat: string) => {
@@ -586,6 +673,34 @@ export default function POSPage() {
               ))}
             </select>
           )}
+
+          {/* Quotation number load (PDF Page 10) */}
+          <div className="flex items-center gap-1.5 border-l pl-3 ml-1">
+            <div className="relative">
+              <FileCheck className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Quotation number..."
+                value={quoteInput}
+                onChange={(e) => setQuoteInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleLoadQuotation();
+                  }
+                }}
+                className="h-8 pl-8 pr-2 w-44 text-xs font-mono uppercase"
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={loadingQuote || !quoteInput.trim()}
+              onClick={() => handleLoadQuotation()}
+              className="h-8 text-xs font-semibold px-2.5"
+            >
+              {loadingQuote ? "Loading..." : "Load"}
+            </Button>
+          </div>
         </div>
 
         {/* Register Status & Actions */}
@@ -641,6 +756,24 @@ export default function POSPage() {
           </div>
         </div>
       </div>
+
+      {/* Quotation Loaded Notification Banner (PDF Page 10) */}
+      {loadedQuoteBanner && (
+        <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-xs text-blue-900 dark:text-blue-200 flex items-center justify-between shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
+            <span>
+              <strong>Quotation #{loadedQuoteBanner.number}</strong> loaded into cart ({loadedQuoteBanner.count} items, Total: ₹{loadedQuoteBanner.total}). Ready for checkout & billing!
+            </span>
+          </div>
+          <button
+            onClick={() => setLoadedQuoteBanner(null)}
+            className="text-xs text-blue-700 hover:text-blue-900 font-bold ml-2 px-1.5 py-0.5 rounded hover:bg-blue-200/50"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Main Work Area: Left Catalog & Right Cart */}
       <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-12">
@@ -1006,6 +1139,20 @@ export default function POSPage() {
                     + {m.label}
                   </Button>
                 ))}
+
+                {/* PDF Page 10: Exact Amount quick-settle button */}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const payable = grandTotalNum > 0 ? grandTotalNum : localCartSubtotal;
+                    setPayments([{ method: "CASH", amount: payable }]);
+                  }}
+                  className="gap-1 text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold"
+                >
+                  ⚡ Exact amount!
+                </Button>
               </div>
 
               {/* Payment Split Lines */}
@@ -1137,6 +1284,12 @@ export default function POSPage() {
 
           {completedSale && (
             <div className="space-y-4 py-2">
+              {/* PDF Page 11 Success Banner */}
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-center text-emerald-800">
+                <p className="font-bold text-sm">🎉 Bill {completedSale.invoice_number} ban gaya! Ab Print Bill dabao</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Sale recorded, inventory updated, and sequential tax invoice registered.</p>
+              </div>
+
               {/* Receipt Summary Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
                 <div className="rounded bg-muted p-2">
