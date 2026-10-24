@@ -573,6 +573,7 @@ class CheckoutService:
 
         return {
             "id": str(tx.id),
+            "transaction_id": str(tx.id),
             "invoice_number": tx.invoice_number,
             "transaction_date": tx.transaction_date.isoformat(),
             "customer": {

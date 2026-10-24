@@ -6,6 +6,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.exceptions import ValidationError
 
 from apps.billing.models import BusinessConfig, HeldCart, CashRegister
 from apps.billing.business_types import BUSINESS_TYPES
@@ -129,8 +130,9 @@ def resolve_request_store(request):
     from apps.stores.models import Store
     if store_id:
         s = Store.objects.filter(organization=org, id=store_id).first()
-        if s:
-            return s
+        if not s:
+            raise ValidationError(f"Store '{store_id}' not found.")
+        return s
     if hasattr(request.user, "stores"):
         s = request.user.stores.first()
         if s:
@@ -230,10 +232,14 @@ class POSCheckoutView(APIView):
 
     def post(self, request):
         org = request.user.organization
-        idempotency_key = request.headers.get("Idempotency-Key") or request.data.get("idempotency_key")
-        store = resolve_request_store(request)
+        idempotency_key = (
+            request.headers.get("Idempotency-Key")
+            or request.headers.get("X-Idempotency-Key")
+            or (request.data.get("idempotency_key") if isinstance(request.data, dict) else None)
+        )
 
         try:
+            store = resolve_request_store(request)
             result = CheckoutService.process_checkout(
                 organization=org,
                 store=store,
