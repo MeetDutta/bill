@@ -4,8 +4,7 @@ from django.utils import timezone
 
 @shared_task(name="apps.automations.tasks.run_automation_task")
 def run_automation_task(automation_id):
-    from apps.automations.models import Automation, AutomationExecution
-    from apps.customers.models import Customer
+    from apps.automations.models import Automation
 
     try:
         automation = Automation.objects.get(id=automation_id)
@@ -105,7 +104,6 @@ def execute_automation_action(execution_id):
 
     try:
         if automation.action == "send_whatsapp":
-            from apps.whatsapp.tasks import send_digital_bill_task
             message_content = automation.action_config.get("message", "")
             if message_content:
                 from apps.whatsapp.models import WhatsAppConfig, WhatsAppMessage

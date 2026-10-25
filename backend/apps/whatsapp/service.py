@@ -1,5 +1,4 @@
 import json
-from decimal import Decimal
 
 import requests
 from celery import shared_task

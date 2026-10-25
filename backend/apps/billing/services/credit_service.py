@@ -1,12 +1,10 @@
 from decimal import Decimal
 from django.db import transaction
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.billing.models import CashRegister
 from apps.customers.models import Customer, CustomerTimeline
 from apps.transactions.models import Transaction, CustomerCreditPayment
-from .tax_engine import round_decimal
 
 
 class CreditService:

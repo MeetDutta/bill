@@ -9,7 +9,6 @@ from .serializers import (
     CampaignListSerializer,
     CampaignMessageSerializer,
     CampaignSerializer,
-    SendCampaignSerializer,
 )
 from .tasks import process_campaign_task
 

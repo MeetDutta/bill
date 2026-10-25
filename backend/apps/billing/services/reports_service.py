@@ -1,12 +1,11 @@
 from datetime import datetime, time
 from decimal import Decimal
-from django.db.models import Sum, Count, F, Q
+from django.db.models import Sum, Count
 from django.utils import timezone
 
 from apps.transactions.models import Transaction, TransactionItem, TransactionPayment, SalesReturn, CustomerCreditPayment
 from apps.customers.models import Customer
 from apps.billing.models import CashRegister
-from apps.products.models import InventoryMovement
 from .tax_engine import round_decimal
 
 

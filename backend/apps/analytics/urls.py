@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from apps.billing.staff_views import AdminStaffSalesBreakdownView
 
 urlpatterns = [
     path("", views.DashboardView.as_view(), name="analytics-dashboard"),
@@ -8,7 +9,7 @@ urlpatterns = [
     path("revenue-trend/", views.RevenueTrendView.as_view(), name="analytics-revenue-trend"),
     path("customer-growth/", views.CustomerGrowthView.as_view(), name="analytics-customer-growth"),
     path("sales/", views.DailySalesReportListView.as_view(), name="analytics-sales"),
-    path("staff-sales/", views.StaffSalesBreakdownView.as_view(), name="analytics-staff-sales"),
+    path("staff-sales/", AdminStaffSalesBreakdownView.as_view(), name="analytics-staff-sales"),
     path("customers/", views.CustomerAnalyticsListView.as_view(), name="analytics-customers"),
     path("campaigns/", views.CampaignAnalyticsListView.as_view(), name="analytics-campaigns"),
 

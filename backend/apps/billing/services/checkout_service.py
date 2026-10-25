@@ -1,4 +1,3 @@
-import uuid
 import secrets
 from decimal import Decimal, InvalidOperation
 from django.db import transaction, IntegrityError

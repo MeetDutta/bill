@@ -3,7 +3,7 @@ from typing import Dict, Any, List
 from django.db.models import Sum
 
 from apps.invoices.models import Invoice
-from apps.transactions.models import Transaction, TransactionPayment
+from apps.transactions.models import Transaction
 from apps.products.models import Product, InventoryMovement, PurchaseOrder
 from apps.customers.models import Customer
 

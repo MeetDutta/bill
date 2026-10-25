@@ -43,7 +43,7 @@ def compute_analytics(org):
     from apps.campaigns.models import Campaign
     from apps.loyalty.models import LoyaltyAccount
     from apps.coupons.models import CouponRedemption
-    from apps.products.models import Product, Supplier, PurchaseOrder, ProductCategory
+    from apps.products.models import Product, Supplier, PurchaseOrder
     from django.db import models
 
     now = timezone.now()
@@ -985,7 +985,7 @@ class CustomerPortalPublicView(APIView):
         from apps.customers.models import Customer
         from apps.transactions.models import Transaction
         from apps.coupons.models import Coupon
-        from .services import LoyaltyTierService, CustomerHealthService
+        from .services import LoyaltyTierService
 
         customer = (
             Customer.objects.filter(portal_token=token)
@@ -1083,5 +1083,4 @@ class AICopilotQueryView(APIView):
         return Response(response_data)
 
 
-from apps.billing.staff_views import AdminStaffSalesBreakdownView as StaffSalesBreakdownView
 

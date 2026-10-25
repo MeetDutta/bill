@@ -2,16 +2,14 @@ import csv
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from django.db import models
 from django.db.models import Count, Max, Q, Sum
 from django.http import HttpResponse
 from django.utils import timezone
-from rest_framework import permissions, status
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework import permissions
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.customers.models import Customer
 from apps.invoices.models import Invoice, Quotation
 from apps.invoices.serializers import InvoiceListSerializer, QuotationListSerializer
 from apps.stores.models import Store

@@ -1,4 +1,3 @@
-from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -10,7 +9,7 @@ from rest_framework.views import APIView
 from common.pagination import StandardPagination
 
 from .models import Coupon, CouponRedemption
-from .serializers import CouponListSerializer, CouponRedemptionSerializer, CouponSerializer
+from .serializers import CouponListSerializer, CouponSerializer
 
 
 class CouponListView(generics.ListCreateAPIView):

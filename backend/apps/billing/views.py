@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import ValidationError
 
-from apps.billing.models import BusinessConfig, HeldCart, CashRegister
+from apps.billing.models import BusinessConfig, HeldCart
 from apps.billing.business_types import BUSINESS_TYPES
 from apps.products.models import Product, InventoryMovement, PurchaseOrder
 from apps.billing.serializers import (
@@ -1017,14 +1017,6 @@ class POSRealtimeTicketView(APIView):
         return Response({"ticket": ticket, "expires_in": 60})
 
 
-class ServerSentEventRenderer(renderers.BaseRenderer):
-    media_type = "text/event-stream"
-    format = "text"
-
-    def render(self, data, accepted_media_type=None, renderer_context=None):
-        return data
-
-
 class POSRealtimeEventStreamView(APIView):
     """
     Server-Sent Events (SSE) streaming endpoint for live dashboard & POS synchronization.
@@ -1032,13 +1024,12 @@ class POSRealtimeEventStreamView(APIView):
     replay from Last-Event-ID, and automatic keepalive comments.
     """
     permission_classes = [permissions.AllowAny]
-    renderer_classes = [ServerSentEventRenderer, renderers.JSONRenderer]
+    renderer_classes = [renderers.JSONRenderer]
 
     def perform_content_negotiation(self, request, force=False):
-        accept = request.META.get("HTTP_ACCEPT", "")
-        if "text/event-stream" in accept:
-            return (ServerSentEventRenderer(), "text/event-stream")
-        return super().perform_content_negotiation(request, force)
+        # Return JSONRenderer so error responses are rendered as application/json
+        # while StreamingHttpResponse in get() directly returns text/event-stream.
+        return (renderers.JSONRenderer(), "application/json")
 
     def get(self, request):
         import json

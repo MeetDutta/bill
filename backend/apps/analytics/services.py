@@ -1,23 +1,21 @@
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from django.db.models import Avg, Count, F, Q, Sum
+from django.db.models import Avg, Count, Sum
 from django.utils import timezone
 
 from apps.analytics.models import (
     BusinessAlert,
     BusinessHealthSnapshot,
-    CampaignAnalytics,
     ChurnPrediction,
     CustomerHealthProfile,
     CustomerRFMProfile,
     ProductAffinity,
-    ProductBundle,
 )
 from apps.campaigns.models import Campaign, CampaignMessage
 from apps.coupons.models import Coupon, CouponRedemption
-from apps.customers.models import Customer, CustomerTimeline
+from apps.customers.models import Customer
 from apps.loyalty.models import Achievement, CustomerAchievement, LoyaltyAccount, LoyaltyTier
 from apps.products.models import Product
 from apps.transactions.models import Transaction, TransactionItem

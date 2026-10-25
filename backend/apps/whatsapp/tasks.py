@@ -1,9 +1,4 @@
 from celery import shared_task
-from .service import (
-    send_coupon_task,
-    send_digital_bill_task,
-    send_loyalty_notification_task,
-)
 
 
 @shared_task(name="apps.whatsapp.tasks.process_webhook_task")

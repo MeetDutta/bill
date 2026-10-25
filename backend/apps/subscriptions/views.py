@@ -1,6 +1,5 @@
 from datetime import timedelta
 
-from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.response import Response

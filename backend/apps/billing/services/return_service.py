@@ -1,12 +1,11 @@
 import secrets
 from decimal import Decimal
 from django.db import transaction
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.billing.models import CashRegister
 from apps.products.models import Product, InventoryMovement
-from apps.transactions.models import Transaction, TransactionItem, SalesReturn, SalesReturnItem
+from apps.transactions.models import Transaction, SalesReturn, SalesReturnItem
 from apps.customers.models import CustomerTimeline
 from .tax_engine import round_decimal
 

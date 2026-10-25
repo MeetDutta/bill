@@ -11,7 +11,6 @@ from django.db.models import Sum, Count
 from apps.transactions.models import Transaction, TransactionPayment, SalesReturn
 from apps.customers.models import CustomerTimeline
 from apps.billing.models import CashRegister
-from .inventory_reconciliation import InventoryReconciliationService
 
 logger = logging.getLogger(__name__)
 

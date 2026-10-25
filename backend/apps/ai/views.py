@@ -1,6 +1,5 @@
 from decimal import Decimal
 
-from django.db.models import Avg, Count, Sum
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -11,7 +10,6 @@ from common.pagination import StandardPagination
 from .models import CustomerInsight, AIContentGeneration, AISegmentation
 from .serializers import (
     AICustomerInsightSerializer,
-    AIContentGenerationSerializer,
     AISegmentationSerializer,
     CustomerSegmentationSerializer,
     GenerateCampaignContentSerializer,
@@ -114,7 +112,6 @@ class GenerateCustomerInsightsView(APIView):
 
         churn_score = Decimal("0")
         if customer.total_purchases > 0:
-            from datetime import timedelta
             days_since = (timezone.now() - customer.last_purchase_at).days if customer.last_purchase_at else 999
             churn_score = min(100, days_since)
 

@@ -1,6 +1,5 @@
 from datetime import timedelta
-from decimal import Decimal
-from django.db.models import Count, Sum, Avg
+from django.db.models import Avg
 from django.utils import timezone
 from rest_framework import generics
 from rest_framework.response import Response

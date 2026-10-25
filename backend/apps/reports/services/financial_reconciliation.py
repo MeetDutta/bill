@@ -2,12 +2,10 @@ import csv
 import io
 import logging
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from django.utils import timezone
-from django.db.models import Sum, Count
 
-from apps.transactions.models import Transaction, TransactionItem, TransactionPayment
-from apps.invoices.models import Invoice
+from apps.transactions.models import Transaction
 from apps.customers.models import Customer, CustomerTimeline
 from apps.billing.models import CashRegister
 from .alert_service import OperationalAlertService

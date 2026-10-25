@@ -1,5 +1,4 @@
 from celery import shared_task
-from django.utils import timezone
 
 
 @shared_task(name="apps.analytics.tasks.update_daily_sales_task")
@@ -60,7 +59,6 @@ def update_daily_sales_task(organization_id, store_id=None):
 def update_customer_analytics_task(organization_id):
     from apps.customers.models import Customer
     from apps.analytics.models import CustomerAnalytics
-    from apps.transactions.models import Transaction
     from datetime import date, timedelta
 
     today = date.today()

@@ -2,7 +2,7 @@ import csv
 import io
 import logging
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from django.utils import timezone
 from django.db.models import Sum, Count
 

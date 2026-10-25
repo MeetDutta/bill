@@ -30,7 +30,6 @@ from .serializers import (
     PublicInvoiceSerializer,
     QuotationSerializer,
     QuotationListSerializer,
-    QuotationItemSerializer,
 )
 
 

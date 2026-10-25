@@ -339,6 +339,7 @@ export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cart]);
 
   const handleBarcodeScanned = async (code: string) => {
@@ -1435,6 +1436,7 @@ export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?
               <div className="rounded-lg border bg-card p-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shadow-xs">
                 <div className="flex items-center gap-3">
                   <div className="bg-white p-1.5 rounded-lg border shadow-xs shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(upiUrl)}`}
                       alt="UPI Payment QR"

@@ -1,10 +1,8 @@
 from decimal import Decimal
 from rest_framework import serializers
-from apps.billing.models import BusinessConfig, HeldCart, CashRegister
+from apps.billing.models import BusinessConfig, HeldCart
 from apps.billing.business_types import BUSINESS_TYPES
 from apps.products.models import Product, InventoryMovement, PurchaseOrder, PurchaseOrderItem
-from apps.transactions.models import Transaction, TransactionItem, SalesReturn, SalesReturnItem, CustomerCreditPayment
-from apps.customers.models import Customer
 
 
 class BusinessConfigSerializer(serializers.ModelSerializer):

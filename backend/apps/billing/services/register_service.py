@@ -1,9 +1,7 @@
 from decimal import Decimal
-from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.billing.models import CashRegister
-from .tax_engine import round_decimal
 
 
 class RegisterService:

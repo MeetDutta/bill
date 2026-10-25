@@ -10,7 +10,6 @@ from common.pagination import StandardPagination
 from .models import LoyaltyAccount, LoyaltyRedemption, LoyaltyRule, LoyaltyTransaction
 from .serializers import (
     LoyaltyAccountSerializer,
-    LoyaltyRedemptionSerializer,
     LoyaltyRuleSerializer,
     LoyaltyTransactionSerializer,
     RedeemPointsSerializer,
