@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,6 @@ import type {
 import {
   TrendingUp,
   Receipt,
-  RotateCcw,
   Wallet,
   Clock,
   AlertTriangle,
@@ -24,18 +24,17 @@ import {
   Info,
   X,
   Activity,
-  Sparkles,
   ArrowRight,
   RefreshCw,
   Radio,
   CreditCard,
   Banknote,
-  Smartphone,
   QrCode,
   DollarSign,
   PackageX,
   CheckCircle2,
   Boxes,
+  Truck,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -54,10 +53,10 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [engagement, setEngagement] = useState<EngagementDashboard | null>(null);
+  const [, setEngagement] = useState<EngagementDashboard | null>(null);
   const [healthData, setHealthData] = useState<BusinessHealthData | null>(null);
   const [alerts, setAlerts] = useState<BusinessAlertItem[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [, setLastUpdated] = useState<Date>(new Date());
   const [liveEventsCount, setLiveEventsCount] = useState(0);
 
   const fetchDashboard = useCallback(async (silent = false) => {
@@ -92,7 +91,6 @@ export default function DashboardPage() {
   const handleRealtimeEvent = useCallback(
     (event: RealtimeEventPayload) => {
       setLiveEventsCount((prev) => prev + 1);
-      // Auto-refresh analytics when high-impact transactions commit
       if (
         [
           "sale_completed",
@@ -108,7 +106,7 @@ export default function DashboardPage() {
     [fetchDashboard]
   );
 
-  const { isConnected, connectionError } = useRealtimeSubscription(handleRealtimeEvent);
+  const { isConnected } = useRealtimeSubscription(handleRealtimeEvent);
 
   const handleDismissAlert = async (alertId: string) => {
     try {
@@ -119,11 +117,9 @@ export default function DashboardPage() {
     }
   };
 
+  // Authoritative metrics from backend
   const todayGrossSales = Number(data?.today_gross_sales || 0);
-  const todayDiscounts = Number(data?.today_discounts || 0);
-  const todayReturns = Number(data?.today_returns || 0);
   const todayNetSales = Number(data?.today_net_sales || 0);
-  const todayCollected = Number(data?.today_collected || 0);
   const todayOutstanding = Number(data?.today_outstanding || 0);
   const lowStockCount = Number(data?.low_stock_count || 0);
   const todayTransactionsCount = Number(data?.today_transactions_count || 0);
@@ -132,16 +128,16 @@ export default function DashboardPage() {
   const weekRevenue = Number(data?.week_revenue || 0);
   const monthRevenue = Number(data?.month_revenue || 0);
   const allTimeRevenue = Number(data?.all_time_revenue || Number(data?.total_revenue || 0));
-  const avgBillValue = Number(data?.avg_bill_value || (todayTransactionsCount > 0 ? todayNetSales / todayTransactionsCount : 0));
+
   const stockValue = Number(data?.stock_value || 0);
   const totalProducts = Number(data?.total_products_count || 0);
   const inStockCount = Number(data?.in_stock_count || 0);
   const outOfStockCount = Number(data?.out_of_stock_count || 0);
   const totalSuppliers = Number(data?.total_suppliers_count || 0);
   const supplierDues = Number(data?.supplier_dues || 0);
+
   const salesByCategory = data?.sales_by_category || [];
   const salesTrend30 = data?.sales_trend_30 || [];
-
   const paymentBreakdown = data?.payment_methods_breakdown || [];
   const hourlySales = data?.hourly_sales || [];
   const liveSalesActivity = data?.live_sales_activity || [];
@@ -153,21 +149,34 @@ export default function DashboardPage() {
     data?.has_customer_data && data?.customer_growth && (data?.total_customers || 0) > 0
   );
 
+  // Parse payment channel specifics
+  const cashItem = paymentBreakdown.find((p) => p.payment_method.toUpperCase() === "CASH");
+  const upiItem = paymentBreakdown.find((p) => p.payment_method.toUpperCase() === "UPI");
+  const cardItem = paymentBreakdown.find((p) =>
+    ["CARD", "DEBIT", "CREDIT_CARD"].includes(p.payment_method.toUpperCase())
+  );
+  const cashAmount = Number(cashItem?.total || 0);
+  const cashCount = Number(cashItem?.count || 0);
+  const upiAmount = Number(upiItem?.total || 0);
+  const upiCount = Number(upiItem?.count || 0);
+  const cardAmount = Number(cardItem?.total || 0);
+  const cardCount = Number(cardItem?.count || 0);
+
   const getPaymentIcon = (method: string) => {
     switch (method.toUpperCase()) {
       case "CASH":
         return <Banknote className="h-4 w-4 text-emerald-600" />;
       case "UPI":
-        return <QrCode className="h-4 w-4 text-indigo-600" />;
+        return <QrCode className="h-4 w-4 text-foreground" />;
       case "CARD":
       case "DEBIT":
       case "CREDIT_CARD":
-        return <CreditCard className="h-4 w-4 text-blue-600" />;
+        return <CreditCard className="h-4 w-4 text-slate-700" />;
       case "CREDIT":
       case "UDHAAR":
-        return <Wallet className="h-4 w-4 text-amber-600" />;
+        return <Wallet className="h-4 w-4 text-red-600" />;
       default:
-        return <DollarSign className="h-4 w-4 text-slate-600" />;
+        return <DollarSign className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
@@ -175,31 +184,33 @@ export default function DashboardPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="flex flex-col items-center gap-2">
-          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-muted-foreground text-sm font-medium">Loading executive dashboard...</p>
+          <div className="w-8 h-8 border-4 border-foreground border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-muted-foreground text-xs font-semibold">Loading dashboard metrics...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Top Header: Title, Realtime Status Badge & Controls */}
+    <div className="space-y-5 sm:space-y-6 min-w-0">
+      {/* Top Header: Title, Realtime Status Badge & Refresh Control */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b pb-4">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-foreground">Business Dashboard</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Authoritative financial metrics, real-time POS velocity, and inventory ledger intelligence
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground truncate">
+            Business Dashboard
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">
+            Operational sales velocity, payment allocations, and inventory ledger
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 shrink-0">
           {/* Live SSE Status Pill */}
           <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
               isConnected
                 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
-                : "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400"
+                : "bg-muted border-border text-muted-foreground"
             }`}
           >
             <span className="relative flex h-2 w-2">
@@ -208,14 +219,14 @@ export default function DashboardPage() {
               )}
               <span
                 className={`relative inline-flex rounded-full h-2 w-2 ${
-                  isConnected ? "bg-emerald-500" : "bg-amber-500"
+                  isConnected ? "bg-emerald-500" : "bg-slate-400"
                 }`}
               ></span>
             </span>
-            <span>{isConnected ? "Live Sync Active" : "Reconnecting SSE..."}</span>
+            <span className="text-[11px] font-bold">{isConnected ? "Live Sync" : "Connecting..."}</span>
             {liveEventsCount > 0 && (
-              <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
-                {liveEventsCount} events
+              <Badge variant="secondary" className="h-4 px-1 text-[9px] font-mono">
+                {liveEventsCount}
               </Badge>
             )}
           </div>
@@ -225,10 +236,10 @@ export default function DashboardPage() {
             size="sm"
             onClick={() => fetchDashboard(false)}
             disabled={isRefreshing}
-            className="h-8 gap-1.5 text-xs"
+            className="h-8 gap-1.5 text-xs font-bold"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
+            <span className="hidden xs:inline">Refresh</span>
           </Button>
         </div>
       </div>
@@ -242,224 +253,394 @@ export default function DashboardPage() {
             .map((alert) => (
               <div
                 key={alert.id}
-                className={`flex items-start justify-between rounded-xl border p-3.5 text-xs shadow-sm transition-all ${
+                className={`flex items-start justify-between rounded-xl border p-3 text-xs shadow-xs transition-all ${
                   alert.severity === "CRITICAL"
                     ? "bg-rose-500/10 border-rose-500/30 text-rose-800 dark:text-rose-300"
                     : alert.severity === "WARNING"
                     ? "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300"
-                    : "bg-blue-500/10 border-blue-500/30 text-blue-800 dark:text-blue-300"
+                    : "bg-muted/40 border-border text-foreground"
                 }`}
               >
-                <div className="flex items-start gap-2.5">
+                <div className="flex items-start gap-2.5 min-w-0">
                   {alert.severity === "CRITICAL" ? (
                     <ShieldAlert className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
                   ) : alert.severity === "WARNING" ? (
                     <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
                   ) : (
-                    <Info className="h-4 w-4 shrink-0 text-blue-600 mt-0.5" />
+                    <Info className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
                   )}
-                  <div>
-                    <div className="font-semibold text-sm">{alert.title}</div>
-                    <div className="mt-0.5 text-foreground/80">{alert.description}</div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-xs truncate">{alert.title}</div>
+                    <div className="mt-0.5 text-muted-foreground text-[11px] line-clamp-2">{alert.description}</div>
                     {alert.recommended_action && (
-                      <div className="mt-1 font-medium text-foreground">
-                        💡 Recommended: {alert.recommended_action}
+                      <div className="mt-1 font-semibold text-[11px] text-foreground">
+                        Action: {alert.recommended_action}
                       </div>
                     )}
                   </div>
                 </div>
                 <button
                   onClick={() => handleDismissAlert(alert.id)}
-                  className="text-muted-foreground hover:text-foreground p-1 transition-colors"
+                  className="text-muted-foreground hover:text-foreground p-1 shrink-0 ml-2"
                   title="Dismiss alert"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-3.5 w-3.5" />
                 </button>
               </div>
             ))}
         </div>
       )}
 
-      {/* EXECUTIVE KPI GRID - ROW 1: SALES VELOCITY & REVENUE */}
-      <div>
-        <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Sales Velocity & Performance</h2>
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-          {/* Today's Net Sales */}
-          <Card className="border-emerald-500/30 bg-emerald-500/5">
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Today&apos;s Net Sales</span>
-              <TrendingUp className="h-4 w-4 text-emerald-600" />
+      {/* ============================================================== */}
+      {/* SECTION 1: TODAY'S SALES & PAYMENT CHANNELS                    */}
+      {/* ============================================================== */}
+      <section className="space-y-2.5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Today&apos;s Sales & Payment Channels
+          </h2>
+          <span className="text-[10px] text-muted-foreground font-mono">
+            {todayTransactionsCount} bills recorded today
+          </span>
+        </div>
+
+        {/* 6-Card Responsive Grid: 2 cols on mobile, 3 cols on tablet, 6 cols on desktop */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
+          {/* Card 1: Today's Net Sales */}
+          <Card className="border-emerald-500/30 bg-emerald-500/5 shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground truncate">Today&apos;s Sales</span>
+              <TrendingUp className="h-4 w-4 text-emerald-600 shrink-0" />
             </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-emerald-700 dark:text-emerald-400">
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
                 {formatCurrency(todayNetSales)}
               </div>
-              <div className="text-[10px] text-muted-foreground mt-0.5 flex justify-between">
-                <span>Gross: {formatCurrency(todayGrossSales)}</span>
-                <span>{todayTransactionsCount} bills</span>
-              </div>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                Gross: {formatCurrency(todayGrossSales)}
+              </p>
             </CardContent>
           </Card>
 
-          {/* This Week */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">This Week</span>
-              <Activity className="h-4 w-4 text-foreground" />
+          {/* Card 2: Number of Transactions */}
+          <Card className="border-border bg-card shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground truncate">Bills Issued</span>
+              <Receipt className="h-4 w-4 text-foreground shrink-0" />
             </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-foreground">
-                {formatCurrency(weekRevenue)}
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                {todayTransactionsCount}
               </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Last 7 calendar days</p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                Completed checkouts
+              </p>
             </CardContent>
           </Card>
 
-          {/* This Month */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">This Month</span>
-              <TrendingUp className="h-4 w-4 text-emerald-600" />
+          {/* Card 3: Cash Sales */}
+          <Card className="border-border bg-card shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground truncate">Cash Sales</span>
+              <Banknote className="h-4 w-4 text-foreground shrink-0" />
             </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-emerald-600">
-                {formatCurrency(monthRevenue)}
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                {formatCurrency(cashAmount)}
               </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Month to date gross</p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                {cashCount} cash payments
+              </p>
             </CardContent>
           </Card>
 
-          {/* All-Time Sales */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">All-Time Revenue</span>
-              <Wallet className="h-4 w-4 text-foreground" />
+          {/* Card 4: Online / UPI Sales */}
+          <Card className="border-border bg-card shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground truncate">UPI / QR Sales</span>
+              <QrCode className="h-4 w-4 text-foreground shrink-0" />
             </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-foreground">
-                {formatCurrency(allTimeRevenue)}
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                {formatCurrency(upiAmount)}
               </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Lifetime verified sales</p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                {upiCount} digital payments
+              </p>
             </CardContent>
           </Card>
 
-          {/* Gross Profit */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Est. Gross Profit</span>
-              <DollarSign className="h-4 w-4 text-emerald-600" />
+          {/* Card 5: Card Payments */}
+          <Card className="border-border bg-card shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground truncate">Card Payments</span>
+              <CreditCard className="h-4 w-4 text-foreground shrink-0" />
             </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-emerald-600">
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                {formatCurrency(cardAmount)}
+              </div>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                {cardCount} card swipes
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Card 6: Customer Dues / Outstanding Credit */}
+          <Link
+            href="/dashboard/finance/receivables"
+            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl"
+          >
+            <Card
+              className={`h-full shadow-xs transition-all hover:border-foreground/30 ${
+                todayOutstanding > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
+              }`}
+            >
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Customer Dues</span>
+                <Wallet
+                  className={`h-4 w-4 shrink-0 ${
+                    todayOutstanding > 0 ? "text-red-600" : "text-muted-foreground"
+                  }`}
+                />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div
+                  className={`text-lg sm:text-xl lg:text-xl font-black truncate ${
+                    todayOutstanding > 0 ? "text-red-600" : "text-foreground"
+                  }`}
+                >
+                  {formatCurrency(todayOutstanding)}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>Pending credit</span>
+                  <span className="font-bold">View →</span>
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
+      </section>
+
+      {/* ============================================================== */}
+      {/* SECTION 2: INVENTORY & WORKING CAPITAL                         */}
+      {/* ============================================================== */}
+      <section className="space-y-2.5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Inventory Valuation & Payables
+          </h2>
+          <Link
+            href="/dashboard/inventory"
+            className="text-[11px] font-semibold text-foreground hover:underline flex items-center gap-1"
+          >
+            Catalog ({totalProducts} SKUs) →
+          </Link>
+        </div>
+
+        {/* 6-Card Responsive Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
+          {/* Card 1: Stock Value */}
+          <Link href="/dashboard/inventory" className="block focus:outline-none">
+            <Card className="h-full border-border bg-card shadow-xs hover:border-foreground/30 transition-all">
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Stock Value</span>
+                <Boxes className="h-4 w-4 text-foreground shrink-0" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                  {formatCurrency(stockValue)}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  {totalProducts} active SKUs
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Card 2: In Stock */}
+          <Link href="/dashboard/inventory" className="block focus:outline-none">
+            <Card className="h-full border-emerald-500/20 bg-emerald-500/5 shadow-xs hover:border-emerald-500/40 transition-all">
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">In Stock</span>
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
+                  {inStockCount}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  Available on shelves
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Card 3: Low Stock Alert */}
+          <Link href="/dashboard/inventory" className="block focus:outline-none">
+            <Card
+              className={`h-full shadow-xs transition-all hover:border-foreground/30 ${
+                lowStockCount > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
+              }`}
+            >
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Low Stock</span>
+                <AlertTriangle
+                  className={`h-4 w-4 shrink-0 ${
+                    lowStockCount > 0 ? "text-red-600" : "text-muted-foreground"
+                  }`}
+                />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div
+                  className={`text-lg sm:text-xl lg:text-xl font-black truncate ${
+                    lowStockCount > 0 ? "text-red-600" : "text-foreground"
+                  }`}
+                >
+                  {lowStockCount}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  Below reorder min
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Card 4: Out of Stock */}
+          <Link href="/dashboard/inventory" className="block focus:outline-none">
+            <Card
+              className={`h-full shadow-xs transition-all hover:border-foreground/30 ${
+                outOfStockCount > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
+              }`}
+            >
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Out of Stock</span>
+                <PackageX
+                  className={`h-4 w-4 shrink-0 ${
+                    outOfStockCount > 0 ? "text-red-600" : "text-muted-foreground"
+                  }`}
+                />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div
+                  className={`text-lg sm:text-xl lg:text-xl font-black truncate ${
+                    outOfStockCount > 0 ? "text-red-600" : "text-foreground"
+                  }`}
+                >
+                  {outOfStockCount}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  Zero quantity SKUs
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Card 5: Supplier Dues */}
+          <Link href="/dashboard/suppliers" className="block focus:outline-none">
+            <Card
+              className={`h-full shadow-xs transition-all hover:border-foreground/30 ${
+                supplierDues > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
+              }`}
+            >
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Supplier Dues</span>
+                <Truck
+                  className={`h-4 w-4 shrink-0 ${
+                    supplierDues > 0 ? "text-red-600" : "text-muted-foreground"
+                  }`}
+                />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div
+                  className={`text-lg sm:text-xl lg:text-xl font-black truncate ${
+                    supplierDues > 0 ? "text-red-600" : "text-foreground"
+                  }`}
+                >
+                  {formatCurrency(supplierDues)}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  {totalSuppliers} active vendors
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          {/* Card 6: Est. Gross Profit */}
+          <Card className="border-border bg-card shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground truncate">Gross Profit</span>
+              <DollarSign className="h-4 w-4 text-emerald-600 shrink-0" />
+            </CardHeader>
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
                 {formatCurrency(estimatedGrossProfit)}
               </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Revenue less purchase cost</p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                Revenue less item cost
+              </p>
             </CardContent>
           </Card>
         </div>
-      </div>
+      </section>
 
-      {/* EXECUTIVE KPI GRID - ROW 2: INVENTORY & WORKING CAPITAL */}
-      <div>
-        <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Inventory Valuation & Dues</h2>
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-          {/* Stock Valuation */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Stock Value</span>
-              <Boxes className="h-4 w-4 text-foreground" />
-            </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-foreground">
-                {formatCurrency(stockValue)}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">{totalProducts} active catalog SKUs</p>
-            </CardContent>
-          </Card>
+      {/* ============================================================== */}
+      {/* SECTION 3: REVENUE HORIZONS (WEEK, MONTH, LIFETIME)             */}
+      {/* ============================================================== */}
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+        <Card className="border-border bg-card shadow-xs">
+          <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+            <span className="text-xs font-semibold text-muted-foreground">This Week</span>
+            <Activity className="h-4 w-4 text-foreground" />
+          </CardHeader>
+          <CardContent className="p-3 pt-0">
+            <div className="text-lg sm:text-xl font-black text-foreground">
+              {formatCurrency(weekRevenue)}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Past 7 calendar days</p>
+          </CardContent>
+        </Card>
 
-          {/* In-Stock SKUs */}
-          <Card className="border-emerald-500/20 bg-emerald-500/5">
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">In Stock</span>
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-emerald-600">
-                {inStockCount}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Healthy on-shelf inventory</p>
-            </CardContent>
-          </Card>
+        <Card className="border-border bg-card shadow-xs">
+          <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+            <span className="text-xs font-semibold text-muted-foreground">This Month</span>
+            <TrendingUp className="h-4 w-4 text-emerald-600" />
+          </CardHeader>
+          <CardContent className="p-3 pt-0">
+            <div className="text-lg sm:text-xl font-black text-emerald-600">
+              {formatCurrency(monthRevenue)}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Month-to-date gross sales</p>
+          </CardContent>
+        </Card>
 
-          {/* Low Stock Alerts */}
-          <Card className={lowStockCount > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Low Stock Alert</span>
-              <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? "text-red-600" : "text-muted-foreground"}`} />
-            </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className={`text-xl font-black ${lowStockCount > 0 ? "text-red-600" : "text-foreground"}`}>
-                {lowStockCount}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Below reorder threshold</p>
-            </CardContent>
-          </Card>
+        <Card className="border-border bg-card shadow-xs">
+          <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+            <span className="text-xs font-semibold text-muted-foreground">All-Time Revenue</span>
+            <Wallet className="h-4 w-4 text-foreground" />
+          </CardHeader>
+          <CardContent className="p-3 pt-0">
+            <div className="text-lg sm:text-xl font-black text-foreground">
+              {formatCurrency(allTimeRevenue)}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Lifetime verified sales</p>
+          </CardContent>
+        </Card>
+      </section>
 
-          {/* Out of Stock */}
-          <Card className={outOfStockCount > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Out of Stock</span>
-              <PackageX className={`h-4 w-4 ${outOfStockCount > 0 ? "text-red-600" : "text-muted-foreground"}`} />
-            </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className={`text-xl font-black ${outOfStockCount > 0 ? "text-red-600" : "text-foreground"}`}>
-                {outOfStockCount}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Zero stock items</p>
-            </CardContent>
-          </Card>
-
-          {/* Customer Dues (Udhaar) */}
-          <Card className={todayOutstanding > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Customer Dues</span>
-              <Wallet className={`h-4 w-4 ${todayOutstanding > 0 ? "text-red-600" : "text-muted-foreground"}`} />
-            </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className={`text-xl font-black ${todayOutstanding > 0 ? "text-red-600" : "text-foreground"}`}>
-                {formatCurrency(todayOutstanding)}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Total outstanding receivables</p>
-            </CardContent>
-          </Card>
-
-          {/* Supplier Payables */}
-          <Card className={supplierDues > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Supplier Dues</span>
-              <CreditCard className={`h-4 w-4 ${supplierDues > 0 ? "text-red-600" : "text-muted-foreground"}`} />
-            </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className={`text-xl font-black ${supplierDues > 0 ? "text-red-600" : "text-foreground"}`}>
-                {formatCurrency(supplierDues)}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">{totalSuppliers} active suppliers</p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* 30-DAY SALES TREND & CATEGORY BREAKDOWN (PDF Page 1-2) */}
-      <div className="grid gap-4 md:grid-cols-12">
-        {/* 30-Day Trend Table & Chart (7 Cols) */}
-        <Card className="md:col-span-7 flex flex-col">
+      {/* ============================================================== */}
+      {/* SECTION 4: 30-DAY SALES TREND & CATEGORY BREAKDOWN              */}
+      {/* ============================================================== */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-12">
+        {/* 30-Day Trend (7 Cols) */}
+        <Card className="lg:col-span-7 flex flex-col shadow-xs">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-bold flex items-center justify-between">
+            <CardTitle className="text-sm font-bold flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-primary" />
+                <TrendingUp className="h-4 w-4 text-foreground" />
                 <span>30-Day Sales Trend</span>
               </div>
-              <Badge variant="outline" className="text-xs font-semibold">
+              <Badge variant="outline" className="text-[10px] font-semibold">
                 Past 30 Days
               </Badge>
             </CardTitle>
@@ -467,15 +648,15 @@ export default function DashboardPage() {
               Daily revenue trajectory and transaction volume
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex-1 space-y-4">
+          <CardContent className="flex-1 space-y-3">
             {salesTrend30.length > 0 && salesTrend30.some((p) => p.revenue > 0) ? (
-              <div className="h-56 w-full">
+              <div className="h-52 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={salesTrend30} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="trend30Gradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
+                        <stop offset="5%" stopColor="#0f172a" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#0f172a" stopOpacity={0.0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -484,7 +665,7 @@ export default function DashboardPage() {
                       tickLine={false}
                       axisLine={false}
                       tick={{ fill: "#64748b", fontSize: 10 }}
-                      interval={4}
+                      interval={3}
                     />
                     <YAxis
                       tickLine={false}
@@ -505,7 +686,7 @@ export default function DashboardPage() {
                     <Area
                       type="monotone"
                       dataKey="revenue"
-                      stroke="#3b82f6"
+                      stroke="#0f172a"
                       strokeWidth={2}
                       fillOpacity={1}
                       fill="url(#trend30Gradient)"
@@ -515,13 +696,13 @@ export default function DashboardPage() {
               </div>
             ) : null}
 
-            {/* Daily History Mini Table (matching PDF Page 1) */}
-            <div className="rounded-lg border overflow-hidden max-h-48 overflow-y-auto">
+            {/* Daily History Mini Table */}
+            <div className="rounded-lg border overflow-hidden max-h-44 overflow-y-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-muted/50 border-b font-semibold text-muted-foreground text-[10px] uppercase">
                   <tr>
                     <th className="py-2 px-3">Date</th>
-                    <th className="py-2 px-3 text-center">Bills Count</th>
+                    <th className="py-2 px-3 text-center">Bills</th>
                     <th className="py-2 px-3 text-right">Gross Revenue</th>
                   </tr>
                 </thead>
@@ -541,33 +722,33 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Category Breakdown (5 Cols, matching PDF Page 2) */}
-        <Card className="md:col-span-5 flex flex-col">
+        {/* Category Breakdown (5 Cols) */}
+        <Card className="lg:col-span-5 flex flex-col shadow-xs">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-bold flex items-center justify-between">
+            <CardTitle className="text-sm font-bold flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Boxes className="h-4 w-4 text-emerald-600" />
+                <Boxes className="h-4 w-4 text-foreground" />
                 <span>Sales by Category</span>
               </div>
-              <span className="text-xs text-muted-foreground font-normal">Past 30 Days</span>
+              <span className="text-[11px] text-muted-foreground font-normal">Past 30 Days</span>
             </CardTitle>
             <CardDescription className="text-xs">
               Product category revenue contribution and unit volume
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex-1 space-y-3">
+          <CardContent className="flex-1 space-y-2.5">
             {salesByCategory.length > 0 ? (
               salesByCategory.map((cat, idx) => (
-                <div key={idx} className="space-y-1.5 rounded-lg border p-2.5 bg-muted/20 text-xs">
+                <div key={idx} className="space-y-1 rounded-lg border p-2 bg-muted/20 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-foreground">{cat.category}</span>
                     <span className="font-mono font-bold">{formatCurrency(cat.total)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                     <span>{cat.items_sold} units sold</span>
-                    <span>{cat.percentage}% of sales</span>
+                    <span>{cat.percentage}% share</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                     <div
                       className="h-full bg-emerald-500 rounded-full transition-all duration-500"
                       style={{ width: `${Math.min(100, Math.max(0, cat.percentage))}%` }}
@@ -576,7 +757,7 @@ export default function DashboardPage() {
                 </div>
               ))
             ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-center text-muted-foreground">
+              <div className="flex flex-col items-center justify-center h-44 text-center text-muted-foreground">
                 <Boxes className="h-8 w-8 mb-2 opacity-30 stroke-1" />
                 <p className="text-xs font-semibold">No category sales recorded</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -588,23 +769,25 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* SECOND ROW: PAYMENT BREAKDOWN & HOURLY SALES VELOCITY */}
-      <div className="grid gap-4 md:grid-cols-12">
+      {/* ============================================================== */}
+      {/* SECTION 5: PAYMENT BREAKDOWN & HOURLY SALES VELOCITY            */}
+      {/* ============================================================== */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-12">
         {/* Payment Breakdown Card (5 Cols) */}
-        <Card className="md:col-span-5 flex flex-col">
+        <Card className="lg:col-span-5 flex flex-col shadow-xs">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-bold flex items-center gap-2">
-              <CreditCard className="h-4 w-4 text-primary" />
+            <CardTitle className="text-sm font-bold flex items-center gap-2">
+              <CreditCard className="h-4 w-4 text-foreground" />
               Payment Method Breakdown
             </CardTitle>
             <CardDescription className="text-xs">
               Exact split allocations across Cash, UPI, Cards, and Customer Credit
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex-1 space-y-3">
+          <CardContent className="flex-1 space-y-2.5">
             {paymentBreakdown.length > 0 ? (
               paymentBreakdown.map((item) => (
-                <div key={item.payment_method} className="space-y-1.5 rounded-lg border p-2.5 bg-muted/20">
+                <div key={item.payment_method} className="space-y-1 rounded-lg border p-2.5 bg-muted/20">
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
                       {getPaymentIcon(item.payment_method)}
@@ -615,23 +798,23 @@ export default function DashboardPage() {
                     </div>
                     <div className="text-right">
                       <span className="font-bold text-foreground">{formatCurrency(item.total)}</span>
-                      <span className="ml-1.5 text-[11px] font-semibold text-muted-foreground">
+                      <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground">
                         {item.percentage}%
                       </span>
                     </div>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                     <div
                       className={`h-full transition-all duration-500 ${
                         item.payment_method.toUpperCase() === "CASH"
                           ? "bg-emerald-500"
                           : item.payment_method.toUpperCase() === "UPI"
-                          ? "bg-indigo-500"
+                          ? "bg-slate-900 dark:bg-slate-100"
                           : item.payment_method.toUpperCase().includes("CARD")
-                          ? "bg-blue-500"
+                          ? "bg-slate-600"
                           : item.payment_method.toUpperCase() === "CREDIT"
-                          ? "bg-amber-500"
-                          : "bg-slate-500"
+                          ? "bg-red-500"
+                          : "bg-slate-400"
                       }`}
                       style={{ width: `${Math.min(100, Math.max(0, item.percentage))}%` }}
                     />
@@ -639,7 +822,7 @@ export default function DashboardPage() {
                 </div>
               ))
             ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-center text-muted-foreground">
+              <div className="flex flex-col items-center justify-center h-44 text-center text-muted-foreground">
                 <Receipt className="h-8 w-8 mb-2 opacity-30 stroke-1" />
                 <p className="text-xs font-semibold">No transactions recorded today</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -651,10 +834,10 @@ export default function DashboardPage() {
         </Card>
 
         {/* Hourly Sales Velocity Chart (7 Cols) */}
-        <Card className="md:col-span-7 flex flex-col">
+        <Card className="lg:col-span-7 flex flex-col shadow-xs">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-bold flex items-center gap-2">
-              <Clock className="h-4 w-4 text-primary" />
+            <CardTitle className="text-sm font-bold flex items-center gap-2">
+              <Clock className="h-4 w-4 text-foreground" />
               Today&apos;s Hourly Sales Velocity
             </CardTitle>
             <CardDescription className="text-xs">
@@ -663,7 +846,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="flex-1 pb-4">
             {hourlySales.some((h) => h.sales > 0) ? (
-              <div className="h-64 w-full">
+              <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={hourlySales} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -692,15 +875,15 @@ export default function DashboardPage() {
                         fontSize: "12px",
                       }}
                     />
-                    <Bar dataKey="sales" fill="#16a34a" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="sales" fill="#16a34a" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-64 text-center text-muted-foreground">
-                <Clock className="h-10 w-10 mb-2 opacity-30 stroke-1" />
-                <p className="text-sm font-semibold">No hourly sales activity yet</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+              <div className="flex flex-col items-center justify-center h-56 text-center text-muted-foreground">
+                <Clock className="h-8 w-8 mb-2 opacity-30 stroke-1" />
+                <p className="text-xs font-semibold">No hourly sales activity yet</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
                   As transactions are committed throughout the day, velocity by hour will render here.
                 </p>
               </div>
@@ -709,115 +892,172 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* STAFF PERFORMANCE & SALES ATTRIBUTION BREAKDOWN */}
+      {/* ============================================================== */}
+      {/* SECTION 6: STAFF PERFORMANCE & SALES ATTRIBUTION TABLE         */}
+      {/* ============================================================== */}
       <StaffSalesBreakdownTable />
 
-      {/* THIRD ROW: LIVE RECENT COMMITTED TRANSACTIONS */}
-      <Card>
+      {/* ============================================================== */}
+      {/* SECTION 7: LIVE SALES STREAM (RECENT COMMITTED TRANSACTIONS)   */}
+      {/* ============================================================== */}
+      <Card className="shadow-xs">
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-base font-bold flex items-center gap-2">
+            <CardTitle className="text-sm font-bold flex items-center gap-2">
               <Radio className="h-4 w-4 text-emerald-600 animate-pulse" />
               Live Sales Stream
             </CardTitle>
             <CardDescription className="text-xs">
-              Recent atomically committed sales with cashier, customer, and hybrid payment methods
+              Recent atomically committed sales with cashier, customer, and payment methods
             </CardDescription>
           </div>
-          <a
+          <Link
             href="/dashboard/transactions"
-            className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+            className="text-xs font-semibold text-foreground hover:underline flex items-center gap-1"
           >
             All Transactions <ArrowRight className="h-3 w-3" />
-          </a>
+          </Link>
         </CardHeader>
         <CardContent>
           {liveSalesActivity.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b text-muted-foreground uppercase text-[10px]">
-                    <th className="text-left pb-2 font-semibold">Invoice #</th>
-                    <th className="text-left pb-2 font-semibold">Time</th>
-                    <th className="text-left pb-2 font-semibold">Customer</th>
-                    <th className="text-left pb-2 font-semibold">Cashier</th>
-                    <th className="text-left pb-2 font-semibold">Items</th>
-                    <th className="text-left pb-2 font-semibold">Payment Methods</th>
-                    <th className="text-right pb-2 font-semibold">Amount</th>
-                    <th className="text-right pb-2 font-semibold">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {liveSalesActivity.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="py-2.5 font-mono font-bold text-primary">
+            <>
+              {/* Desktop / Tablet Table View */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b text-muted-foreground uppercase text-[10px]">
+                      <th className="text-left pb-2 font-semibold">Invoice #</th>
+                      <th className="text-left pb-2 font-semibold">Time</th>
+                      <th className="text-left pb-2 font-semibold">Customer</th>
+                      <th className="text-left pb-2 font-semibold">Cashier</th>
+                      <th className="text-left pb-2 font-semibold">Items</th>
+                      <th className="text-left pb-2 font-semibold">Payment Methods</th>
+                      <th className="text-right pb-2 font-semibold">Amount</th>
+                      <th className="text-right pb-2 font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {liveSalesActivity.map((tx) => (
+                      <tr key={tx.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="py-2.5 font-mono font-bold text-foreground">
+                          {tx.invoice_number}
+                        </td>
+                        <td className="py-2.5 text-muted-foreground">{tx.time}</td>
+                        <td className="py-2.5 font-medium">{tx.customer}</td>
+                        <td className="py-2.5 text-muted-foreground">{tx.cashier}</td>
+                        <td className="py-2.5">{tx.items_count} items</td>
+                        <td className="py-2.5">
+                          <div className="flex flex-wrap gap-1">
+                            {tx.payment_methods.map((pm, i) => (
+                              <Badge
+                                key={i}
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 uppercase font-medium"
+                              >
+                                {pm}
+                              </Badge>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="py-2.5 text-right font-black text-foreground">
+                          {formatCurrency(tx.amount)}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <Badge
+                            className={`text-[10px] font-bold ${
+                              tx.payment_status === "PAID"
+                                ? "bg-emerald-600 text-white"
+                                : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            }`}
+                          >
+                            {tx.payment_status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Card View (Zero horizontal scrolling on 320px–430px) */}
+              <div className="block md:hidden space-y-2.5">
+                {liveSalesActivity.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="rounded-xl border border-border bg-muted/20 p-3 space-y-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-foreground text-xs">
                         {tx.invoice_number}
-                      </td>
-                      <td className="py-2.5 text-muted-foreground">{tx.time}</td>
-                      <td className="py-2.5 font-medium">{tx.customer}</td>
-                      <td className="py-2.5 text-muted-foreground">{tx.cashier}</td>
-                      <td className="py-2.5">{tx.items_count} items</td>
-                      <td className="py-2.5">
-                        <div className="flex flex-wrap gap-1">
-                          {tx.payment_methods.map((pm, i) => (
-                            <Badge
-                              key={i}
-                              variant="outline"
-                              className="text-[10px] px-1.5 py-0 uppercase"
-                            >
-                              {pm}
-                            </Badge>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="py-2.5 text-right font-black text-foreground">
-                        {formatCurrency(tx.amount)}
-                      </td>
-                      <td className="py-2.5 text-right">
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-muted-foreground">{tx.time}</span>
                         <Badge
-                          variant={tx.payment_status === "PAID" ? "default" : "secondary"}
-                          className={`text-[10px] ${
+                          className={`text-[9px] font-bold px-1.5 py-0 ${
                             tx.payment_status === "PAID"
                               ? "bg-emerald-600 text-white"
-                              : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                              : "bg-amber-100 text-amber-800"
                           }`}
                         >
                           {tx.payment_status}
                         </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                      <span className="truncate">Cust: <strong className="text-foreground">{tx.customer}</strong></span>
+                      <span className="truncate">Staff: <strong className="text-foreground">{tx.cashier}</strong></span>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-border pt-2">
+                      <div className="flex flex-wrap gap-1">
+                        {tx.payment_methods.map((pm, i) => (
+                          <Badge key={i} variant="outline" className="text-[9px] px-1 py-0 uppercase">
+                            {pm}
+                          </Badge>
+                        ))}
+                        <span className="text-[10px] text-muted-foreground self-center">
+                          ({tx.items_count} items)
+                        </span>
+                      </div>
+                      <span className="text-sm font-black text-foreground">
+                        {formatCurrency(tx.amount)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           ) : (
-            <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
+            <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
               <Receipt className="h-8 w-8 mb-2 opacity-30 stroke-1" />
               <p className="text-xs font-semibold">No recent transactions recorded</p>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                New sales committed at POS or ingested via API will appear here instantly.
+                New sales committed at POS will appear here instantly.
               </p>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* FOURTH ROW: BUSINESS HEALTH INDEX & 14-DAY TRENDS */}
+      {/* ============================================================== */}
+      {/* SECTION 8: BUSINESS HEALTH INDEX & 14-DAY REVENUE CURVE        */}
+      {/* ============================================================== */}
       {healthData && (
-        <Card className="border bg-gradient-to-r from-card via-card to-primary/5">
+        <Card className="border-border bg-card shadow-xs">
           <CardHeader className="pb-3">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <Activity className="h-5 w-5 text-primary" />
-                  Business Health Index (0–100)
+                <CardTitle className="flex items-center gap-2 text-sm font-bold">
+                  <Activity className="h-4 w-4 text-foreground" />
+                  Business Health Index
                 </CardTitle>
-                <CardDescription>
-                  Real-time composite score of store operations, customer loyalty, and retention
+                <CardDescription className="text-xs">
+                  Operational velocity, loyalty retention, and catalog performance
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-3xl font-black text-foreground">
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-black text-foreground">
                   {healthData.overall_score}
                 </span>
                 <span className="text-xs text-muted-foreground font-semibold">/ 100</span>
@@ -825,44 +1065,44 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-5 pt-1">
-              <div className="rounded-lg border bg-background/80 p-3">
-                <p className="text-[11px] font-medium text-muted-foreground uppercase">Sales Growth</p>
-                <p className="mt-1 text-xl font-bold">{healthData.sales_growth || 0}</p>
-                <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-primary" style={{ width: `${healthData.sales_growth || 0}%` }} />
+            <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-5 pt-1">
+              <div className="rounded-lg border bg-background p-2.5">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Sales Growth</p>
+                <p className="mt-1 text-lg font-bold">{healthData.sales_growth || 0}%</p>
+                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-foreground" style={{ width: `${healthData.sales_growth || 0}%` }} />
                 </div>
               </div>
 
-              <div className="rounded-lg border bg-background/80 p-3">
-                <p className="text-[11px] font-medium text-muted-foreground uppercase">Retention</p>
-                <p className="mt-1 text-xl font-bold">{healthData.customer_retention || 0}</p>
-                <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-emerald-500" style={{ width: `${healthData.customer_retention || 0}%` }} />
+              <div className="rounded-lg border bg-background p-2.5">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Retention</p>
+                <p className="mt-1 text-lg font-bold">{healthData.customer_retention || 0}%</p>
+                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-emerald-600" style={{ width: `${healthData.customer_retention || 0}%` }} />
                 </div>
               </div>
 
-              <div className="rounded-lg border bg-background/80 p-3">
-                <p className="text-[11px] font-medium text-muted-foreground uppercase">Loyalty</p>
-                <p className="mt-1 text-xl font-bold">{healthData.customer_loyalty || 0}</p>
-                <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-amber-500" style={{ width: `${healthData.customer_loyalty || 0}%` }} />
+              <div className="rounded-lg border bg-background p-2.5">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Loyalty</p>
+                <p className="mt-1 text-lg font-bold">{healthData.customer_loyalty || 0}%</p>
+                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-emerald-500" style={{ width: `${healthData.customer_loyalty || 0}%` }} />
                 </div>
               </div>
 
-              <div className="rounded-lg border bg-background/80 p-3">
-                <p className="text-[11px] font-medium text-muted-foreground uppercase">Marketing</p>
-                <p className="mt-1 text-xl font-bold">{healthData.marketing || 0}</p>
-                <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-blue-500" style={{ width: `${healthData.marketing || 0}%` }} />
+              <div className="rounded-lg border bg-background p-2.5">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Marketing</p>
+                <p className="mt-1 text-lg font-bold">{healthData.marketing || 0}%</p>
+                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-slate-700" style={{ width: `${healthData.marketing || 0}%` }} />
                 </div>
               </div>
 
-              <div className="rounded-lg border bg-background/80 p-3">
-                <p className="text-[11px] font-medium text-muted-foreground uppercase">Products</p>
-                <p className="mt-1 text-xl font-bold">{healthData.product_performance || 0}</p>
-                <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-indigo-500" style={{ width: `${healthData.product_performance || 0}%` }} />
+              <div className="rounded-lg border bg-background p-2.5">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Products</p>
+                <p className="mt-1 text-lg font-bold">{healthData.product_performance || 0}%</p>
+                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-slate-900 dark:bg-slate-100" style={{ width: `${healthData.product_performance || 0}%` }} />
                 </div>
               </div>
             </div>
@@ -871,17 +1111,17 @@ export default function DashboardPage() {
       )}
 
       {/* 14-Day Charts */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="flex flex-col">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">14-Day Revenue Trend</CardTitle>
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+        <Card className="flex flex-col shadow-xs">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-bold">14-Day Revenue Trajectory</CardTitle>
             <CardDescription className="text-xs">
-              Daily revenue trend across all stores
+              Daily revenue trend across all store counters
             </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 pb-4">
             {hasRevenueData && data?.revenue_trend ? (
-              <div className="h-64 w-full">
+              <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart
                     data={data.revenue_trend}
@@ -889,8 +1129,8 @@ export default function DashboardPage() {
                   >
                     <defs>
                       <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
+                        <stop offset="5%" stopColor="#16a34a" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#16a34a" stopOpacity={0.0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -898,12 +1138,12 @@ export default function DashboardPage() {
                       dataKey="formatted_date"
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tick={{ fill: "#64748b", fontSize: 10 }}
                     />
                     <YAxis
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tick={{ fill: "#64748b", fontSize: 10 }}
                       tickFormatter={(val) =>
                         `₹${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`
                       }
@@ -921,8 +1161,8 @@ export default function DashboardPage() {
                     <Area
                       type="monotone"
                       dataKey="revenue"
-                      stroke="#6366f1"
-                      strokeWidth={2.5}
+                      stroke="#16a34a"
+                      strokeWidth={2}
                       fillOpacity={1}
                       fill="url(#revenueGradient)"
                     />
@@ -930,12 +1170,12 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-64 text-center p-6 text-muted-foreground">
-                <Receipt className="h-10 w-10 mb-2 opacity-30 stroke-1" />
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <div className="flex flex-col items-center justify-center h-56 text-center p-6 text-muted-foreground">
+                <Receipt className="h-8 w-8 mb-2 opacity-30 stroke-1" />
+                <p className="text-xs font-semibold text-foreground">
                   No revenue data available yet.
                 </p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                <p className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
                   Committed POS checkouts will populate your revenue trend curve.
                 </p>
               </div>
@@ -943,16 +1183,16 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="flex flex-col">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">Customer Growth</CardTitle>
+        <Card className="flex flex-col shadow-xs">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-bold">Customer Growth Curve</CardTitle>
             <CardDescription className="text-xs">
-              Cumulative registered customer count over the last 14 days
+              Cumulative registered customers over the past 14 days
             </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 pb-4">
             {hasCustomerData && data?.customer_growth ? (
-              <div className="h-64 w-full">
+              <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart
                     data={data.customer_growth}
@@ -960,8 +1200,8 @@ export default function DashboardPage() {
                   >
                     <defs>
                       <linearGradient id="customerGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                        <stop offset="5%" stopColor="#0f172a" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#0f172a" stopOpacity={0.0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -969,12 +1209,12 @@ export default function DashboardPage() {
                       dataKey="formatted_date"
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tick={{ fill: "#64748b", fontSize: 10 }}
                     />
                     <YAxis
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tick={{ fill: "#64748b", fontSize: 10 }}
                       allowDecimals={false}
                     />
                     <Tooltip
@@ -993,8 +1233,8 @@ export default function DashboardPage() {
                     <Area
                       type="monotone"
                       dataKey="total_customers"
-                      stroke="#10b981"
-                      strokeWidth={2.5}
+                      stroke="#0f172a"
+                      strokeWidth={2}
                       fillOpacity={1}
                       fill="url(#customerGradient)"
                     />
@@ -1002,12 +1242,12 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-64 text-center p-6 text-muted-foreground">
-                <TrendingUp className="h-10 w-10 mb-2 opacity-30 stroke-1" />
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <div className="flex flex-col items-center justify-center h-56 text-center p-6 text-muted-foreground">
+                <TrendingUp className="h-8 w-8 mb-2 opacity-30 stroke-1" />
+                <p className="text-xs font-semibold text-foreground">
                   No customer growth data yet.
                 </p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                <p className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
                   New customers registered at POS will populate this growth curve.
                 </p>
               </div>

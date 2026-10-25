@@ -80,7 +80,6 @@ export default function MobileDashboardPage() {
 
   const todaySales = data?.today_net_sales ?? data?.today_gross_sales ?? Number(data?.total_revenue || 0);
   const todayCount = data?.today_transactions_count ?? data?.total_transactions ?? 0;
-  const avgOrderVal = data?.avg_bill_value ?? (todayCount > 0 ? todaySales / todayCount : 0);
   const returnsAmount = data?.today_returns ?? 0;
   const lowStockCount = data?.low_stock_count ?? 0;
   const totalSales = Number(data?.all_time_revenue ?? data?.total_revenue ?? 0);
@@ -134,7 +133,7 @@ export default function MobileDashboardPage() {
         <div className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm">
           <div className="flex items-center justify-between text-slate-500">
             <span className="text-[11px] font-medium">Today&apos;s Sales</span>
-            <div className="rounded-md bg-blue-50 p-1 text-blue-600">
+            <div className="rounded-md bg-emerald-50 p-1 text-emerald-600">
               <TrendingUp className="h-3.5 w-3.5" />
             </div>
           </div>
@@ -150,7 +149,7 @@ export default function MobileDashboardPage() {
         <div className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm">
           <div className="flex items-center justify-between text-slate-500">
             <span className="text-[11px] font-medium">Bills Issued</span>
-            <div className="rounded-md bg-emerald-50 p-1 text-emerald-600">
+            <div className="rounded-md bg-slate-100 p-1 text-slate-700">
               <Receipt className="h-3.5 w-3.5" />
             </div>
           </div>
@@ -158,7 +157,7 @@ export default function MobileDashboardPage() {
             {todayCount}
           </p>
           <span className="text-[10px] text-slate-400">
-            Avg: {formatCurrency(avgOrderVal)}
+            Completed sales
           </span>
         </div>
 
