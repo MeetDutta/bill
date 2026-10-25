@@ -2,7 +2,7 @@ from decimal import Decimal
 import secrets
 from django.db import transaction
 from django.db.models import Q
-from rest_framework import permissions, status
+from rest_framework import permissions, status, renderers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
@@ -1017,6 +1017,14 @@ class POSRealtimeTicketView(APIView):
         return Response({"ticket": ticket, "expires_in": 60})
 
 
+class ServerSentEventRenderer(renderers.BaseRenderer):
+    media_type = "text/event-stream"
+    format = "text"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data
+
+
 class POSRealtimeEventStreamView(APIView):
     """
     Server-Sent Events (SSE) streaming endpoint for live dashboard & POS synchronization.
@@ -1024,6 +1032,13 @@ class POSRealtimeEventStreamView(APIView):
     replay from Last-Event-ID, and automatic keepalive comments.
     """
     permission_classes = [permissions.AllowAny]
+    renderer_classes = [ServerSentEventRenderer, renderers.JSONRenderer]
+
+    def perform_content_negotiation(self, request, force=False):
+        accept = request.META.get("HTTP_ACCEPT", "")
+        if "text/event-stream" in accept:
+            return (ServerSentEventRenderer(), "text/event-stream")
+        return super().perform_content_negotiation(request, force)
 
     def get(self, request):
         import json
