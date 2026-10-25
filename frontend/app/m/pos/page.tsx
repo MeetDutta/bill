@@ -27,7 +27,11 @@ import {
   FileText,
   RotateCcw,
   Sparkles,
+  Printer,
+  Download,
+  Share2,
 } from "lucide-react";
+import { printThermalReceipt, downloadInvoicePdf } from "@/lib/receiptPrinter";
 
 interface CartItem {
   id: string; // product id or custom
@@ -85,12 +89,16 @@ export default function MobilePOSPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmedSale, setConfirmedSale] = useState<{
     transaction_id: string;
+    invoice_id?: string;
     invoice_number: string;
     total: number;
     amount_paid: number;
     change_amount: number;
     payment_method: string;
     web_url?: string;
+    customer_name?: string;
+    customer_phone?: string;
+    raw?: any;
   } | null>(null);
 
   // Load products on search / category filter
@@ -348,12 +356,16 @@ export default function MobilePOSPage() {
 
       setConfirmedSale({
         transaction_id: data.transaction_id || data.id,
+        invoice_id: data.invoice?.id || data.invoice_id || data.id,
         invoice_number: data.invoice_number,
         total: Number(data.total || cartSummary.grandTotal),
         amount_paid: Number(data.amount_paid || cartSummary.grandTotal),
         change_amount: Number(data.change_amount || 0),
         payment_method: data.payment_method || primaryMethod,
         web_url: data.invoice?.web_url,
+        customer_name: customer.name,
+        customer_phone: customer.phone,
+        raw: data,
       });
 
       // Clear cart on confirmed success
@@ -950,6 +962,89 @@ export default function MobilePOSPage() {
           </div>
 
           <div className="space-y-2 pt-1">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirmedSale.raw) {
+                    const raw = confirmedSale.raw;
+                    printThermalReceipt({
+                      invoice_id: confirmedSale.invoice_id,
+                      invoice_number: confirmedSale.invoice_number,
+                      transaction_date: raw.transaction_date,
+                      seller: {
+                        name: raw.seller?.name || "BILLMEET RETAIL",
+                        trade_name: raw.seller?.trade_name || raw.seller?.name || "BILLMEET RETAIL",
+                        gstin: raw.seller?.gstin || "",
+                        phone: raw.seller?.phone || "",
+                        address: raw.seller?.address || "",
+                      },
+                      customer: raw.customer ? {
+                        name: raw.customer?.name || confirmedSale.customer_name || "Walk-in",
+                        phone: raw.customer?.phone || confirmedSale.customer_phone || "",
+                        gstin: raw.customer?.gstin || "",
+                      } : null,
+                      cashier_name: raw.cashier || "Mobile Staff",
+                      store_name: raw.store?.name || "Mobile Counter",
+                      items: (raw.items || []).map((it: any) => ({
+                        name: it.product_name || it.name || it.description || "Product Item",
+                        product_name: it.product_name || it.name || it.description || "Product Item",
+                        sku: it.sku || "",
+                        hsn_code: it.hsn_code || "",
+                        quantity: Number(it.quantity || 1),
+                        unit: it.unit || "pcs",
+                        unit_price: Number(it.unit_price || 0),
+                        discount: Number(it.discount || 0),
+                        tax_rate: Number(it.tax_rate || 0),
+                        taxable_amount: Number(it.taxable_amount || 0),
+                        total: Number(it.total || 0),
+                      })),
+                      subtotal: Number(raw.subtotal || confirmedSale.total),
+                      discount: Number(raw.discount || 0),
+                      tax: Number(raw.tax || 0),
+                      round_off: Number(raw.round_off || 0),
+                      total: Number(raw.total || confirmedSale.total),
+                      tendered_amount: Number(raw.tendered_amount || confirmedSale.total),
+                      change_amount: Number(raw.change_amount || confirmedSale.change_amount),
+                      payments: raw.payments,
+                      payment_method: confirmedSale.payment_method,
+                      payment_status: raw.payment_status || "paid",
+                    });
+                  }
+                }}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white py-2.5 text-xs font-bold text-slate-800 shadow-sm active:bg-slate-50"
+              >
+                <Printer className="h-3.5 w-3.5 text-blue-600" />
+                <span>Thermal Bill</span>
+              </button>
+
+              {confirmedSale.invoice_id && (
+                <button
+                  type="button"
+                  onClick={() => downloadInvoicePdf(confirmedSale.invoice_id!, confirmedSale.invoice_number, "a4")}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white py-2.5 text-xs font-bold text-slate-800 shadow-sm active:bg-slate-50"
+                >
+                  <Download className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>GST PDF</span>
+                </button>
+              )}
+            </div>
+
+            {confirmedSale.customer_phone && (
+              <button
+                type="button"
+                onClick={() => {
+                  const phone = confirmedSale.customer_phone!.replace(/\D/g, "");
+                  const msg = `Dear ${confirmedSale.customer_name || "Customer"}, thank you for shopping with us! Your invoice #${confirmedSale.invoice_number} of ${formatCurrency(confirmedSale.total)} is confirmed. View invoice: ${window.location.origin}/invoices/${confirmedSale.invoice_number}`;
+                  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+                }}
+                className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 py-2.5 text-xs font-bold text-emerald-800 shadow-sm active:bg-emerald-100"
+              >
+                <Share2 className="h-3.5 w-3.5 text-emerald-700" />
+                <span>WhatsApp Bill to {confirmedSale.customer_phone}</span>
+              </button>
+            )}
+
             {confirmedSale.web_url && (
               <a
                 href={confirmedSale.web_url}

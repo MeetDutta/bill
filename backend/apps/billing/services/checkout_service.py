@@ -594,22 +594,39 @@ class CheckoutService:
     @classmethod
     def _format_checkout_response(cls, tx: Transaction) -> dict:
         invoice = getattr(tx, "invoice", None)
+        config = BusinessConfig.objects.filter(organization=tx.organization).first()
         items_data = []
         for it in tx.items.select_related("product").all():
+            prod = it.product
+            item_name = it.name or (prod.name if prod else "Item")
+            item_sku = (prod.sku if prod else "") or it.attributes.get("sku", "")
+            item_desc = (prod.description if prod and hasattr(prod, "description") and prod.description else "") or item_name
+            item_unit = getattr(prod, "unit", "") if prod else (it.attributes.get("unit", "") or "pcs")
+
+            unit_price_d = Decimal(str(it.unit_price))
+            qty_d = Decimal(str(it.quantity))
+            disc_d = Decimal(str(it.discount))
+            taxable_amount = max(Decimal("0.00"), (unit_price_d * qty_d) - disc_d)
+
             items_data.append({
                 "id": str(it.id),
-                "product_id": str(it.product.id) if it.product else None,
-                "name": it.name,
+                "product_id": str(prod.id) if prod else None,
+                "name": item_name,
+                "product_name": item_name,
+                "description": item_desc,
+                "sku": item_sku,
+                "unit": item_unit,
                 "quantity": str(it.quantity),
                 "unit_price": str(it.unit_price),
                 "discount": str(it.discount),
                 "tax": str(it.tax),
                 "tax_rate": str(it.tax_rate),
+                "taxable_amount": str(round_decimal(taxable_amount)),
                 "cgst_amount": str(it.cgst_amount),
                 "sgst_amount": str(it.sgst_amount),
                 "igst_amount": str(it.igst_amount),
                 "total": str(it.total),
-                "hsn_code": it.hsn_code,
+                "hsn_code": it.hsn_code or (getattr(prod, "hsn_code", "") if prod else ""),
                 "attributes": it.attributes,
                 "returned_quantity": str(it.returned_quantity),
             })
@@ -624,15 +641,33 @@ class CheckoutService:
                 "status": p.status,
             })
 
+        seller_data = {
+            "name": tx.organization.name,
+            "legal_name": getattr(tx.organization, "legal_name", tx.organization.name),
+            "trade_name": getattr(config, "trade_name", "") or tx.organization.name if config else tx.organization.name,
+            "gstin": getattr(tx.organization, "gst_number", "") or (getattr(config, "gstin", "") if config else "") or "",
+            "address": (getattr(config, "address", "") if config else "") or getattr(tx.organization, "address_line1", "") or (getattr(tx.store, "address_line1", "") if tx.store else ""),
+            "city": getattr(tx.organization, "city", "") or (getattr(tx.store, "city", "") if tx.store else ""),
+            "state": getattr(tx.organization, "state", "") or (getattr(tx.store, "state", "") if tx.store else ""),
+            "phone": (getattr(config, "phone", "") if config else "") or getattr(tx.organization, "phone", "") or (getattr(tx.store, "phone", "") if tx.store else ""),
+            "email": getattr(tx.organization, "email", "") or "",
+            "invoice_footer": getattr(config, "invoice_footer", "Thank you for shopping with us!") if config else "Thank you for shopping with us!",
+            "invoice_terms": getattr(config, "invoice_terms_and_conditions", "Goods once sold cannot be returned.") if config else "Goods once sold cannot be returned.",
+        }
+
         return {
             "id": str(tx.id),
             "transaction_id": str(tx.id),
+            "invoice_id": str(invoice.id) if invoice else None,
             "invoice_number": tx.invoice_number,
             "transaction_date": tx.transaction_date.isoformat(),
+            "seller": seller_data,
             "customer": {
                 "id": str(tx.customer.id) if tx.customer else None,
                 "name": tx.customer.full_name if tx.customer else "Walk-in Customer",
                 "phone": tx.customer.phone if tx.customer else "",
+                "gstin": getattr(tx.customer, "gst_number", "") or "",
+                "address": getattr(tx.customer, "address_line1", "") or "",
                 "outstanding_credit": str(tx.customer.outstanding_credit) if tx.customer else "0.00",
                 "is_walk_in": tx.customer.is_walk_in if tx.customer else True,
             } if tx.customer else None,

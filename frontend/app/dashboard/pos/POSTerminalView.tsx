@@ -48,6 +48,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { cn, parseApiError } from "@/lib/utils";
+import { IsolatedReceiptModal } from "@/components/pos/IsolatedReceiptModal";
 
 export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?: string } = {}) {
   // Config & Metadata
@@ -1491,142 +1492,16 @@ export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?
         </DialogContent>
       </Dialog>
 
-      {/* MODAL 2: Post-Sale Receipt & Print Dialog */}
-      <Dialog open={!!completedSale} onOpenChange={() => setCompletedSale(null)}>
-        <DialogContent className="max-w-xl w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-emerald-600">
-              <CheckCircle2 className="h-5 w-5" />
-              Bill Generated Successfully!
-            </DialogTitle>
-          </DialogHeader>
-
-          {completedSale && (
-            <div className="space-y-4 py-2">
-              {/* PDF Page 11 Success Banner */}
-              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-center text-emerald-800">
-                <p className="font-bold text-sm">🎉 Bill {completedSale.invoice_number} ban gaya! Ab Print Bill dabao</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Sale recorded, inventory updated, and sequential tax invoice registered.</p>
-              </div>
-
-              {/* Receipt Summary Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-                <div className="rounded bg-muted p-2">
-                  <span className="text-muted-foreground block text-[10px]">Invoice</span>
-                  <span className="font-bold text-sm font-mono">{completedSale.invoice_number}</span>
-                </div>
-                <div className="rounded bg-muted p-2">
-                  <span className="text-muted-foreground block text-[10px]">Total Paid</span>
-                  <span className="font-bold text-sm text-emerald-600">₹{completedSale.total}</span>
-                </div>
-                <div className="rounded bg-muted p-2">
-                  <span className="text-muted-foreground block text-[10px]">Customer</span>
-                  <span className="font-bold truncate block">{completedSale.customer?.name || "Walk-in"}</span>
-                </div>
-                <div className="rounded bg-muted p-2">
-                  <span className="text-muted-foreground block text-[10px]">Status</span>
-                  <span className="font-bold uppercase text-primary">{completedSale.payment_status}</span>
-                </div>
-              </div>
-
-              {/* Printable Receipt Preview */}
-              <div className="rounded border bg-white p-4 text-black font-mono text-xs shadow-inner max-h-56 overflow-y-auto print:border-none print:p-0 print:shadow-none">
-                <div className="text-center border-b pb-2">
-                  <p className="font-bold text-sm uppercase">{config?.trade_name || "BILLFREE STORE"}</p>
-                  {config?.gstin && <p className="text-[10px]">GSTIN: {config.gstin}</p>}
-                  <p className="text-[10px]">TAX INVOICE: {completedSale.invoice_number}</p>
-                  <p className="text-[10px]">{new Date().toLocaleString()}</p>
-                </div>
-                <table className="w-full my-2 text-[11px]">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left pb-1">Item</th>
-                      <th className="text-right pb-1">Qty</th>
-                      <th className="text-right pb-1">Price</th>
-                      <th className="text-right pb-1">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {completedSale.items?.map((item: any, i: number) => (
-                      <tr key={i}>
-                        <td className="py-0.5 truncate max-w-[120px]">{item.product_name}</td>
-                        <td className="text-right py-0.5">{item.quantity}</td>
-                        <td className="text-right py-0.5">₹{item.unit_price}</td>
-                        <td className="text-right py-0.5">₹{item.total}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="border-t pt-1 space-y-0.5 text-right text-[11px]">
-                  <p>Subtotal: ₹{completedSale.subtotal}</p>
-                  {Number(completedSale.discount) > 0 && <p>Discount: -₹{completedSale.discount}</p>}
-                  <p>Tax: ₹{completedSale.tax}</p>
-                  <p className="font-bold text-sm">Grand Total: ₹{completedSale.total}</p>
-                  {completedSale.tendered_amount && Number(completedSale.tendered_amount) > Number(completedSale.total) && (
-                    <p className="text-xs text-muted-foreground">Tendered: ₹{completedSale.tendered_amount}</p>
-                  )}
-                  {completedSale.change_amount && Number(completedSale.change_amount) > 0 && (
-                    <p className="text-xs font-bold text-amber-600">Change Returned: ₹{completedSale.change_amount}</p>
-                  )}
-                  <p className="text-[10px] text-muted-foreground uppercase">
-                    Paid via {completedSale.payments?.map((p: any) => `${p.payment_method}: ₹${p.amount}`).join(", ") || completedSale.payment_method}
-                  </p>
-                </div>
-                <div className="text-center border-t mt-2 pt-1 text-[10px]">
-                  <p>{config?.invoice_footer || "Thank you for shopping with us!"}</p>
-                </div>
-              </div>
-
-              {/* Action Buttons: Print, WhatsApp, Copy Link */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => window.print()}
-                    className="gap-1.5 text-xs"
-                  >
-                    <Printer className="h-3.5 w-3.5" />
-                    Print Receipt
-                  </Button>
-
-                  <Link
-                    href={`${basePath}/invoices`}
-                    className="inline-flex items-center gap-1.5 rounded-md border bg-background hover:bg-accent px-3 py-1.5 text-xs font-semibold text-foreground"
-                  >
-                    <FileText className="h-3.5 w-3.5 text-primary" />
-                    <span>View Invoices</span>
-                  </Link>
-
-                  {completedSale.customer?.phone && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const phone = completedSale.customer.phone.replace(/\D/g, "");
-                        const msg = `Dear ${completedSale.customer.name}, thank you for your purchase of ₹${completedSale.total}. View your digital invoice here: ${window.location.origin}/invoices/${completedSale.invoice_number}`;
-                        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
-                      }}
-                      className="gap-1.5 text-xs text-emerald-700 hover:text-emerald-800"
-                    >
-                      <Share2 className="h-3.5 w-3.5" />
-                      WhatsApp Bill
-                    </Button>
-                  )}
-                </div>
-
-                <Button
-                  size="sm"
-                  onClick={() => setCompletedSale(null)}
-                  className="bg-primary text-primary-foreground text-xs"
-                >
-                  Start New Sale (Enter)
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* MODAL 2: Post-Sale Isolated Receipt & Tax Invoice Dialog */}
+      {completedSale && (
+        <IsolatedReceiptModal
+          saleData={completedSale}
+          config={config}
+          basePath={basePath}
+          onClose={() => setCompletedSale(null)}
+          onNewSale={() => setCompletedSale(null)}
+        />
+      )}
 
       {/* MODAL 3: Customer Selector & Quick Create */}
       <Dialog open={customerModalOpen} onOpenChange={setCustomerModalOpen}>
