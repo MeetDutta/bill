@@ -6,7 +6,7 @@ export interface User {
   full_name: string;
   phone: string;
   role: string;
-  organization: string;
+  organization: string | { id?: string; name?: string } | any;
   organization_name?: string;
   is_active: boolean;
   is_verified: boolean;
@@ -81,6 +81,9 @@ export interface Product {
   name: string;
   sku: string;
   barcode?: string;
+  hsn_code?: string;
+  unit?: string;
+  description?: string;
   unit_price: number;
   selling_price?: number | string;
   purchase_price?: number | string;
@@ -810,6 +813,7 @@ export interface Invoice {
   origin_quotation_number?: string;
   terms_and_conditions?: string;
   custom_notes?: string;
+  transaction?: any;
   transaction_details?: any;
 }
 
@@ -820,6 +824,7 @@ export interface QuotationItem {
   name: string;
   quantity: number | string;
   unit_price: number | string;
+  original_price?: number | string;
   discount: number | string;
   tax_rate: number | string;
   tax?: number | string;
@@ -831,7 +836,7 @@ export interface QuotationItem {
 export interface Quotation {
   id: string;
   quotation_number: string;
-  customer?: string | null;
+  customer?: string | { id?: string; full_name?: string; phone?: string; email?: string } | any;
   customer_name?: string;
   customer_phone?: string;
   customer_email?: string;

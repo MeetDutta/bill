@@ -255,7 +255,7 @@ export default function CurrentStockPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-amber-600">{lowStockCount}</div>
+            <div className="text-2xl font-bold text-red-600">{lowStockCount}</div>
             <p className="text-xs text-muted-foreground mt-1">Items at or below reorder level</p>
           </CardContent>
         </Card>
@@ -346,15 +346,15 @@ export default function CurrentStockPage() {
                         </td>
                         <td className="py-3 px-4 text-center">
                           {isOutOfStock ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-rose-500/10 text-rose-700">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-500/10 text-red-700 border border-red-500/20">
                               Out of Stock
                             </span>
                           ) : isLow ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-500/10 text-amber-700">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-500/10 text-red-700 border border-red-500/20">
                               Low Stock
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-700">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
                               In Stock
                             </span>
                           )}

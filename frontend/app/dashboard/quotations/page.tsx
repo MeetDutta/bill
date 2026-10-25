@@ -169,22 +169,25 @@ export default function QuotationsPage() {
     if (!prod) return;
     const updated = [...items];
     const qty = updated[index].quantity || 1;
-    const price = prod.unit_price || 0;
+    const authoritativePrice = Number(prod.selling_price ?? (prod as any).unit_price) || 0;
     const disc = updated[index].discount || 0;
-    const rate = prod.tax_rate || 0;
+    const rate = Number(prod.tax_rate ?? 18);
 
-    const sub = Math.max(0, Number(qty) * Number(price) - Number(disc));
+    const sub = Math.max(0, Number(qty) * authoritativePrice - Number(disc));
     const tax = sub * (Number(rate) / 100);
 
     updated[index] = {
       product_id: prod.id,
       name: prod.name,
-      unit_price: price,
+      unit_price: authoritativePrice,
+      original_price: authoritativePrice,
       quantity: qty,
       discount: disc,
       tax_rate: rate,
       tax: Math.round(tax * 100) / 100,
       total: Math.round((sub + tax) * 100) / 100,
+      hsn_code: prod.hsn_code || "",
+      unit: prod.unit || "pcs",
     };
     setItems(updated);
   };
@@ -731,11 +734,14 @@ export default function QuotationsPage() {
                             className="w-full mb-1 text-[11px] border rounded px-1.5 py-1 bg-background text-muted-foreground"
                           >
                             <option value="">-- Choose Product Preset --</option>
-                            {availableProducts.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} (₹{p.unit_price})
-                              </option>
-                            ))}
+                            {availableProducts.map((p) => {
+                              const pPrice = Number(p.selling_price ?? (p as any).unit_price) || 0;
+                              return (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} {p.sku ? `(${p.sku})` : ""} - ₹{pPrice} | Stock: {p.current_stock || 0}
+                                </option>
+                              );
+                            })}
                           </select>
                         )}
                         <input

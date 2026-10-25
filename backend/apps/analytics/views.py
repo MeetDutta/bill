@@ -223,11 +223,12 @@ def compute_analytics(org):
     live_activity = []
     for tx in recent_txs:
         methods = list({p.payment_method.upper() for p in tx.payments.all()}) or [tx.payment_method.upper()]
+        cashier_label = (tx.cashier.get_full_name() or tx.cashier.email) if tx.cashier else "Unknown / Legacy"
         live_activity.append({
             "id": str(tx.id),
             "invoice_number": tx.invoice_number,
             "time": tx.transaction_date.isoformat(),
-            "cashier": tx.cashier.get_full_name() if tx.cashier else "Staff",
+            "cashier": cashier_label,
             "customer": tx.customer.full_name if tx.customer else "Walk-in Customer",
             "amount": float(tx.total),
             "amount_paid": float(tx.amount_paid),
@@ -236,6 +237,35 @@ def compute_analytics(org):
             "change_amount": float(tx.change_amount),
             "payment_status": tx.payment_status,
             "payment_methods": methods,
+        })
+
+    # Staff attribution for today's sales
+    staff_sales_qs = Transaction.objects.filter(
+        organization=org,
+        transaction_date__gte=today_start,
+        status="completed",
+    ).values(
+        "cashier__id", "cashier__first_name", "cashier__last_name", "cashier__email", "cashier__role"
+    ).annotate(
+        completed_sales=Count("id"),
+        gross_sales=Sum("total"),
+        collected=Sum("amount_paid"),
+        outstanding=Sum("outstanding_amount"),
+    ).order_by("-gross_sales")
+
+    staff_sales_today = []
+    for s in staff_sales_qs:
+        cid = s["cashier__id"]
+        c_name = f"{s['cashier__first_name'] or ''} {s['cashier__last_name'] or ''}".strip() or s["cashier__email"] if cid else "Unknown / Legacy"
+        c_role = s["cashier__role"] if cid else "Legacy / System"
+        staff_sales_today.append({
+            "staff_id": str(cid) if cid else None,
+            "name": c_name,
+            "role": c_role,
+            "completed_sales": s["completed_sales"] or 0,
+            "gross_sales": float(s["gross_sales"] or Decimal("0.00")),
+            "collected": float(s["collected"] or Decimal("0.00")),
+            "outstanding": float(s["outstanding"] or Decimal("0.00")),
         })
 
     # 4. Hourly Sales Chart for Today (00:00 to 23:00)
@@ -455,6 +485,7 @@ def compute_analytics(org):
         "estimated_gross_profit": float(today_profit),
         "payment_methods": payment_methods_data,
         "payment_methods_breakdown": payment_methods_data,
+        "staff_sales_today": staff_sales_today,
         "live_activity": live_activity,
         "live_sales_activity": live_activity,
         "hourly_sales": hourly_sales,
@@ -1050,4 +1081,7 @@ class AICopilotQueryView(APIView):
 
         response_data = AIBusinessCopilotService.answer_query(request.user.organization, question)
         return Response(response_data)
+
+
+from apps.billing.staff_views import AdminStaffSalesBreakdownView as StaffSalesBreakdownView
 

@@ -1,7 +1,7 @@
 {
   "last_backup": {
     "filename": "unit_test_backup.dump",
-    "timestamp": "2026-10-25T06:52:21.501156+00:00",
+    "timestamp": "2026-10-25T07:51:23.249633+00:00",
     "size_bytes": 102400,
     "status": "success",
     "database_name": "digitalbill_db",
@@ -10,7 +10,7 @@
   },
   "last_verified_restoration": {
     "backup_filename": "unit_test_backup.dump",
-    "timestamp": "2026-10-25T06:52:21.501601+00:00",
+    "timestamp": "2026-10-25T07:51:23.251957+00:00",
     "duration_seconds": 0.85,
     "status": "verified",
     "verified_records": {
@@ -20,6 +20,24 @@
     "error_message": ""
   },
   "backups": [
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-25T07:51:23.249633+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-25T07:43:22.878051+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
     {
       "filename": "unit_test_backup.dump",
       "timestamp": "2026-10-25T06:52:21.501156+00:00",

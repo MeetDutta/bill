@@ -2,12 +2,13 @@ import logging
 import secrets
 from decimal import Decimal, InvalidOperation
 from django.db import models, transaction
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, PermissionDenied
 
 from common.pagination import StandardPagination
 from apps.billing.models import BusinessConfig
@@ -98,26 +99,75 @@ class InvoiceDetailView(generics.RetrieveAPIView):
 class InvoicePDFView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request, pk):
+    def _get_invoice_with_permissions(self, request, pk):
         invoice = get_object_or_404(
-            Invoice.objects.select_related("transaction__customer", "transaction__store", "organization"),
+            Invoice.objects.select_related(
+                "transaction__customer",
+                "transaction__store",
+                "transaction__cashier",
+                "organization",
+            ),
             id=pk,
             organization=request.user.organization,
         )
-        from apps.invoices.pdf import generate_invoice_pdf
-        pdf_url = generate_invoice_pdf(invoice)
-        if pdf_url and invoice.pdf_url != pdf_url:
-            invoice.pdf_url = pdf_url
-            invoice.save(update_fields=["pdf_url"])
+
+        user = request.user
+        admin_roles = ("org_admin", "super_admin", "owner", "store_manager", "manager")
+        # Restrict cashiers and staff from viewing another staff member's invoice
+        if user.role in ("cashier", "staff") and not user.is_superuser:
+            tx = invoice.transaction
+            if tx and tx.cashier and tx.cashier != user:
+                raise PermissionDenied("You do not have permission to access another staff member's invoice.")
+
+        return invoice
+
+    def get(self, request, pk):
+        invoice = self._get_invoice_with_permissions(request, pk)
+        format_type = request.query_params.get("format_type", "a4").lower()
+        if format_type not in ("a4", "thermal", "receipt"):
+            format_type = "a4"
+
+        # Check if direct PDF download/streaming is requested
+        wants_pdf = (
+            request.query_params.get("download") == "true"
+            or request.query_params.get("raw") == "true"
+            or request.query_params.get("format") == "pdf"
+            or "application/pdf" in request.headers.get("Accept", "")
+        )
+
+        from apps.invoices.pdf import generate_invoice_pdf, generate_invoice_pdf_bytes
+
+        if wants_pdf:
+            try:
+                pdf_bytes = generate_invoice_pdf_bytes(invoice, format_type=format_type)
+                disp = "attachment" if request.query_params.get("download") == "true" else "inline"
+                response = HttpResponse(pdf_bytes, content_type="application/pdf")
+                response["Content-Disposition"] = f'{disp}; filename="{invoice.invoice_number}.pdf"'
+                return response
+            except Exception as e:
+                logger.error("Error generating PDF bytes for invoice %s: %s", invoice.invoice_number, e)
+                return Response({"error": "Failed to generate PDF document."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Standard JSON response (persisting verified ReportLab pdf_url)
+        try:
+            pdf_url = generate_invoice_pdf(invoice, format_type=format_type)
+            if pdf_url and invoice.pdf_url != pdf_url:
+                invoice.pdf_url = pdf_url
+                invoice.save(update_fields=["pdf_url"])
+        except Exception as e:
+            logger.warning("PDF generation error: %s", e)
+
         return Response({
             "id": str(invoice.id),
             "invoice_number": invoice.invoice_number,
             "pdf_url": invoice.pdf_url,
             "web_url": invoice.web_url,
+            "download_url": f"/api/v1/invoices/{invoice.id}/pdf/?download=true",
+            "view_url": f"/api/v1/invoices/{invoice.id}/pdf/?raw=true",
         })
 
-    def get(self, request, pk):
-        return self.post(request, pk)
+    def post(self, request, pk):
+        return self.get(request, pk)
 
 
 class InvoicePublicView(generics.RetrieveAPIView):

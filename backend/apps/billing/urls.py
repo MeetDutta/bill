@@ -38,10 +38,24 @@ from .views import (
     POSRealtimeRecentEventsView,
     POSRealtimeTicketView,
 )
+from .staff_views import (
+    StaffOverviewView,
+    StaffInvoiceListView,
+    StaffQuotationListView,
+    StaffSalesProfileView,
+    AdminStaffSalesBreakdownView,
+)
 
 app_name = "billing"
 
 urlpatterns = [
+    # Staff Dedicated Routes & Admin Attribution
+    path("staff/overview/", StaffOverviewView.as_view(), name="billing-staff-overview"),
+    path("staff/invoices/", StaffInvoiceListView.as_view(), name="billing-staff-invoices"),
+    path("staff/quotations/", StaffQuotationListView.as_view(), name="billing-staff-quotations"),
+    path("staff/sales-profile/", StaffSalesProfileView.as_view(), name="billing-staff-sales-profile"),
+    path("admin/staff-sales/", AdminStaffSalesBreakdownView.as_view(), name="billing-admin-staff-sales"),
+
     # Configuration & Business Types
     path("config/", BusinessConfigView.as_view(), name="pos-config"),
     path("business-types/", BusinessTypesListView.as_view(), name="pos-business-types"),

@@ -245,7 +245,15 @@ export const quotationApi = {
   create: (data: unknown) => api.post<Quotation>("/quotations/", data),
   update: (id: string, data: unknown) => api.patch<Quotation>(`/quotations/${id}/`, data),
   delete: (id: string) => api.delete(`/quotations/${id}/`),
-  convert: (id: string, data?: { payment_method?: string }) =>
+  convert: (
+    id: string,
+    data?: {
+      payment_method?: string;
+      payments?: Array<{ payment_method: string; amount: number; reference?: string; notes?: string }>;
+      allow_partial?: boolean;
+      idempotency_key?: string;
+    }
+  ) =>
     api.post<{
       message: string;
       invoice_id: string;
@@ -279,6 +287,104 @@ export const userApi = {
     api.post<User>("/users/create/", data),
   update: (id: string, data: Partial<User> & { password?: string }) => api.patch<User>(`/users/${id}/`, data),
   delete: (id: string) => api.delete(`/users/${id}/`),
+};
+
+// Dedicated Staff Operations
+export const staffApi = {
+  getOverview: () =>
+    api.get<{
+      staff: { id: string; name: string; email: string; role: string; role_display: string };
+      organization: { id: string; name: string; gst_number: string };
+      store: { id: string; name: string };
+      metrics: { today_sales: number; today_bills_count: number; today_collected: number; today_outstanding: number };
+      payment_methods: Array<{ method: string; payment_method: string; amount: number; count: number; percentage: number }>;
+      recent_bills: Array<{
+        id: string;
+        invoice_number: string;
+        customer_name: string;
+        customer_phone: string;
+        date: string;
+        total: number;
+        amount_paid: number;
+        outstanding_amount: number;
+        payment_status: string;
+        payment_method: string;
+        pdf_url: string;
+        web_url: string;
+      }>;
+    }>("/billing/staff/overview/"),
+
+  getInvoices: (params?: { search?: string; payment_status?: string; start_date?: string; end_date?: string; page?: number }) =>
+    api.get<PaginatedResponse<Invoice>>("/billing/staff/invoices/", { params }),
+
+  getQuotations: (params?: { search?: string; status?: string; start_date?: string; end_date?: string; page?: number }) =>
+    api.get<PaginatedResponse<Quotation>>("/billing/staff/quotations/", { params }),
+
+  getSalesProfile: (params?: { start_date?: string; end_date?: string }) =>
+    api.get<{
+      staff: { id: string; name: string; email: string; role: string; role_display: string };
+      date_range: { start_date: string; end_date: string };
+      today: { sales: number; invoices_count: number; collected: number };
+      range_summary: {
+        gross_sales: number;
+        discounts: number;
+        net_sales: number;
+        invoices_count: number;
+        actual_collected: number;
+        outstanding_credit: number;
+      };
+      payment_methods: Array<{ method: string; payment_method: string; amount: number; count: number; percentage: number }>;
+      recent_invoices: Array<{
+        id: string;
+        invoice_number: string;
+        date: string;
+        customer: string;
+        total: number;
+        amount_paid: number;
+        outstanding_amount: number;
+        payment_status: string;
+        payment_method: string;
+        pdf_url: string;
+        web_url: string;
+      }>;
+    }>("/billing/staff/sales-profile/", { params }),
+};
+
+// Admin Staff Attribution & Sales Breakdown
+export const adminStaffSalesApi = {
+  getBreakdown: (params?: {
+    start_date?: string;
+    end_date?: string;
+    staff_id?: string;
+    search?: string;
+    export?: string;
+  }) =>
+    api.get<{
+      date_range: { start_date: string; end_date: string };
+      summary: {
+        completed_sales: number;
+        gross_sales: number;
+        discounts: number;
+        returns: number;
+        net_sales: number;
+        collected_amount: number;
+        outstanding_credit: number;
+      };
+      staff_breakdown: Array<{
+        staff_id: string | null;
+        name: string;
+        email: string;
+        role: string;
+        completed_sales: number;
+        gross_sales: number;
+        discounts: number;
+        returns: number;
+        net_sales: number;
+        collected_amount: number;
+        outstanding_credit: number;
+        last_transaction: string | null;
+      }>;
+    }>("/billing/admin/staff-sales/", { params }),
 };
 
 

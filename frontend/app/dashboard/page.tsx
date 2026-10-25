@@ -48,6 +48,7 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
+import { StaffSalesBreakdownTable } from "@/components/dashboard/StaffSalesBreakdownTable";
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -282,15 +283,15 @@ export default function DashboardPage() {
       {/* EXECUTIVE KPI GRID - ROW 1: SALES VELOCITY & REVENUE */}
       <div>
         <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Sales Velocity & Performance</h2>
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           {/* Today's Net Sales */}
-          <Card className="border-primary/30 bg-gradient-to-br from-primary/5 via-background to-background">
+          <Card className="border-emerald-500/30 bg-emerald-500/5">
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
               <span className="text-[11px] font-semibold text-muted-foreground">Today&apos;s Net Sales</span>
-              <TrendingUp className="h-4 w-4 text-primary" />
+              <TrendingUp className="h-4 w-4 text-emerald-600" />
             </CardHeader>
             <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-foreground">
+              <div className="text-xl font-black text-emerald-700 dark:text-emerald-400">
                 {formatCurrency(todayNetSales)}
               </div>
               <div className="text-[10px] text-muted-foreground mt-0.5 flex justify-between">
@@ -300,30 +301,14 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Today's Avg Bill */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Avg Bill Value</span>
-              <Receipt className="h-4 w-4 text-blue-600" />
-            </CardHeader>
-            <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-foreground">
-                {formatCurrency(avgBillValue)}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
-                Returns: {formatCurrency(todayReturns)}
-              </p>
-            </CardContent>
-          </Card>
-
           {/* This Week */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
               <span className="text-[11px] font-semibold text-muted-foreground">This Week</span>
-              <Activity className="h-4 w-4 text-indigo-600" />
+              <Activity className="h-4 w-4 text-foreground" />
             </CardHeader>
             <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-indigo-600">
+              <div className="text-xl font-black text-foreground">
                 {formatCurrency(weekRevenue)}
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">Last 7 calendar days</p>
@@ -348,10 +333,10 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
               <span className="text-[11px] font-semibold text-muted-foreground">All-Time Revenue</span>
-              <Wallet className="h-4 w-4 text-purple-600" />
+              <Wallet className="h-4 w-4 text-foreground" />
             </CardHeader>
             <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-purple-600">
+              <div className="text-xl font-black text-foreground">
                 {formatCurrency(allTimeRevenue)}
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">Lifetime verified sales</p>
@@ -379,13 +364,13 @@ export default function DashboardPage() {
         <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Inventory Valuation & Dues</h2>
         <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
           {/* Stock Valuation */}
-          <Card className="border-emerald-500/20 bg-emerald-500/5">
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
               <span className="text-[11px] font-semibold text-muted-foreground">Stock Value</span>
-              <Boxes className="h-4 w-4 text-emerald-600" />
+              <Boxes className="h-4 w-4 text-foreground" />
             </CardHeader>
             <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-emerald-700 dark:text-emerald-400">
+              <div className="text-xl font-black text-foreground">
                 {formatCurrency(stockValue)}
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">{totalProducts} active catalog SKUs</p>
@@ -393,7 +378,7 @@ export default function DashboardPage() {
           </Card>
 
           {/* In-Stock SKUs */}
-          <Card>
+          <Card className="border-emerald-500/20 bg-emerald-500/5">
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
               <span className="text-[11px] font-semibold text-muted-foreground">In Stock</span>
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
@@ -407,13 +392,13 @@ export default function DashboardPage() {
           </Card>
 
           {/* Low Stock Alerts */}
-          <Card className={lowStockCount > 0 ? "border-amber-500/30 bg-amber-500/5" : ""}>
+          <Card className={lowStockCount > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
               <span className="text-[11px] font-semibold text-muted-foreground">Low Stock Alert</span>
-              <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? "text-amber-600" : "text-muted-foreground"}`} />
+              <AlertTriangle className={`h-4 w-4 ${lowStockCount > 0 ? "text-red-600" : "text-muted-foreground"}`} />
             </CardHeader>
             <CardContent className="px-3.5 pb-3">
-              <div className={`text-xl font-black ${lowStockCount > 0 ? "text-amber-600" : "text-foreground"}`}>
+              <div className={`text-xl font-black ${lowStockCount > 0 ? "text-red-600" : "text-foreground"}`}>
                 {lowStockCount}
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">Below reorder threshold</p>
@@ -421,13 +406,13 @@ export default function DashboardPage() {
           </Card>
 
           {/* Out of Stock */}
-          <Card className={outOfStockCount > 0 ? "border-rose-500/30 bg-rose-500/5" : ""}>
+          <Card className={outOfStockCount > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
               <span className="text-[11px] font-semibold text-muted-foreground">Out of Stock</span>
-              <PackageX className={`h-4 w-4 ${outOfStockCount > 0 ? "text-rose-600" : "text-muted-foreground"}`} />
+              <PackageX className={`h-4 w-4 ${outOfStockCount > 0 ? "text-red-600" : "text-muted-foreground"}`} />
             </CardHeader>
             <CardContent className="px-3.5 pb-3">
-              <div className={`text-xl font-black ${outOfStockCount > 0 ? "text-rose-600" : "text-foreground"}`}>
+              <div className={`text-xl font-black ${outOfStockCount > 0 ? "text-red-600" : "text-foreground"}`}>
                 {outOfStockCount}
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">Zero stock items</p>
@@ -435,13 +420,13 @@ export default function DashboardPage() {
           </Card>
 
           {/* Customer Dues (Udhaar) */}
-          <Card>
+          <Card className={todayOutstanding > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
-              <span className="text-[11px] font-semibold text-muted-foreground">Customer Dues (Udhaar)</span>
-              <Wallet className="h-4 w-4 text-amber-600" />
+              <span className="text-[11px] font-semibold text-muted-foreground">Customer Dues</span>
+              <Wallet className={`h-4 w-4 ${todayOutstanding > 0 ? "text-red-600" : "text-muted-foreground"}`} />
             </CardHeader>
             <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-amber-600">
+              <div className={`text-xl font-black ${todayOutstanding > 0 ? "text-red-600" : "text-foreground"}`}>
                 {formatCurrency(todayOutstanding)}
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">Total outstanding receivables</p>
@@ -449,13 +434,13 @@ export default function DashboardPage() {
           </Card>
 
           {/* Supplier Payables */}
-          <Card>
+          <Card className={supplierDues > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
             <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3.5">
               <span className="text-[11px] font-semibold text-muted-foreground">Supplier Dues</span>
-              <CreditCard className="h-4 w-4 text-blue-600" />
+              <CreditCard className={`h-4 w-4 ${supplierDues > 0 ? "text-red-600" : "text-muted-foreground"}`} />
             </CardHeader>
             <CardContent className="px-3.5 pb-3">
-              <div className="text-xl font-black text-blue-600">
+              <div className={`text-xl font-black ${supplierDues > 0 ? "text-red-600" : "text-foreground"}`}>
                 {formatCurrency(supplierDues)}
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">{totalSuppliers} active suppliers</p>
@@ -707,7 +692,7 @@ export default function DashboardPage() {
                         fontSize: "12px",
                       }}
                     />
-                    <Bar dataKey="sales" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="sales" fill="#16a34a" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -723,6 +708,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* STAFF PERFORMANCE & SALES ATTRIBUTION BREAKDOWN */}
+      <StaffSalesBreakdownTable />
 
       {/* THIRD ROW: LIVE RECENT COMMITTED TRANSACTIONS */}
       <Card>

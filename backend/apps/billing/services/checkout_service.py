@@ -167,7 +167,7 @@ class CheckoutService:
         # 6. Customer Identification
         customer_info = cart_data.get("customer") or {}
         customer = None
-        customer_id = customer_info.get("id")
+        customer_id = customer_info.get("id") or cart_data.get("customer_id")
         if customer_id:
             customer = Customer.objects.filter(organization=organization, id=customer_id).first()
 
