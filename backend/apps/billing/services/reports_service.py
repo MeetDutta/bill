@@ -133,29 +133,53 @@ class ReportsService:
             organization=organization,
             created_at__range=(start_dt, end_dt),
             status="success",
-        )
+        ).exclude(payment_method__iexact="credit")
         if store_id:
             qs = qs.filter(transaction__store_id=store_id)
 
-        by_method = qs.values("payment_method").annotate(
+        by_method = list(qs.values("payment_method").annotate(
             total_amount=Sum("amount"),
             count=Count("id"),
-        ).order_by("-total_amount")
+        ))
 
-        total_collected = qs.aggregate(t=Sum("amount"))["t"] or Decimal("0.00")
+        credit_qs = CustomerCreditPayment.objects.filter(
+            organization=organization,
+            created_at__range=(start_dt, end_dt),
+        )
+        credit_by_method = list(credit_qs.values("payment_method").annotate(
+            total_amount=Sum("amount"),
+            count=Count("id"),
+        ))
+
+        method_dict = {}
+        for item in by_method:
+            m = item["payment_method"].lower()
+            method_dict.setdefault(m, {"amount": Decimal("0.00"), "count": 0})
+            method_dict[m]["amount"] += (item["total_amount"] or Decimal("0.00"))
+            method_dict[m]["count"] += (item["count"] or 0)
+
+        for item in credit_by_method:
+            m = item["payment_method"].lower()
+            method_dict.setdefault(m, {"amount": Decimal("0.00"), "count": 0})
+            method_dict[m]["amount"] += (item["total_amount"] or Decimal("0.00"))
+            method_dict[m]["count"] += (item["count"] or 0)
+
+        total_collected = sum((d["amount"] for d in method_dict.values()), Decimal("0.00"))
+
+        breakdown = []
+        for m, d in sorted(method_dict.items(), key=lambda x: x[1]["amount"], reverse=True):
+            pct = round_decimal((d["amount"] / total_collected) * 100) if total_collected else Decimal("0.00")
+            breakdown.append({
+                "method": m,
+                "total": str(d["amount"]),
+                "count": d["count"],
+                "percentage": str(pct),
+            })
 
         return {
             "period": period,
             "total_collected": str(total_collected),
-            "breakdown": [
-                {
-                    "method": item["payment_method"],
-                    "total": str(item["total_amount"]),
-                    "count": item["count"],
-                    "percentage": str(round_decimal((item["total_amount"] / total_collected) * 100)) if total_collected else "0",
-                }
-                for item in by_method
-            ],
+            "breakdown": breakdown,
         }
 
     @classmethod

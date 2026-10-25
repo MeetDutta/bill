@@ -1,6 +1,6 @@
 import logging
 import secrets
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.db import models, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -14,6 +14,7 @@ from apps.billing.models import BusinessConfig
 from apps.billing.services.cart_engine import round_decimal
 from apps.billing.services.tax_engine import TaxEngine
 from apps.billing.services.invoice_number_service import InvoiceNumberService
+from apps.billing.services.checkout_service import ALLOWED_PAYMENT_METHODS
 from apps.products.models import Product, InventoryMovement
 from apps.transactions.models import Transaction, TransactionItem, TransactionPayment
 from apps.customers.models import Customer, CustomerTimeline
@@ -368,25 +369,190 @@ class QuotationConvertView(APIView):
         org = request.user.organization
         idempotency_key = request.headers.get("Idempotency-Key") or request.data.get("idempotency_key")
 
-        quotation = get_object_or_404(
-            Quotation.objects.select_related("customer", "store").prefetch_related("items__product"),
-            id=pk,
-            organization=org,
-        )
-
-        if quotation.status == "converted" or quotation.converted_invoice is not None:
-            return Response(
-                {"error": "This quotation has already been converted into an invoice."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        payment_method = (request.data.get("payment_method") or "cash").lower()
-        store = quotation.store or Store.objects.filter(organization=org).first()
+        # Fast idempotency check
+        if idempotency_key:
+            existing_tx = Transaction.objects.filter(
+                organization=org,
+                external_transaction_id=idempotency_key,
+            ).select_related("invoice").first()
+            if existing_tx and existing_tx.invoice:
+                inv = existing_tx.invoice
+                return Response(
+                    {
+                        "message": "Quotation already converted to invoice (idempotent replay).",
+                        "invoice_id": str(inv.id),
+                        "invoice_number": inv.invoice_number,
+                        "quotation_id": str(pk),
+                        "pdf_url": inv.pdf_url,
+                        "web_url": inv.web_url,
+                        "total": str(existing_tx.total),
+                    },
+                    status=status.HTTP_200_OK,
+                )
 
         config = BusinessConfig.objects.filter(organization=org).first()
         allow_negative_stock = config.allow_negative_stock if config else False
 
         with transaction.atomic():
+            try:
+                quotation = (
+                    Quotation.objects.select_for_update()
+                    .select_related("customer", "store")
+                    .prefetch_related("items__product")
+                    .get(id=pk, organization=org)
+                )
+            except Quotation.DoesNotExist:
+                return Response({"error": "Quotation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            if quotation.status in ("converted", "cancelled") or quotation.converted_invoice is not None:
+                return Response(
+                    {"error": f"This quotation cannot be converted (current status: '{quotation.status}')."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Support both split payments array and single payment_method
+            payments_input = request.data.get("payments")
+            if not payments_input:
+                pm = (request.data.get("payment_method") or "cash").lower()
+                payments_input = [{"payment_method": pm, "amount": quotation.total}]
+
+            total_tendered = Decimal("0.00")
+            credit_amount = Decimal("0.00")
+            cash_paid = Decimal("0.00")
+            parsed_payments = []
+
+            for p in payments_input:
+                raw_amt = p.get("amount")
+                if raw_amt is None or raw_amt == "":
+                    raise ValidationError("Payment allocation amount is required.")
+                try:
+                    amt = Decimal(str(raw_amt))
+                except (InvalidOperation, TypeError, ValueError):
+                    raise ValidationError(f"Invalid payment allocation amount '{raw_amt}'. Must be a valid number.")
+
+                if not amt.is_finite():
+                    raise ValidationError(f"Payment allocation amount '{raw_amt}' must be a finite number.")
+
+                if amt <= Decimal("0.00"):
+                    raise ValidationError(f"Payment allocation amount must be greater than zero. Received: {amt}.")
+
+                quantized = round_decimal(amt)
+                if abs(amt - quantized) > Decimal("0.00001"):
+                    raise ValidationError(f"Payment allocation '{raw_amt}' exceeds maximum 2 decimal places precision.")
+                amt = quantized
+
+                m = str(p.get("payment_method") or "cash").strip().lower()
+                if m not in ALLOWED_PAYMENT_METHODS:
+                    raise ValidationError(
+                        f"Unsupported payment method '{m}'. Allowed methods: {', '.join(sorted(ALLOWED_PAYMENT_METHODS))}."
+                    )
+
+                ref = str(p.get("reference") or "")
+                notes = str(p.get("notes") or f"Converted from Quote #{quotation.quotation_number}")
+                parsed_payments.append({
+                    "payment_method": m,
+                    "amount": amt,
+                    "reference": ref,
+                    "notes": notes,
+                })
+                total_tendered += amt
+                if m == "credit":
+                    credit_amount += amt
+                if m == "cash":
+                    cash_paid += amt
+
+            if not parsed_payments:
+                raise ValidationError("At least one valid payment allocation is required.")
+
+            customer = quotation.customer
+            is_walk_in = customer.is_walk_in if customer else True
+
+            # Handle Partial Settlement
+            if total_tendered < quotation.total:
+                allow_partial = bool(request.data.get("allow_partial") or request.data.get("is_partial"))
+                remaining_balance = quotation.total - total_tendered
+                if allow_partial:
+                    if is_walk_in or not customer:
+                        raise ValidationError("Partial payment and credit balance require a registered customer.")
+                    if config and not config.allow_credit_sales:
+                        raise ValidationError("Credit and partial payments are not enabled for this business.")
+                    parsed_payments.append({
+                        "payment_method": "credit",
+                        "amount": remaining_balance,
+                        "reference": "Partial Settlement Balance",
+                        "notes": f"Partial balance allocated to customer credit: ₹{remaining_balance}",
+                    })
+                    credit_amount += remaining_balance
+                    total_tendered += remaining_balance
+                else:
+                    raise ValidationError(
+                        f"Payment amount (₹{total_tendered}) is less than quotation total (₹{quotation.total})."
+                    )
+
+            # Handle Excess Tender & Cash Change
+            cash_change = Decimal("0.00")
+            if total_tendered > quotation.total:
+                excess = total_tendered - quotation.total
+                if cash_paid >= excess:
+                    cash_change = excess
+                else:
+                    raise ValidationError(
+                        f"Overpayment of ₹{excess} is only permitted in Cash (change return). "
+                        f"Total electronic payment cannot exceed the payable amount."
+                    )
+
+            applied_payments = []
+            remaining_change = cash_change
+            for p in parsed_payments:
+                p_amt = p["amount"]
+                p_notes = p["notes"]
+                if p["payment_method"] == "cash" and remaining_change > Decimal("0.00"):
+                    deduction = min(p_amt, remaining_change)
+                    p_amt -= deduction
+                    remaining_change -= deduction
+                    p_notes = (p_notes + f" [Tendered: ₹{p['amount']}, Change: ₹{deduction}]").strip()
+
+                if p_amt > Decimal("0.00"):
+                    applied_payments.append({
+                        "payment_method": p["payment_method"],
+                        "amount": p_amt,
+                        "reference": p["reference"],
+                        "notes": p_notes,
+                    })
+
+            cash_applied = cash_paid - cash_change
+
+            # Credit checks
+            if credit_amount > Decimal("0.00"):
+                if config and not config.allow_credit_sales:
+                    raise ValidationError("Credit sales are not enabled for this business.")
+                if is_walk_in or not customer:
+                    raise ValidationError("Credit sales require a registered customer.")
+                if customer.credit_limit > Decimal("0.00"):
+                    new_outstanding = customer.outstanding_credit + credit_amount
+                    if new_outstanding > customer.credit_limit:
+                        raise ValidationError(
+                            f"Customer credit limit of ₹{customer.credit_limit} exceeded. "
+                            f"Current: ₹{customer.outstanding_credit}, Requested: ₹{credit_amount}."
+                        )
+
+            # Determine payment status and amounts
+            if credit_amount >= quotation.total:
+                payment_status = "credit"
+                amount_paid = Decimal("0.00")
+                outstanding_amount = quotation.total
+            elif credit_amount > Decimal("0.00"):
+                payment_status = "partial"
+                amount_paid = quotation.total - credit_amount
+                outstanding_amount = credit_amount
+            else:
+                payment_status = "paid"
+                amount_paid = quotation.total
+                outstanding_amount = Decimal("0.00")
+
+            primary_payment_method = applied_payments[0]["payment_method"] if applied_payments else "cash"
+            store = quotation.store or Store.objects.filter(organization=org).first()
+
             # 1. Validate Stock Availability
             if not allow_negative_stock:
                 for q_item in quotation.items.all():
@@ -406,11 +572,6 @@ class QuotationConvertView(APIView):
             )
 
             # 3. Create Transaction
-            is_credit = payment_method == "credit"
-            payment_status = "credit" if is_credit else "paid"
-            amount_paid = Decimal("0.00") if is_credit else quotation.total
-            outstanding_amount = quotation.total if is_credit else Decimal("0.00")
-
             tx = Transaction.objects.create(
                 organization=org,
                 store=store,
@@ -422,10 +583,12 @@ class QuotationConvertView(APIView):
                 discount=quotation.discount,
                 tax=quotation.tax,
                 total=quotation.total,
-                payment_method=payment_method,
+                payment_method=primary_payment_method,
                 payment_status=payment_status,
                 amount_paid=amount_paid,
                 outstanding_amount=outstanding_amount,
+                tendered_amount=total_tendered,
+                change_amount=cash_change,
                 external_source="quotation",
                 external_transaction_id=idempotency_key or "",
                 notes=f"Converted from Quote #{quotation.quotation_number}. {quotation.notes}".strip(),
@@ -469,28 +632,29 @@ class QuotationConvertView(APIView):
                         notes=f"Converted from Quotation #{quotation.quotation_number}",
                     )
 
-            # 5. Create Payment Record
-            TransactionPayment.objects.create(
-                organization=org,
-                transaction=tx,
-                payment_method=payment_method,
-                amount=quotation.total,
-                status="success" if not is_credit else "credit",
-                notes=f"Converted from Quote #{quotation.quotation_number}",
-            )
+            # 5. Create Payment Records
+            for p in applied_payments:
+                TransactionPayment.objects.create(
+                    organization=org,
+                    transaction=tx,
+                    payment_method=p["payment_method"],
+                    amount=p["amount"],
+                    reference=p["reference"],
+                    status="success" if p["payment_method"] != "credit" else "credit",
+                    notes=p["notes"],
+                )
 
             # 6. Update Customer stats & credit ledger
-            customer = quotation.customer
             if customer and not customer.is_walk_in:
-                if is_credit:
-                    customer.outstanding_credit += quotation.total
+                if credit_amount > Decimal("0.00"):
+                    customer.outstanding_credit += credit_amount
                     customer.save(update_fields=["outstanding_credit"])
                     CustomerTimeline.objects.create(
                         organization=org,
                         customer=customer,
                         event_type="credit_sale",
                         reference_id=str(tx.id),
-                        metadata={"invoice_number": invoice_number, "credit_amount": str(quotation.total)},
+                        metadata={"invoice_number": invoice_number, "credit_amount": str(credit_amount)},
                     )
                 customer.update_stats(tx.total)
                 CustomerTimeline.objects.create(
@@ -520,6 +684,17 @@ class QuotationConvertView(APIView):
             quotation.converted_at = timezone.now()
             quotation.status = "converted"
             quotation.save(update_fields=["converted_invoice", "converted_at", "status"])
+
+            # 8b. Update Open Cash Register if Cash Payment Involved
+            if cash_applied > Decimal("0.00") and store:
+                from apps.billing.models import CashRegister
+                active_register = CashRegister.objects.filter(
+                    organization=org,
+                    store=store,
+                    status="open",
+                ).first()
+                if active_register:
+                    active_register.record_sale(cash_applied)
 
             # 9. Generate PDF
             try:

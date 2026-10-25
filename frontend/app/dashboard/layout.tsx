@@ -133,6 +133,7 @@ const navSections: NavSection[] = [
     title: "ADMINISTRATION",
     key: "administration",
     items: [
+      { name: "Staff Management", href: "/dashboard/staff", icon: Users },
       { name: "Stores", href: "/dashboard/stores", icon: Store },
       { name: "System Health", href: "/dashboard/health", icon: Activity },
       { name: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -159,7 +160,7 @@ export default function DashboardLayout({
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   // Helper to determine if an item is active
-  const isItemActive = (item: NavItem) => {
+  const isItemActive = React.useCallback((item: NavItem) => {
     const [itemPath] = item.href.split("?");
     if (pathname !== itemPath) return false;
     if (item.tab) {
@@ -170,7 +171,7 @@ export default function DashboardLayout({
       return false;
     }
     return true;
-  };
+  }, [pathname, currentTab]);
 
   // Find active section key
   const activeSectionKey = useMemo(() => {
@@ -182,7 +183,7 @@ export default function DashboardLayout({
       }
     }
     return "dashboard";
-  }, [pathname, currentTab]);
+  }, [isItemActive]);
 
   // Load persisted collapsed state from sessionStorage on mount
   useEffect(() => {
@@ -233,7 +234,7 @@ export default function DashboardLayout({
       }
     }
     return "Dashboard";
-  }, [pathname, currentTab]);
+  }, [isItemActive]);
 
   const closeMobile = () => setMobileOpen(false);
 

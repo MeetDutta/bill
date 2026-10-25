@@ -14,7 +14,7 @@ class IsOrganizationAdmin(permissions.BasePermission):
             return False
         if request.user.is_superuser:
             return True
-        return request.user.role in ("org_admin", "super_admin")
+        return request.user.role in ("org_admin", "super_admin", "owner")
 
 
 class IsStoreManager(permissions.BasePermission):
@@ -24,7 +24,7 @@ class IsStoreManager(permissions.BasePermission):
             return False
         if request.user.is_superuser:
             return True
-        return request.user.role in ("org_admin", "store_manager")
+        return request.user.role in ("org_admin", "super_admin", "owner", "store_manager", "manager")
 
 
 class IsStaffOrAbove(permissions.BasePermission):
@@ -33,6 +33,36 @@ class IsStaffOrAbove(permissions.BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
         return True
+
+
+class IsAdminOrManager(permissions.BasePermission):
+    """Allow organization admins, super admins, owners, and store managers."""
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_superuser:
+            return True
+        return request.user.role in ("org_admin", "super_admin", "owner", "store_manager", "manager")
+
+
+class IsInventoryStaffOrAbove(permissions.BasePermission):
+    """Allow inventory staff, managers, and admins."""
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_superuser:
+            return True
+        return request.user.role in ("org_admin", "super_admin", "owner", "store_manager", "manager", "inventory")
+
+
+class IsCashierOrAbove(permissions.BasePermission):
+    """Allow cashiers, staff, managers, and admins."""
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_superuser:
+            return True
+        return request.user.role in ("org_admin", "super_admin", "owner", "store_manager", "manager", "cashier", "staff")
 
 
 class IsOwnerOrReadOnly(permissions.BasePermission):

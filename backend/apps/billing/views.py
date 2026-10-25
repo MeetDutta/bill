@@ -26,6 +26,7 @@ from apps.billing.services.credit_service import CreditService
 from apps.billing.services.register_service import RegisterService
 from apps.billing.services.inventory_service import InventoryService
 from apps.billing.services.reports_service import ReportsService
+from common.permissions import IsInventoryStaffOrAbove
 
 
 class StandardPOSPagination(PageNumberPagination):
@@ -465,7 +466,7 @@ class POSInventoryMovementListView(APIView):
 
 
 class POSInventoryAdjustView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsInventoryStaffOrAbove]
 
     def post(self, request):
         store = request.user.stores.first() if hasattr(request.user, "stores") else None
@@ -526,6 +527,11 @@ class POSPurchaseOrderView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
+        if not IsInventoryStaffOrAbove().has_permission(request, self):
+            return Response(
+                {"detail": "You do not have permission to perform this action."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         from apps.stores.models import Store
         store = None
         store_id = request.data.get("store_id")
@@ -567,7 +573,7 @@ class POSPurchaseOrderDetailView(APIView):
 
 
 class POSPurchaseOrderReceiveView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsInventoryStaffOrAbove]
 
     def post(self, request, pk):
         try:
@@ -596,7 +602,7 @@ class POSPurchaseOrderReceiveView(APIView):
 
 
 class POSPurchaseOrderCancelView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsInventoryStaffOrAbove]
 
     def post(self, request, pk):
         try:

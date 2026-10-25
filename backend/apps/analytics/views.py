@@ -38,7 +38,7 @@ class CampaignAnalyticsListView(generics.ListAPIView):
 
 
 def compute_analytics(org):
-    from apps.transactions.models import Transaction, TransactionItem, TransactionPayment, SalesReturn
+    from apps.transactions.models import Transaction, TransactionItem, TransactionPayment, SalesReturn, CustomerCreditPayment
     from apps.customers.models import Customer
     from apps.campaigns.models import Campaign
     from apps.loyalty.models import LoyaltyAccount
@@ -106,12 +106,19 @@ def compute_analytics(org):
     all_time_sales = all_time_stats["total_rev"] or Decimal("0.00")
     all_time_transactions = all_time_stats["total_cnt"] or 0
 
-    # Payments collected today (from TransactionPayment)
-    today_payments_sum = TransactionPayment.objects.filter(
+    # Payments collected today (monetary collections from TransactionPayment excluding credit, plus credit debt settlements)
+    tx_payments_collected = TransactionPayment.objects.filter(
         organization=org,
         created_at__gte=today_start,
         status="success",
+    ).exclude(payment_method__iexact="credit").aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+
+    credit_repayments_collected = CustomerCreditPayment.objects.filter(
+        organization=org,
+        created_at__gte=today_start,
     ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+
+    today_payments_sum = tx_payments_collected + credit_repayments_collected
 
     # Total customer outstanding credit (Customer Dues / Receivables)
     total_customer_outstanding = Customer.objects.filter(
@@ -165,26 +172,45 @@ def compute_analytics(org):
         if it.product and it.product.cost_price and it.product.cost_price > Decimal("0.00"):
             today_profit += (it.unit_price - it.product.cost_price) * it.quantity
 
-    # 2. Payment Method Breakdown (sums individual payments for exact hybrid split accounting)
-    payment_methods_data = []
-    payment_qs = TransactionPayment.objects.filter(
+    # 2. Payment Method Breakdown (sums individual payments for exact hybrid split accounting & credit repayments)
+    method_totals = {}
+    tx_payment_qs = TransactionPayment.objects.filter(
         organization=org,
         status="success",
+        created_at__gte=today_start,
+    ).exclude(payment_method__iexact="credit").values("payment_method").annotate(
+        total_amount=Sum("amount"),
+        payment_count=Count("id"),
+    )
+    for p in tx_payment_qs:
+        m = (p["payment_method"] or "cash").lower()
+        method_totals.setdefault(m, {"amount": Decimal("0.00"), "count": 0})
+        method_totals[m]["amount"] += (p["total_amount"] or Decimal("0.00"))
+        method_totals[m]["count"] += (p["payment_count"] or 0)
+
+    credit_rep_qs = CustomerCreditPayment.objects.filter(
+        organization=org,
         created_at__gte=today_start,
     ).values("payment_method").annotate(
         total_amount=Sum("amount"),
         payment_count=Count("id"),
-    ).order_by("-total_amount")
+    )
+    for cp in credit_rep_qs:
+        m = (cp["payment_method"] or "cash").lower()
+        method_totals.setdefault(m, {"amount": Decimal("0.00"), "count": 0})
+        method_totals[m]["amount"] += (cp["total_amount"] or Decimal("0.00"))
+        method_totals[m]["count"] += (cp["payment_count"] or 0)
 
-    for p in payment_qs:
-        amt = p["total_amount"] or Decimal("0.00")
-        pct = (amt / today_payments_sum * Decimal("100.00")) if today_payments_sum > 0 else Decimal("0.00")
+    payment_methods_data = []
+    for m, d in sorted(method_totals.items(), key=lambda x: x[1]["amount"], reverse=True):
+        amt = d["amount"]
+        pct = (amt / today_payments_sum * Decimal("100.00")) if today_payments_sum > Decimal("0.00") else Decimal("0.00")
         payment_methods_data.append({
-            "method": p["payment_method"].upper(),
-            "payment_method": p["payment_method"],
+            "method": m.upper(),
+            "payment_method": m,
             "amount": float(amt),
             "total": float(amt),
-            "count": p["payment_count"],
+            "count": d["count"],
             "percentage": round(float(pct), 1),
         })
 

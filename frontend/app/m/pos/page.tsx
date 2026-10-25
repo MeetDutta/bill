@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, parseApiError } from "@/lib/utils";
 import { posApi, quotationApi, customerApi } from "@/services/api";
 import type { Product, Quotation, Customer } from "@/types";
 import {
@@ -361,8 +361,7 @@ export default function MobilePOSPage() {
       setQuotationRef(null);
       setActiveTab("success");
     } catch (err: unknown) {
-      const errObj = err as { response?: { data?: { error?: string } } };
-      const msg = errObj.response?.data?.error || "Payment checkout failed. Please review cart and retry.";
+      const msg = parseApiError(err, "Payment checkout failed. Please review cart and retry.");
       setErrorMessage(msg);
     } finally {
       setIsSubmitting(false);

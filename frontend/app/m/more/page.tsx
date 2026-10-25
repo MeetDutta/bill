@@ -157,6 +157,22 @@ export default function MobileMorePage() {
           </div>
           <ChevronRight className="h-4 w-4 text-slate-400" />
         </Link>
+
+        <Link
+          href="/dashboard/staff"
+          className="flex items-center justify-between p-3.5 hover:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+              <ShieldCheck className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="font-bold text-slate-900 block">Staff & Roles</span>
+              <span className="text-[10px] text-slate-400">Manage cashier & team accounts</span>
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-slate-400" />
+        </Link>
       </div>
 
       {/* Switch to Desktop & Logout Actions */}

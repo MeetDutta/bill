@@ -46,9 +46,8 @@ import {
 import { FileCheck, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { cn, parseApiError } from "@/lib/utils";
 
 export default function POSPage() {
   // Config & Metadata
@@ -654,22 +653,8 @@ export default function POSPage() {
       setCompletedSale(res.data);
       setPaymentModalOpen(false);
       clearCart();
-    } catch (err: any) {
-      let errorMsg = "Checkout failed. Please check stock or payments.";
-      if (err.response?.data) {
-        if (typeof err.response.data === "string") {
-          errorMsg = err.response.data;
-        } else if (err.response.data.error) {
-          errorMsg = typeof err.response.data.error === "string" ? err.response.data.error : JSON.stringify(err.response.data.error);
-        } else if (err.response.data.detail) {
-          errorMsg = typeof err.response.data.detail === "string" ? err.response.data.detail : JSON.stringify(err.response.data.detail);
-        } else {
-          const values = Object.values(err.response.data).flat();
-          if (values.length > 0) errorMsg = String(values[0]);
-        }
-      } else if (err.message) {
-        errorMsg = err.message;
-      }
+    } catch (err: unknown) {
+      const errorMsg = parseApiError(err, "Checkout failed. Please check stock or payments.");
       setCheckoutError(errorMsg);
     } finally {
       setCheckoutLoading(false);

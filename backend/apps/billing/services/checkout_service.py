@@ -1,6 +1,6 @@
 import uuid
 import secrets
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.db import transaction, IntegrityError
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -16,6 +16,8 @@ from .cart_engine import CartEngine, round_decimal
 from .invoice_number_service import InvoiceNumberService
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_PAYMENT_METHODS = {"cash", "upi", "card", "credit", "netbanking", "cheque", "wallet"}
 
 
 class CheckoutService:
@@ -135,6 +137,15 @@ class CheckoutService:
                 raise ValidationError(
                     f"Cashier discount limit exceeded. Maximum allowed: {config.max_cashier_discount_percent}%"
                 )
+            if overall_disc_type == "fixed" and overall_disc_val > Decimal("0.00"):
+                items_subtotal = sum(it["unit_price"] * it["quantity"] for it in prepared_items)
+                if items_subtotal > Decimal("0.00"):
+                    effective_pct = (overall_disc_val / items_subtotal) * Decimal("100.00")
+                    if effective_pct > config.max_cashier_discount_percent:
+                        raise ValidationError(
+                            f"Cashier discount limit exceeded. Maximum allowed: {config.max_cashier_discount_percent}% "
+                            f"(applied fixed discount represents {round_decimal(effective_pct)}% of subtotal)."
+                        )
 
         # 5. Calculate Cart via CartEngine
         is_interstate = bool(cart_data.get("is_interstate", False))
@@ -221,7 +232,7 @@ class CheckoutService:
         # 7. Payment Validation & Split Payments
         payments_input = cart_data.get("payments", [])
         if not payments_input:
-            default_method = cart_data.get("payment_method") or config.default_payment_method
+            default_method = (cart_data.get("payment_method") or config.default_payment_method or "cash").lower()
             payments_input = [{"payment_method": default_method, "amount": grand_total}]
 
         total_paid_tendered = Decimal("0.00")
@@ -230,10 +241,32 @@ class CheckoutService:
 
         parsed_payments = []
         for p_data in payments_input:
-            amt = Decimal(str(p_data.get("amount") or 0))
+            raw_amt = p_data.get("amount")
+            if raw_amt is None or raw_amt == "":
+                raise ValidationError("Payment allocation amount is required.")
+            try:
+                amt = Decimal(str(raw_amt))
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValidationError(f"Invalid payment allocation amount '{raw_amt}'. Must be a valid number.")
+
+            if not amt.is_finite():
+                raise ValidationError(f"Payment allocation amount '{raw_amt}' must be a finite number.")
+
             if amt <= Decimal("0.00"):
-                continue
-            method = p_data.get("payment_method", "cash").lower()
+                raise ValidationError(f"Payment allocation amount must be greater than zero. Received: {amt}.")
+
+            # Validate precision to maximum 2 decimal places
+            quantized = round_decimal(amt)
+            if abs(amt - quantized) > Decimal("0.00001"):
+                raise ValidationError(f"Payment allocation '{raw_amt}' exceeds maximum 2 decimal places precision.")
+            amt = quantized
+
+            method = str(p_data.get("payment_method") or "cash").strip().lower()
+            if method not in ALLOWED_PAYMENT_METHODS:
+                raise ValidationError(
+                    f"Unsupported payment method '{method}'. Allowed methods: {', '.join(sorted(ALLOWED_PAYMENT_METHODS))}."
+                )
+
             ref = str(p_data.get("reference") or "")
             parsed_payments.append({
                 "payment_method": method,
@@ -247,10 +280,31 @@ class CheckoutService:
             if method == "cash":
                 cash_paid += amt
 
+        if not parsed_payments:
+            raise ValidationError("At least one valid payment allocation is required.")
+
+        # Check settlement rule & explicit partial payments
         if total_paid_tendered < grand_total:
-            raise ValidationError(
-                f"Payment amount (₹{total_paid_tendered}) is less than bill total (₹{grand_total})."
-            )
+            allow_partial = bool(cart_data.get("allow_partial") or cart_data.get("is_partial"))
+            remaining_balance = grand_total - total_paid_tendered
+            if allow_partial:
+                if is_walk_in or not customer or customer.is_walk_in:
+                    raise ValidationError("Partial payment and credit balance require a registered customer.")
+                if not config.allow_credit_sales:
+                    raise ValidationError("Credit and partial payments are not enabled for this business.")
+                # Allocate remaining balance to credit
+                parsed_payments.append({
+                    "payment_method": "credit",
+                    "amount": remaining_balance,
+                    "reference": "Partial Settlement Balance",
+                    "notes": f"Partial balance allocated to customer credit: ₹{remaining_balance}",
+                })
+                credit_amount += remaining_balance
+                total_paid_tendered += remaining_balance
+            else:
+                raise ValidationError(
+                    f"Payment amount (₹{total_paid_tendered}) is less than bill total (₹{grand_total})."
+                )
 
         # Handle Cash Change & Excess Tender
         cash_change = Decimal("0.00")
@@ -276,7 +330,7 @@ class CheckoutService:
                 remaining_change -= deduction
                 p_notes = (p_notes + f" [Tendered: ₹{p['amount']}, Change: ₹{deduction}]").strip()
 
-            if p_amt > Decimal("0.00") or p["payment_method"] == "cash":
+            if p_amt > Decimal("0.00"):
                 applied_payments.append({
                     "payment_method": p["payment_method"],
                     "amount": p_amt,

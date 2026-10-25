@@ -26,6 +26,9 @@ class User(UUIDModel, AbstractBaseUser, PermissionsMixin, TimeStampedModel):
         ("super_admin", "Super Admin"),
         ("org_admin", "Organization Admin"),
         ("store_manager", "Store Manager"),
+        ("manager", "Manager"),
+        ("cashier", "Cashier"),
+        ("inventory", "Inventory Staff"),
         ("staff", "Staff"),
     ]
 

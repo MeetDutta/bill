@@ -270,4 +270,15 @@ export const supplierApi = {
     api.get<PaginatedResponse<PurchaseOrder>>(`/suppliers/${id}/purchases/`, { params }),
 };
 
+// Staff & User Management
+export const userApi = {
+  list: (params?: { search?: string; role?: string; is_active?: boolean; page?: number }) =>
+    api.get<PaginatedResponse<User>>("/users/", { params }),
+  get: (id: string) => api.get<User>(`/users/${id}/`),
+  create: (data: { email: string; first_name: string; last_name?: string; phone?: string; role: string; password?: string; is_active?: boolean }) =>
+    api.post<User>("/users/create/", data),
+  update: (id: string, data: Partial<User> & { password?: string }) => api.patch<User>(`/users/${id}/`, data),
+  delete: (id: string) => api.delete(`/users/${id}/`),
+};
+
 

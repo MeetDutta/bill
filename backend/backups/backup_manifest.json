@@ -1,7 +1,7 @@
 {
   "last_backup": {
     "filename": "unit_test_backup.dump",
-    "timestamp": "2026-10-24T11:46:46.110923+00:00",
+    "timestamp": "2026-10-25T06:52:21.501156+00:00",
     "size_bytes": 102400,
     "status": "success",
     "database_name": "digitalbill_db",
@@ -10,7 +10,7 @@
   },
   "last_verified_restoration": {
     "backup_filename": "unit_test_backup.dump",
-    "timestamp": "2026-10-24T11:46:46.111322+00:00",
+    "timestamp": "2026-10-25T06:52:21.501601+00:00",
     "duration_seconds": 0.85,
     "status": "verified",
     "verified_records": {
@@ -20,6 +20,51 @@
     "error_message": ""
   },
   "backups": [
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-25T06:52:21.501156+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-25T06:38:18.307969+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-25T06:31:50.066485+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-25T06:30:26.552068+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
+    {
+      "filename": "unit_test_backup.dump",
+      "timestamp": "2026-10-25T06:14:00.106477+00:00",
+      "size_bytes": 102400,
+      "status": "success",
+      "database_name": "digitalbill_db",
+      "checksum": "",
+      "error_message": ""
+    },
     {
       "filename": "unit_test_backup.dump",
       "timestamp": "2026-10-24T11:46:46.110923+00:00",
