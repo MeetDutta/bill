@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { formatCurrency } from "@/lib/utils";
+import { parseApiError } from "@/lib/api-error";
 import { staffApi, quotationApi, posApi, customerApi } from "@/services/api";
 import type { Quotation, QuotationItem, Customer, POSProduct } from "@/types";
 import {
@@ -58,6 +59,7 @@ export default function StaffQuotationsPage() {
   ]);
   const [isSplit, setIsSplit] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [convertError, setConvertError] = useState<string | null>(null);
   const [convertSuccess, setConvertSuccess] = useState<{ invoice_number: string; invoice_id: string } | null>(null);
 
   // Detail Modal
@@ -229,18 +231,21 @@ export default function StaffQuotationsPage() {
     if (q.status === "converted") return;
     setQuotationToConvert(q);
     setConvertSuccess(null);
+    setConvertError(null);
     setConvertPaymentMethod("cash");
     setIsSplit(false);
+    const half = Math.floor(Number(q.total || 0) / 2);
     setSplitPayments([
-      { payment_method: "cash", amount: Math.floor(Number(q.total || 0) / 2) },
-      { payment_method: "upi", amount: Number(q.total || 0) - Math.floor(Number(q.total || 0) / 2) },
+      { payment_method: "cash", amount: half },
+      { payment_method: "upi", amount: Number(q.total || 0) - half },
     ]);
     setShowConvertModal(true);
   };
 
   const handleExecuteConvert = async () => {
-    if (!quotationToConvert) return;
+    if (!quotationToConvert || converting) return;
     setConverting(true);
+    setConvertError(null);
     try {
       const payload: any = isSplit
         ? { payments: splitPayments.filter((p) => p.amount > 0) }
@@ -252,8 +257,9 @@ export default function StaffQuotationsPage() {
         invoice_number: res.data.invoice_number,
       });
       fetchQuotations(true);
-    } catch (err: any) {
-      alert(err.response?.data?.error || err.response?.data?.detail || "Failed to convert quotation to invoice.");
+    } catch (err: unknown) {
+      const errorMsg = parseApiError(err, "Failed to convert quotation to invoice.");
+      setConvertError(errorMsg);
     } finally {
       setConverting(false);
     }
@@ -712,6 +718,12 @@ export default function StaffQuotationsPage() {
               </div>
             ) : (
               <div className="space-y-4 text-xs">
+                {convertError && (
+                  <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-destructive text-xs flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span className="flex-1 font-medium">{convertError}</span>
+                  </div>
+                )}
                 <div className="rounded-xl bg-muted/40 p-3 space-y-1">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Customer:</span>

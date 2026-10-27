@@ -30,6 +30,7 @@ import {
   Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { parseApiError } from "@/lib/api-error";
 
 export default function QuotationsPage() {
   const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -49,7 +50,10 @@ export default function QuotationsPage() {
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [quotationToConvert, setQuotationToConvert] = useState<Quotation | null>(null);
   const [convertPaymentMethod, setConvertPaymentMethod] = useState("cash");
+  const [isSplitConvert, setIsSplitConvert] = useState(false);
+  const [splitPayments, setSplitPayments] = useState<{ payment_method: string; amount: number }[]>([]);
   const [converting, setConverting] = useState(false);
+  const [convertError, setConvertError] = useState<string | null>(null);
   const [convertSuccess, setConvertSuccess] = useState<{ invoice_number: string; invoice_id: string } | null>(null);
 
   // Create form state
@@ -232,28 +236,40 @@ export default function QuotationsPage() {
     }
   };
 
-  // Convert Quotation to Invoice
+  // Convert Quotation to Invoice / Pay
   const handleConvertClick = (q: Quotation) => {
     if (q.status === "converted") return;
     setQuotationToConvert(q);
     setConvertSuccess(null);
+    setConvertError(null);
+    setConvertPaymentMethod("cash");
+    setIsSplitConvert(false);
+    const half = Math.floor(Number(q.total || 0) / 2);
+    setSplitPayments([
+      { payment_method: "cash", amount: half },
+      { payment_method: "upi", amount: Number(q.total || 0) - half },
+    ]);
     setShowConvertModal(true);
   };
 
   const handleExecuteConvert = async () => {
-    if (!quotationToConvert) return;
+    if (!quotationToConvert || converting) return;
     setConverting(true);
+    setConvertError(null);
     try {
-      const res = await quotationApi.convert(quotationToConvert.id, {
-        payment_method: convertPaymentMethod,
-      });
+      const payload: any = isSplitConvert
+        ? { payments: splitPayments.filter((p) => p.amount > 0) }
+        : { payment_method: convertPaymentMethod };
+
+      const res = await quotationApi.convert(quotationToConvert.id, payload);
       setConvertSuccess({
         invoice_number: res.data.invoice_number,
         invoice_id: res.data.invoice_id,
       });
       fetchQuotations();
-    } catch (err: any) {
-      alert(err.response?.data?.error || "Failed to convert quotation to invoice.");
+    } catch (err: unknown) {
+      const errorMsg = parseApiError(err, "Failed to convert quotation to invoice.");
+      setConvertError(errorMsg);
     } finally {
       setConverting(false);
     }
@@ -548,10 +564,10 @@ export default function QuotationsPage() {
                               <button
                                 onClick={() => handleConvertClick(q)}
                                 className="flex items-center gap-1 rounded bg-emerald-600 hover:bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-white shadow-xs"
-                                title="Convert to Invoice"
+                                title="Pay & Convert to Invoice"
                               >
-                                <span>Convert</span>
-                                <ArrowRight className="h-3 w-3" />
+                                <CreditCard className="h-3 w-3" />
+                                <span>Pay</span>
                               </button>
                             </>
                           ) : (
@@ -914,6 +930,13 @@ export default function QuotationsPage() {
               </div>
             ) : (
               <div className="py-4 space-y-4 text-xs">
+                {convertError && (
+                  <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-destructive text-xs flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span className="flex-1 font-medium">{convertError}</span>
+                  </div>
+                )}
+
                 <div className="rounded-xl bg-muted/40 p-3 space-y-1">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Customer:</span>
@@ -927,19 +950,68 @@ export default function QuotationsPage() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block font-semibold mb-1">Tender / Payment Method</label>
-                  <select
-                    value={convertPaymentMethod}
-                    onChange={(e) => setConvertPaymentMethod(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-xs focus:ring-2 focus:ring-primary/20"
+                {/* Single vs Split Toggle */}
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold">Tender / Payment Method</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsSplitConvert(!isSplitConvert)}
+                    className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline"
                   >
-                    <option value="cash">Cash</option>
-                    <option value="upi">UPI / QR Code</option>
-                    <option value="card">Card (Debit/Credit)</option>
-                    <option value="credit">Credit / Udhaar</option>
-                  </select>
+                    {isSplitConvert ? "Switch to Single Method" : "Split Payment (Cash + UPI)"}
+                  </button>
                 </div>
+
+                {!isSplitConvert ? (
+                  <div>
+                    <select
+                      value={convertPaymentMethod}
+                      onChange={(e) => setConvertPaymentMethod(e.target.value)}
+                      className="w-full rounded-lg border bg-background px-3 py-2 text-xs focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="cash">Cash Tender</option>
+                      <option value="upi">UPI / QR Code</option>
+                      <option value="card">Card (Debit/Credit POS)</option>
+                      <option value="credit">Credit / Udhaar (Registered Customers)</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="space-y-2 p-3 rounded-lg border bg-muted/20">
+                    {splitPayments.map((p, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <select
+                          value={p.payment_method}
+                          onChange={(e) => {
+                            const updated = [...splitPayments];
+                            updated[idx].payment_method = e.target.value;
+                            setSplitPayments(updated);
+                          }}
+                          className="w-28 rounded border px-2 py-1.5 bg-background text-xs font-semibold"
+                        >
+                          <option value="cash">Cash</option>
+                          <option value="upi">UPI</option>
+                          <option value="card">Card</option>
+                          <option value="credit">Credit</option>
+                        </select>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={p.amount}
+                          onChange={(e) => {
+                            const updated = [...splitPayments];
+                            updated[idx].amount = parseFloat(e.target.value) || 0;
+                            setSplitPayments(updated);
+                          }}
+                          className="flex-1 rounded border px-2 py-1.5 bg-background text-right font-mono text-xs"
+                          placeholder="Amount"
+                        />
+                      </div>
+                    ))}
+                    <div className="text-[11px] text-right text-muted-foreground pt-1">
+                      Total Tendered: ₹{splitPayments.reduce((s, p) => s + p.amount, 0).toFixed(2)}
+                    </div>
+                  </div>
+                )}
 
                 <div className="rounded-lg bg-blue-500/10 p-3 text-blue-700 dark:text-blue-300 space-y-1">
                   <p className="font-semibold">Action will:</p>
@@ -962,7 +1034,7 @@ export default function QuotationsPage() {
                     disabled={converting}
                     className="rounded-lg bg-emerald-600 text-white px-5 py-2 font-semibold shadow-sm hover:bg-emerald-700 disabled:opacity-50"
                   >
-                    {converting ? "Converting..." : "Confirm & Issue Invoice"}
+                    {converting ? "Processing..." : "Pay & Issue Invoice"}
                   </button>
                 </div>
               </div>
@@ -1108,8 +1180,8 @@ export default function QuotationsPage() {
                       }}
                       className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 font-semibold shadow-sm text-xs"
                     >
-                      <span>Convert to Invoice</span>
-                      <ArrowRight className="h-4 w-4" />
+                      <CreditCard className="h-4 w-4" />
+                      <span>Pay &amp; Issue Invoice</span>
                     </button>
                   </>
                 ) : (

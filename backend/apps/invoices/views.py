@@ -415,7 +415,32 @@ class QuotationConvertView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
+        try:
+            return self._process_convert(request, pk)
+        except ValidationError as e:
+            if hasattr(e, "detail"):
+                if isinstance(e.detail, (list, tuple)) and len(e.detail) > 0:
+                    msg = str(e.detail[0])
+                elif isinstance(e.detail, dict):
+                    first_val = next(iter(e.detail.values()))
+                    msg = str(first_val[0]) if isinstance(first_val, (list, tuple)) and len(first_val) > 0 else str(first_val)
+                else:
+                    msg = str(e.detail)
+            else:
+                msg = str(e)
+            return Response({"error": msg, "detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.exception("Unexpected error in QuotationConvertView: %s", e)
+            return Response(
+                {"error": f"Failed to convert quotation: {str(e)}", "detail": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _process_convert(self, request, pk):
         org = request.user.organization
+        if not org:
+            return Response({"error": "User does not belong to an active organization.", "detail": "User does not belong to an active organization."}, status=status.HTTP_400_BAD_REQUEST)
+
         idempotency_key = request.headers.get("Idempotency-Key") or request.data.get("idempotency_key")
 
         # Fast idempotency check
@@ -446,16 +471,28 @@ class QuotationConvertView(APIView):
             try:
                 quotation = (
                     Quotation.objects.select_for_update()
-                    .select_related("customer", "store")
+                    .select_related("customer", "store", "converted_invoice")
                     .prefetch_related("items__product")
                     .get(id=pk, organization=org)
                 )
             except Quotation.DoesNotExist:
-                return Response({"error": "Quotation not found."}, status=status.HTTP_404_NOT_FOUND)
+                return Response({"error": "Quotation not found.", "detail": "Quotation not found."}, status=status.HTTP_404_NOT_FOUND)
 
-            if quotation.status in ("converted", "cancelled") or quotation.converted_invoice is not None:
+            if quotation.status == "cancelled":
                 return Response(
-                    {"error": f"This quotation cannot be converted (current status: '{quotation.status}')."},
+                    {"error": "Cancelled quotations cannot be converted into invoices.", "detail": "Cancelled quotations cannot be converted into invoices."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if quotation.status == "converted" or quotation.converted_invoice is not None:
+                return Response(
+                    {"error": "This quotation has already been converted into an invoice.", "detail": "This quotation has already been converted into an invoice."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if not quotation.items.exists():
+                return Response(
+                    {"error": "Quotation contains no line items to convert into an invoice.", "detail": "Quotation contains no line items to convert into an invoice."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -601,6 +638,14 @@ class QuotationConvertView(APIView):
 
             primary_payment_method = applied_payments[0]["payment_method"] if applied_payments else "cash"
             store = quotation.store or Store.objects.filter(organization=org).first()
+            if not store:
+                store, _ = Store.objects.get_or_create(
+                    organization=org,
+                    defaults={"name": "Main Store", "code": "MAIN"},
+                )
+            if not quotation.store:
+                quotation.store = store
+                quotation.save(update_fields=["store"])
 
             # 1. Validate Stock Availability
             if not allow_negative_stock:
@@ -754,6 +799,23 @@ class QuotationConvertView(APIView):
                     invoice.save(update_fields=["pdf_url"])
             except Exception as e:
                 logger.warning("PDF generation failed on quote conversion: %s", e)
+
+        # 10. Realtime notification
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=org,
+                store=store,
+                event_type="quotation_converted",
+                payload={
+                    "quotation_id": str(quotation.id),
+                    "invoice_id": str(invoice.id),
+                    "invoice_number": invoice.invoice_number,
+                    "total": str(invoice.transaction.total),
+                },
+            )
+        except Exception as e:
+            logger.warning("Realtime quotation_converted publishing failed: %s", e)
 
         return Response(
             {

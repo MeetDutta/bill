@@ -536,6 +536,21 @@ class CheckoutService:
                     if active_register:
                         active_register.record_sale(cash_applied)
 
+                # 8i. Link quotation if checkout originated from a quotation
+                quotation_ref = cart_data.get("quotation_number") or cart_data.get("quotation_id")
+                if quotation_ref:
+                    from apps.invoices.models import Quotation
+                    quote_q = Quotation.objects.filter(organization=organization)
+                    if str(quotation_ref).isdigit():
+                        q_obj = quote_q.filter(id=quotation_ref).first()
+                    else:
+                        q_obj = quote_q.filter(quotation_number=quotation_ref).first()
+                    if q_obj and q_obj.status != "converted":
+                        q_obj.converted_invoice = invoice
+                        q_obj.converted_at = timezone.now()
+                        q_obj.status = "converted"
+                        q_obj.save(update_fields=["converted_invoice", "converted_at", "status"])
+
         except IntegrityError:
             if idempotency_key:
                 existing = Transaction.objects.filter(

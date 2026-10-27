@@ -23,7 +23,19 @@ export function parseApiError(error: unknown, fallbackMessage = "An unexpected e
       return data.length < 200 ? data : fallbackMessage;
     }
 
-    // 2. Object with common string keys
+    // 2. Direct array error (e.g. DRF ValidationError(['msg']))
+    if (Array.isArray(data) && data.length > 0) {
+      const first = data[0];
+      if (typeof first === "string") return first;
+      if (typeof first === "object" && first !== null) {
+        const item = first as Record<string, unknown>;
+        if (typeof item.message === "string") return item.message;
+        if (typeof item.detail === "string") return item.detail;
+        if (typeof item.error === "string") return item.error;
+      }
+    }
+
+    // 3. Object with common string keys
     if (typeof data === "object" && data !== null) {
       const record = data as Record<string, unknown>;
 

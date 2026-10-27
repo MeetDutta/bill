@@ -456,6 +456,7 @@ export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?
     setOverallDiscountValue(0);
     setIsWalkIn(true);
     setSelectedCustomer(null);
+    setLoadedQuoteBanner(null);
   };
 
   // Hold Cart
@@ -670,6 +671,7 @@ export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?
     try {
       const payload: any = {
         store_id: selectedStoreId || undefined,
+        quotation_number: loadedQuoteBanner?.number || undefined,
         items: cart,
         overall_discount_type: overallDiscountType,
         overall_discount_value: Number(overallDiscountValue) || 0,
