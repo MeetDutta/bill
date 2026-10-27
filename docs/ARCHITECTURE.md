@@ -1,88 +1,147 @@
-# BillFree V2 Platform Architecture
+# BillMeet Architecture Documentation
 
-## 1. High-Level Architecture Overview
+## 1. System Overview
 
-BillFree V2 transforms a billing and CRM solution into an **Intelligent Billing + Customer Retention + Business Intelligence Platform**.
-
-```
-                           BILLING & TRANSACTIONS
-                                     ↓
-                          CUSTOMER DATA PLATFORM
-                                     ↓
-                   V2 INTELLIGENCE & ANALYTICS ENGINE
-      ┌─────────────────┬──────────────────┬─────────────────┐
-      │  RFM Profiling  │  Health Scoring  │ Churn Predictor │
-      └─────────────────┴──────────────────┴─────────────────┘
-                                     ↓
-                          NEXT BEST ACTION ENGINE
-                                     ↓
-                      SMART OFFER & BUNDLE GENERATOR
-                                     ↓
-                     CAMPAIGN & WHATSAPP ENGAGEMENT
-                                     ↓
-                     DIRECT REVENUE ATTRIBUTION & ROI
-```
-
----
-
-## 2. Core Subsystems
-
-### 2.1 Backend Core (Django 5.1 / Django REST Framework)
-- **Multi-Tenant Foundation (`apps/core/models.py`)**: All domain models inherit `TenantModel` containing `organization = models.ForeignKey(Organization)`. The custom `TenantQuerySet` guarantees strict organization isolation across all operations.
-- **Transactions & Invoicing (`apps/transactions/`, `apps/invoices/`)**: POS transaction ingest API (`/api/v1/transactions/`), immutable record ledger, automated GST calculations, dynamic PDF invoice generation, and unique public token links (`/bills/<secure_token>`).
-- **Loyalty Engine (`apps/loyalty/`)**: Multiplier-based point accumulation ledger, Tier rules (`LoyaltyTier`), Gamification badges (`Achievement`, `CustomerAchievement`).
-- **Intelligence Layer (`apps/analytics/services.py`)**:
-  - `RFMAnalysisService`: 1–5 recency, frequency, monetary scoring & 9 segment classifications.
-  - `CustomerHealthService`: 0–100 weighted health score with explainable positive & risk factors.
-  - `ChurnPredictionService`: Behaviour-based churn risk probability & cadence ratio analysis.
-  - `NextBestActionService`: Rule-based deterministic decision tree recommending channel and offer.
-  - `OfferRecommendationService`: Margin-aware smart discounts with explicit merchant confirmation.
-  - `ProductIntelligenceService` & `SmartBundleService`: Co-occurrence market basket analysis (support, confidence, lift).
-  - `CampaignROIService`: Direct 7-day transaction link attributing actual revenue against messaging cost.
-  - `BusinessHealthService`: 0–100 executive score spanning sales, retention, loyalty, marketing, and products.
-  - `AnomalyDetectionService`: Anomaly scanning for refund surges, coupon abuse, and delivery drops.
-  - `AIBusinessCopilotService`: Tool-based natural language assistant with access to read-only business summaries.
-
-### 2.2 Frontend Application (Next.js 14 / TypeScript / Tailwind CSS)
-- **Executive Dashboard (`/dashboard`)**: Business Health index (0–100), Active Business Alerts banner with dismissal, today's customer opportunities, and revenue/customer trend charts.
-- **Retention & RFM Analytics (`/dashboard/analytics`)**: Interactive RFM segment distribution bar, drill-down customer drawer, Customers at Risk table with 1-click Comeback Offer trigger, and 6-month Cohort Retention matrix.
-- **Customer 360 (`/dashboard/customers/[id]`)**: Full health score breakdown ("Why this score?"), Churn risk meter, Next Best Action, and Merchant-Confirmed Smart Offers.
-- **Product Intelligence & Smart Bundles (`/dashboard/products`)**: Product affinities ("Customers who buy X frequently buy Y"), declining product alert, and smart bundles with price comparison.
-- **Campaign ROI (`/dashboard/campaigns`)**: Attributed revenue, campaign cost, verified conversions, and ROI multiplier.
-- **AI Business Copilot Drawer**: Global slide-out assistant accessible across dashboard routes with pre-engineered prompt shortcuts.
-- **Customer Mini Portal (`/portal/[token]`)**: Secure, mobile-responsive token-based mini portal with multi-language foundation (English, Hindi, Marathi, Gujarati), loyalty tiers, progress bar, rewards wallet, and unlocked achievement badges.
-- **Smart Digital Invoice (`/bills/[token]`)**: Public tax invoice with loyalty tier badge, wallet balance, recommended companion product, and verification QR code.
-
----
-
-## 3. Database Design & Relational Schema
+BillMeet (formerly BillFree) is a production-oriented, multi-tenant Billing, Inventory, and Point-of-Sale (POS) ERP platform designed for retail, wholesale, and multi-store operations. The system is architected around financial accuracy, high-concurrency checkout, and auditability.
 
 ```
-Organization (Tenant Root)
-  ├── User (Staff / Admins)
-  ├── Store (Branches)
-  ├── Product
-  ├── Customer
-  │     ├── CustomerRFMProfile (1:1)
-  │     ├── CustomerHealthProfile (1:1)
-  │     ├── ChurnPrediction (1:1)
-  │     ├── LoyaltyAccount (1:1)
-  │     └── CustomerAchievement (1:M)
-  ├── Transaction
-  │     ├── TransactionItem (1:M)
-  │     └── Invoice (1:1)
-  ├── Coupon & CouponRedemption
-  ├── Campaign & CampaignRecipient
-  ├── LoyaltyTier (Bronze, Silver, Gold, Platinum)
-  ├── Achievement (Definitions)
-  ├── ProductAffinity (Market Basket Pairings)
-  ├── BusinessAlert (Real-time operational alerts)
-  └── BusinessHealthSnapshot (Historical trend)
+                    ┌───────────────────────────────┐
+                    │  Next.js 14 Frontend Client   │
+                    │   (React / TypeScript / CSS)  │
+                    └───────────────┬───────────────┘
+                                    │ HTTPS / REST API
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │      Django REST Framework    │
+                    │   (Authentication & Routing)  │
+                    └───────┬───────────────┬───────┘
+                            │               │
+                            ▼               ▼
+          ┌──────────────────────────┐  ┌─────────────────────────┐
+          │ Domain Services Layer    │  │ Celery Async Workers    │
+          │ - CheckoutService        │  │ - PDF Invoice Rendering │
+          │ - CartEngine / TaxEngine │  │ - WhatsApp Notification │
+          │ - InvoiceNumberService   │  │ - Loyalty Point Compute │
+          │ - InventoryService       │  └─────────────────────────┘
+          │ - ReturnService          │
+          │ - CreditService          │
+          │ - ReconciliationService  │
+          └─────────────┬────────────┘
+                        │
+                        ▼
+          ┌──────────────────────────┐
+          │ PostgreSQL Database      │
+          │ (Atomic ACIDs & Locks)   │
+          └──────────────────────────┘
 ```
 
 ---
 
-## 4. Multi-Tenant Security & Isolation
-- **Tenant Scope Enforcement**: Every intelligence query filters by `organization=request.user.organization`.
-- **Public Mini Portal**: Token-based lookup matches `portal_token` directly or verifies the invoice's `secure_token`. Never leaks other customers or internal IDs.
-- **AI Tool Boundaries**: LLM copilot services execute only controlled service functions that enforce tenant isolation. Arbitrary SQL execution is strictly prohibited.
+## 2. Multi-Tenant Architecture & Data Isolation
+
+### Tenancy Model
+- Every business account is an `Organization`.
+- Every physical outlet is a `Store` belonging to an `Organization`.
+- All operational models (`Customer`, `Product`, `Transaction`, `Invoice`, `Quotation`, `Supplier`, `PurchaseOrder`, `InventoryMovement`, `CashRegister`, `HeldCart`, `Coupon`, `Campaign`) have a direct foreign key to `Organization`.
+
+### Enforced Isolation Rules
+1. **Model Managers / Queryset Filtering**:
+   All Django ViewSets inherit tenant-scoping logic that filters queries strictly by `request.user.organization`.
+2. **Strict Create Injection**:
+   Create actions inject `organization = request.user.organization` defensively on the backend, ignoring any payload attempt to spoof organization IDs.
+3. **Database Constraints**:
+   Invoice numbers are scoped per organization via `UniqueConstraint(fields=["organization", "invoice_number"])`, preventing cross-tenant leakage or global serial collision.
+4. **Cross-Tenant Test Verification**:
+   Automated security tests (`test_tenant_isolation.py` and `test_workflow_7_strict_cross_tenant_isolation`) verify that requests from Organization A attempting to read, update, or delete Organization B entities receive `403 Forbidden` or `404 Not Found`.
+
+---
+
+## 3. Financial Core & Transaction Lifecycle
+
+```
+[POS Checkout Request]
+        │
+        ▼ (select_for_update idempotent lookup)
+  [Transaction] ── (Status: completed, payment_status, total, round_off)
+        │
+        ├──▶ [TransactionItem] ── (quantity, unit_price, tax_rate, discount, total)
+        │
+        ├──▶ [Invoice] ── (invoice_number: INV-YYYYMMDD-000001, secure_token)
+        │
+        ├──▶ [TransactionPayment] ── (amount, method: cash/upi/card/credit)
+        │
+        ├──▶ [InventoryMovement] ── (type: SALE, quantity: -N, prev/new stock)
+        │
+        ├──▶ [Customer Stats] ── (total_spend += total, visit_count += 1)
+        │
+        └──▶ [Customer Credit Ledger] ── (outstanding_credit += debt if credit sale)
+```
+
+### Atomic Checkout Guarantee (`CheckoutService.process_checkout`)
+Every sale runs within a single `transaction.atomic()` database context. If any step (inventory deduction, payment logging, customer balance update, or invoice persistence) fails, the entire transaction rolls back completely:
+- No orphaned invoices without transactions.
+- No deducted stock without sales records.
+- No partial payment status out of sync with customer credit balances.
+
+---
+
+## 4. Sequential Invoice Numbering Strategy
+
+Historical implementations used timestamps and random tokens (`INV-20261005-ADFE51`). Production billing compliance requires gapless, sequential, tenant-isolated numbering:
+- **Format**: `INV-YYYYMMDD-000001` (configurable prefix and date format).
+- **Concurrency Protection**: Backed by `InvoiceSequence` model using row-level locking:
+  ```python
+  seq, _ = InvoiceSequence.objects.select_for_update().get_or_create(
+      organization=org,
+      store=store,
+      date_key=date_key,
+      prefix=prefix,
+  )
+  seq.last_number += 1
+  seq.save()
+  ```
+- **Crash Recovery**: If an atomic transaction rolls back, the sequence lock releases without leaking or creating phantom invoice records.
+
+---
+
+## 5. Inventory & Stock Movement Architecture
+
+Inventory is an immutable ledger of physical stock movements.
+- **Rules**:
+  - `current_stock` is updated in the database only alongside an `InventoryMovement` entry.
+  - Movement types: `SALE`, `PURCHASE`, `RETURN`, `PURCHASE_RETURN`, `ADJUSTMENT`, `DAMAGE`, `TRANSFER`, `OPENING_STOCK`.
+  - Every movement logs `previous_stock`, `new_stock`, `quantity`, `reference_type`, `reference_id`, and `performed_by`.
+- **Negative Stock Protection**: Controlled by tenant setting `allow_negative_stock`. When false, checkout or stock adjustment attempts exceeding available inventory raise `ValidationError`.
+
+---
+
+## 6. Returns & Credit Management
+
+- **Returns (`ReturnService.process_return`)**:
+  - Validates that the return quantity does not exceed the remaining returnable quantity (`item.quantity - item.returned_quantity`).
+  - Restores inventory by generating positive `InventoryMovement(movement_type="RETURN")`.
+  - Calculates proportional discount and tax adjustments to prevent refunding uncollected revenue.
+  - Creates an immutable `SalesReturn` and `SalesReturnItem` audit record.
+  - Leaves the original `Transaction` and `Invoice` intact as immutable historical records.
+- **Credit / Udhaar (`CreditService`)**:
+  - Row-level locking on `Customer` during settlement prevents double-crediting race conditions.
+  - Credit payments automatically settle historical unpaid transactions on a FIFO (First-In, First-Out) basis.
+
+---
+
+## 7. Public Bill Security
+
+Public invoices are accessible via unguessable, cryptographically secure tokens (`/bills/<token>`):
+- Customer portal authentication tokens (`portal_token`) are strictly stripped from public invoice JSON responses (`PublicInvoiceSerializer`).
+- Public bills expose only relevant bill data (store name, items, tax breakdown, total, receipt info) and never reveal internal organization IDs or private customer profiles.
+
+---
+
+## 8. Data Reconciliation Engine
+
+The system includes a built-in `ReconciliationService` and CLI command (`python manage.py reconcile_data`):
+- Audits invoice totals vs item sums + round-offs.
+- Audits payments vs transaction paid amounts and outstanding debts.
+- Reconciles physical product stock against the historical sum of `InventoryMovement` entries.
+- Verifies customer profile `outstanding_credit` against the sum of active unpaid transactions.
+- Audit-only mode by default to ensure zero silent mutation of historical records.

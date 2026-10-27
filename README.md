@@ -1,44 +1,55 @@
-# BillFree — V2 Intelligence & Customer Engagement Platform
+# BillMeet — Modern Billing, POS & Business Intelligence ERP
 
-[![Tests](https://img.shields.io/badge/Tests-90%20Passed-emerald.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-272%20Passed-emerald.svg)](#)
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](#)
 [![Django](https://img.shields.io/badge/Django-5.1-green.svg)](#)
 [![Next.js](https://img.shields.io/badge/Next.js-14.2-black.svg)](#)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](#)
 
-BillFree V2 transforms modern retail billing from a simple point-of-sale utility into an **Intelligent Billing + Customer Retention + Business Intelligence Platform**.
+BillMeet is a production-oriented, multi-tenant Billing, Inventory, and Point-of-Sale (POS) ERP platform designed for retail, wholesale, and multi-store operations. The system is engineered around zero-float financial precision, atomic transactions, sequential invoicing, strict role-based access control, and real-time inventory propagation.
 
 ---
 
-## The Platform Lifecycle
+## Architecture & Core Modules
 
 ```
-BILLING → CUSTOMER DATA → CUSTOMER INTELLIGENCE → PREDICTION → NEXT BEST ACTION → ENGAGEMENT → REVENUE MEASUREMENT
+                    ┌───────────────────────────────┐
+                    │  Next.js 14 Frontend Client   │
+                    │   (React / TypeScript / CSS)  │
+                    └───────────────┬───────────────┘
+                                    │ HTTPS / REST API / SSE
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │      Django REST Framework    │
+                    │   (Authentication & Routing)  │
+                    └───────┬───────────────┬───────┘
+                            │               │
+                            ▼               ▼
+          ┌──────────────────────────┐  ┌─────────────────────────┐
+          │ Domain Services Layer    │  │ Celery Async Workers    │
+          │ - CheckoutService        │  │ - PDF Invoice Rendering │
+          │ - CartEngine / TaxEngine │  │ - WhatsApp Notification │
+          │ - InvoiceNumberService   │  │ - Loyalty Point Compute │
+          │ - Inventory & Returns    │  └─────────────────────────┘
+          │ - Financial Ledger       │
+          └─────────────┬────────────┘
+                        │
+                        ▼
+          ┌──────────────────────────┐
+          │ PostgreSQL / SQLite      │
+          │ (Atomic ACID Operations) │
+          └──────────────────────────┘
 ```
 
-1. **Merchant Creates a Bill**: Ingested via POS API, GST calculated, itemized receipt recorded.
-2. **Digital Invoice & Rewards**: Customer receives SMS/WhatsApp invoice link with loyalty points earned.
-3. **Automated RFM & Health Profiling**: Customer Recency, Frequency, and Monetary scores are recalculated.
-4. **Behaviour-Based Churn Prediction**: Customer inactivity is evaluated against personal purchase cadence.
-5. **Next Best Action Engine**: Determines whether to offer a comeback incentive, review prompt, or VIP reward.
-6. **Smart Offers with Merchant Confirmation**: Offers are recommended to merchants with one-click approval safeguards.
-7. **Attributed Revenue Measurement**: Post-campaign purchases are linked directly to measure actual financial ROI.
+### Key Capabilities
 
----
-
-## Key V2 Upgrades
-
-- **RFM Customer Intelligence**: 9 segments (Champions, Loyal Customers, At Risk, Hibernating, Lost).
-- **Customer Health Score (0–100)**: 7-factor transparent health score with explainable positive & risk factors ("Why?").
-- **Churn Prediction**: Cadence ratio analysis classifying risk into LOW, MEDIUM, HIGH, CRITICAL.
-- **Next Best Action Engine**: Rule-based decision tree for personalized merchant actions.
-- **Smart Offer Recommendations**: Margin-safe offers requiring merchant approval before publishing.
-- **Product Affinity & Smart Bundles**: Market basket co-occurrence analysis and pre-packaged bundle recommendations.
-- **Direct Campaign ROI**: 7-day post-campaign transaction attribution with zero fabricated metrics.
-- **Customer Mini Portal**: Mobile-responsive, token-based public portal with multi-language support (English, Hindi, Marathi, Gujarati).
-- **Loyalty Tiers & Gamification**: Bronze, Silver, Gold, Platinum tiers and unlocked achievement badges.
-- **Executive Business Health (0–100)**: Overall health index highlighting the weakest operational area.
-- **AI Business Copilot**: Slide-out assistant executing read-only, tenant-isolated analytical tools.
+- **Point of Sale (POS)**: Concurrency-hardened checkout with single-click payment, cash change computation, multi-mode split payments (Cash, UPI, Card, Credit/Udhaar), held cart parking, and barcode scanning.
+- **Inventory & Catalog**: Category inline management, SKU/barcode lookup, unpaginated complete catalog selectors, and real-time Server-Sent Events (SSE) updates to all active cashier terminals.
+- **Sequential Invoicing**: Non-overlapping, tenant-isolated invoice sequences (`INV-YYYYMMDD-000001`) with A4 GST Tax Invoices and 80mm thermal receipt printing.
+- **Dedicated Staff System & RBAC**: Admin-managed cashier accounts with workspace isolation (`/staff/` dashboard, POS, quotations, and invoices) preventing cashiers from accessing managerial reports, tenant settings, or credentials.
+- **WhatsApp Cloud Integration**: Automated digital invoice and coupon dispatch with multi-state connection testing and credential protection.
+- **Customer CRM & Udhaar**: FIFO credit settlement, credit balances ledger, RFM customer segmentation, and automated loyalty tier gamification.
+- **Executive Analytics**: Real-time sales metrics, customer retention, 30-day revenue trends, and daily register closing reconciliation.
 
 ---
 
@@ -48,33 +59,44 @@ BILLING → CUSTOMER DATA → CUSTOMER INTELLIGENCE → PREDICTION → NEXT BEST
 .
 ├── backend/                  # Django 5.1 & DRF Backend
 │   ├── apps/
-│   │   ├── analytics/        # V2 Intelligence Services, RFM, Churn, Copilot
-│   │   ├── customers/        # Customer CRM & Portal Tokens
-│   │   ├── loyalty/          # Loyalty Tiers & Achievements
-│   │   ├── transactions/     # POS Ingest & Ledger
-│   │   ├── invoices/         # Smart Digital Invoices
-│   │   ├── campaigns/        # Broadcasts & ROI Attribution
-│   │   └── automations/      # Customer Journeys
-│   └── tests/                # 90 Pytest Unit & Integration Tests
-├── frontend/                 # Next.js 14 & Tailwind CSS Frontend
+│   │   ├── analytics/        # Business Intelligence, Retention, RFM
+│   │   ├── billing/          # CheckoutService, BusinessConfig, CashRegisters
+│   │   ├── customers/        # Customer CRM & Credit Balances
+│   │   ├── invoices/         # Invoicing, Sequences & Quotations
+│   │   ├── loyalty/          # Loyalty Tiers & Rules
+│   │   ├── organizations/    # Multi-tenant Organizations & Stores
+│   │   ├── products/         # Catalog, Categories, Inventory & Stock Movements
+│   │   ├── reports/          # Financial Ledger, Daily Closings & Backups
+│   │   ├── transactions/     # Atomic Sales Ledger & Split Payments
+│   │   ├── users/            # RBAC Authentication (Owner, Manager, Cashier)
+│   │   └── whatsapp/         # Meta Cloud API Integration & Diagnostics
+│   ├── common/               # Tenancy scoping, pagination, permissions
+│   ├── config/               # Django settings, WSGI, Celery config
+│   └── tests/                # 272 Automated Pytest Tests (100% pass)
+├── frontend/                 # Next.js 14 App Router (TypeScript & Tailwind)
 │   ├── app/
-│   │   ├── dashboard/        # Executive Dashboard, Analytics, Products, Campaigns
-│   │   ├── portal/[token]/   # Customer Mini Portal (Multi-Language)
-│   │   └── bills/[token]/    # Smart Digital Invoices (QR, Companion Recommendations)
-│   ├── components/           # CopilotDrawer, Radix UI Cards & Dialogs
-│   └── services/api.ts       # Unified V2 API Client
-└── docs/                     # Full Technical Documentation
-    ├── ARCHITECTURE.md       # High-level architecture map
-    ├── FEATURES.md           # Deep dive into all 15+ features
-    ├── API.md                # Complete API endpoint specifications
-    ├── AI_COPILOT.md         # Copilot architecture & safety rules
-    ├── ANALYTICS.md          # Statistical & mathematical formulas
-    └── DEPLOYMENT.md         # Production setup & environment variables
+│   │   ├── dashboard/        # Admin & Manager ERP Workspace
+│   │   ├── staff/            # Cashier-Isolated Workspace
+│   │   ├── m/                # Mobile POS & Operational Views
+│   │   ├── bills/[token]/    # Public Verified Invoice View
+│   │   └── portal/[token]/   # Customer Mini Portal
+│   ├── components/           # UI Dialogs, Modals, Receipt Printers
+│   └── services/api.ts       # Unified API client & Real-time SSE
+├── docs/                     # Authoritative Technical Specifications
+│   ├── ARCHITECTURE.md       # Full system architecture & domain lifecycles
+│   ├── DATA_INTEGRITY.md     # Zero floating-point math & rounding rules
+│   ├── DATA_SOURCE_MAP.md    # Authoritative database model mapping
+│   ├── DEPLOYMENT.md         # Render Blueprint & Docker production setup
+│   ├── FEATURES.md           # Deep dive into platform features
+│   ├── API.md                # REST API endpoint specifications
+│   ├── TESTING.md            # Automated testing guide
+│   └── RELEASE_CHECKLIST.md  # Production promotion verification gates
+└── render.yaml               # Infrastructure-as-Code for Render Cloud
 ```
 
 ---
 
-## Quickstart
+## Quickstart & Local Setup
 
 ### 1. Backend Setup
 ```bash
@@ -83,26 +105,57 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python manage.py migrate
-pytest tests/ -v
-python manage.py runserver 8000
+python manage.py createsuperuser_if_none_exists
+python manage.py runserver 0.0.0.0:8000
 ```
+Backend runs at `http://127.0.0.1:8000`. Health check: `http://127.0.0.1:8000/api/v1/health/`.
 
 ### 2. Frontend Setup
 ```bash
 cd frontend
 npm install
-npm run build
 npm run dev
 ```
-
-Visit the dashboard at `http://localhost:3000`.
+Frontend runs at `http://localhost:3000`.
 
 ---
 
-## Documentation Links
-- [Architecture Blueprint](file:///Users/meet/Desktop/bill-main/docs/ARCHITECTURE.md)
-- [Feature Details](file:///Users/meet/Desktop/bill-main/docs/FEATURES.md)
-- [API Reference](file:///Users/meet/Desktop/bill-main/docs/API.md)
-- [AI Copilot Safety](file:///Users/meet/Desktop/bill-main/docs/AI_COPILOT.md)
-- [Analytics & Mathematical Formulas](file:///Users/meet/Desktop/bill-main/docs/ANALYTICS.md)
-- [Production & Deployment Guide](file:///Users/meet/Desktop/bill-main/docs/DEPLOYMENT.md)
+## Automated Verification & Tests
+
+### Backend Tests (272 Tests)
+```bash
+cd backend
+pytest
+```
+
+### Frontend Validation & Production Build
+```bash
+cd frontend
+npm run lint
+npm run build
+```
+
+---
+
+## Deployment to Render
+
+This repository includes a production-ready [`render.yaml`](./render.yaml) Blueprint:
+1. Push your code to GitHub or GitLab.
+2. Log in to [Render Dashboard](https://dashboard.render.com/).
+3. Click **"New +"** $\rightarrow$ **"Blueprint"** and select this repository.
+4. Render automatically deploys the PostgreSQL database, Docker backend, and Next.js frontend with linked environments.
+
+Detailed instructions are available in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+---
+
+## Technical Documentation
+
+- [System Architecture](docs/ARCHITECTURE.md)
+- [Financial Data Integrity Specification](docs/DATA_INTEGRITY.md)
+- [Screen & Data Source Map](docs/DATA_SOURCE_MAP.md)
+- [Deployment & Render Blueprint Guide](docs/DEPLOYMENT.md)
+- [API Reference](docs/API.md)
+- [Platform Features](docs/FEATURES.md)
+- [Testing Verification Guide](docs/TESTING.md)
+- [Production Release Checklist](docs/RELEASE_CHECKLIST.md)
