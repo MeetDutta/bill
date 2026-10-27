@@ -23,6 +23,16 @@ export default function SalesReportPage() {
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<any | null>(null);
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const p = params.get("period");
+      if (p && ["today", "yesterday", "this_week", "this_month", "all"].includes(p)) {
+        setPeriod(p);
+      }
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {

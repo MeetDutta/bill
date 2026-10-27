@@ -5,6 +5,13 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { analyticsApi, engagementApi, intelligenceAnalyticsApi } from "@/services/api";
 import { useRealtimeSubscription, type RealtimeEventPayload } from "@/services/realtime";
 import { formatCurrency } from "@/lib/utils";
@@ -49,6 +56,13 @@ import {
 } from "recharts";
 import { StaffSalesBreakdownTable } from "@/components/dashboard/StaffSalesBreakdownTable";
 
+type SummaryModalState =
+  | { type: "sales_overview" }
+  | { type: "payment_channel"; method: string }
+  | { type: "inventory_valuation" }
+  | { type: "gross_profit" }
+  | null;
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +73,7 @@ export default function DashboardPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [dashboardError, setDashboardError] = useState("");
   const [liveEventsCount, setLiveEventsCount] = useState(0);
+  const [activeModal, setActiveModal] = useState<SummaryModalState>(null);
 
   const fetchDashboard = useCallback(async (silent = false) => {
     if (!silent) setIsRefreshing(true);
@@ -356,92 +371,160 @@ export default function DashboardPage() {
         {/* 6-Card Responsive Grid: 2 cols on mobile, 3 cols on tablet, 6 cols on desktop */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
           {/* Card 1: Today's Net Sales */}
-          <Card className="border-emerald-500/30 bg-emerald-500/5 shadow-xs">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground truncate">Today&apos;s Sales</span>
-              <TrendingUp className="h-4 w-4 text-emerald-600 shrink-0" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
-                {formatCurrency(todayNetSales)}
-              </div>
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                Gross: {formatCurrency(todayGrossSales)}
-              </p>
-            </CardContent>
-          </Card>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setActiveModal({ type: "sales_overview" })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setActiveModal({ type: "sales_overview" });
+              }
+            }}
+            aria-label="View Today's Sales performance summary"
+            className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/30 rounded-xl cursor-pointer"
+          >
+            <Card className="h-full border-emerald-500/30 bg-emerald-500/5 shadow-xs transition-all hover:border-emerald-500/60 hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Today&apos;s Sales</span>
+                <TrendingUp className="h-4 w-4 text-emerald-600 shrink-0" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
+                  {formatCurrency(todayNetSales)}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>Gross: {formatCurrency(todayGrossSales)}</span>
+                  <span className="font-bold text-emerald-600">Details →</span>
+                </p>
+              </CardContent>
+            </Card>
+          </div>
 
           {/* Card 2: Number of Transactions */}
-          <Card className="border-border bg-card shadow-xs">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground truncate">Bills Issued</span>
-              <Receipt className="h-4 w-4 text-foreground shrink-0" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                {todayTransactionsCount}
-              </div>
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                Completed checkouts
-              </p>
-            </CardContent>
-          </Card>
+          <Link
+            href="/dashboard/invoices?date=today"
+            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+            aria-label="View all invoices issued today"
+          >
+            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Bills Issued</span>
+                <Receipt className="h-4 w-4 text-foreground shrink-0" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                  {todayTransactionsCount}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>Completed checkouts</span>
+                  <span className="font-bold">View →</span>
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
 
           {/* Card 3: Cash Sales */}
-          <Card className="border-border bg-card shadow-xs">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground truncate">Cash Sales</span>
-              <Banknote className="h-4 w-4 text-foreground shrink-0" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                {formatCurrency(cashAmount)}
-              </div>
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                {cashCount} cash payments
-              </p>
-            </CardContent>
-          </Card>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setActiveModal({ type: "payment_channel", method: "CASH" })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setActiveModal({ type: "payment_channel", method: "CASH" });
+              }
+            }}
+            aria-label="View Cash sales summary"
+            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+          >
+            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Cash Sales</span>
+                <Banknote className="h-4 w-4 text-foreground shrink-0" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                  {formatCurrency(cashAmount)}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>{cashCount} cash payments</span>
+                  <span className="font-bold">Details →</span>
+                </p>
+              </CardContent>
+            </Card>
+          </div>
 
           {/* Card 4: Online / UPI Sales */}
-          <Card className="border-border bg-card shadow-xs">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground truncate">UPI / QR Sales</span>
-              <QrCode className="h-4 w-4 text-foreground shrink-0" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                {formatCurrency(upiAmount)}
-              </div>
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                {upiCount} digital payments
-              </p>
-            </CardContent>
-          </Card>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setActiveModal({ type: "payment_channel", method: "UPI" })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setActiveModal({ type: "payment_channel", method: "UPI" });
+              }
+            }}
+            aria-label="View UPI and QR sales summary"
+            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+          >
+            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">UPI / QR Sales</span>
+                <QrCode className="h-4 w-4 text-foreground shrink-0" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                  {formatCurrency(upiAmount)}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>{upiCount} digital payments</span>
+                  <span className="font-bold">Details →</span>
+                </p>
+              </CardContent>
+            </Card>
+          </div>
 
           {/* Card 5: Card Payments */}
-          <Card className="border-border bg-card shadow-xs">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground truncate">Card Payments</span>
-              <CreditCard className="h-4 w-4 text-foreground shrink-0" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                {formatCurrency(cardAmount)}
-              </div>
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                {cardCount} card swipes
-              </p>
-            </CardContent>
-          </Card>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setActiveModal({ type: "payment_channel", method: "CARD" })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setActiveModal({ type: "payment_channel", method: "CARD" });
+              }
+            }}
+            aria-label="View Card payments summary"
+            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+          >
+            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Card Payments</span>
+                <CreditCard className="h-4 w-4 text-foreground shrink-0" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
+                  {formatCurrency(cardAmount)}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>{cardCount} card swipes</span>
+                  <span className="font-bold">Details →</span>
+                </p>
+              </CardContent>
+            </Card>
+          </div>
 
           {/* Card 6: Customer Dues / Outstanding Credit */}
           <Link
             href="/dashboard/finance/receivables"
-            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl"
+            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+            aria-label="View outstanding customer dues"
           >
             <Card
-              className={`h-full shadow-xs transition-all hover:border-foreground/30 ${
+              className={`h-full shadow-xs transition-all hover:border-foreground/30 hover:shadow-md ${
                 todayOutstanding > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
               }`}
             >
@@ -490,8 +573,20 @@ export default function DashboardPage() {
         {/* 6-Card Responsive Grid */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
           {/* Card 1: Stock Value */}
-          <Link href="/dashboard/inventory" className="block focus:outline-none">
-            <Card className="h-full border-border bg-card shadow-xs hover:border-foreground/30 transition-all">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setActiveModal({ type: "inventory_valuation" })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setActiveModal({ type: "inventory_valuation" });
+              }
+            }}
+            aria-label="View inventory valuation and catalog health summary"
+            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+          >
+            <Card className="h-full border-border bg-card shadow-xs hover:border-foreground/40 hover:shadow-md transition-all">
               <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
                 <span className="text-xs font-semibold text-muted-foreground truncate">Stock Value</span>
                 <Boxes className="h-4 w-4 text-foreground shrink-0" />
@@ -500,16 +595,21 @@ export default function DashboardPage() {
                 <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
                   {formatCurrency(stockValue)}
                 </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                  {totalProducts} active SKUs
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>{totalProducts} active SKUs</span>
+                  <span className="font-bold">Summary →</span>
                 </p>
               </CardContent>
             </Card>
-          </Link>
+          </div>
 
           {/* Card 2: In Stock */}
-          <Link href="/dashboard/inventory" className="block focus:outline-none">
-            <Card className="h-full border-emerald-500/20 bg-emerald-500/5 shadow-xs hover:border-emerald-500/40 transition-all">
+          <Link
+            href="/dashboard/inventory?filter=in_stock"
+            className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/20 rounded-xl cursor-pointer"
+            aria-label="Filter inventory to in stock products"
+          >
+            <Card className="h-full border-emerald-500/20 bg-emerald-500/5 shadow-xs hover:border-emerald-500/40 hover:shadow-md transition-all">
               <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
                 <span className="text-xs font-semibold text-muted-foreground truncate">In Stock</span>
                 <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
@@ -518,17 +618,22 @@ export default function DashboardPage() {
                 <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
                   {inStockCount}
                 </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                  Available on shelves
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>Available on shelves</span>
+                  <span className="font-bold text-emerald-600">Filter →</span>
                 </p>
               </CardContent>
             </Card>
           </Link>
 
           {/* Card 3: Low Stock Alert */}
-          <Link href="/dashboard/inventory" className="block focus:outline-none">
+          <Link
+            href="/dashboard/inventory?filter=low_stock"
+            className="block focus:outline-none focus:ring-2 focus:ring-red-500/20 rounded-xl cursor-pointer"
+            aria-label="Filter inventory to low stock alerts"
+          >
             <Card
-              className={`h-full shadow-xs transition-all hover:border-foreground/30 ${
+              className={`h-full shadow-xs transition-all hover:border-foreground/30 hover:shadow-md ${
                 lowStockCount > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
               }`}
             >
@@ -548,17 +653,22 @@ export default function DashboardPage() {
                 >
                   {lowStockCount}
                 </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                  Below reorder min
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>Below reorder min</span>
+                  <span className="font-bold text-red-600">View low stock →</span>
                 </p>
               </CardContent>
             </Card>
           </Link>
 
           {/* Card 4: Out of Stock */}
-          <Link href="/dashboard/inventory" className="block focus:outline-none">
+          <Link
+            href="/dashboard/inventory?filter=out_of_stock"
+            className="block focus:outline-none focus:ring-2 focus:ring-red-500/20 rounded-xl cursor-pointer"
+            aria-label="Filter inventory to out of stock depleted products"
+          >
             <Card
-              className={`h-full shadow-xs transition-all hover:border-foreground/30 ${
+              className={`h-full shadow-xs transition-all hover:border-foreground/30 hover:shadow-md ${
                 outOfStockCount > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
               }`}
             >
@@ -578,17 +688,22 @@ export default function DashboardPage() {
                 >
                   {outOfStockCount}
                 </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                  Zero quantity SKUs
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>Zero quantity SKUs</span>
+                  <span className="font-bold text-red-600">View depleted →</span>
                 </p>
               </CardContent>
             </Card>
           </Link>
 
           {/* Card 5: Supplier Dues */}
-          <Link href="/dashboard/suppliers" className="block focus:outline-none">
+          <Link
+            href="/dashboard/finance/payables"
+            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+            aria-label="View supplier dues and accounts payable"
+          >
             <Card
-              className={`h-full shadow-xs transition-all hover:border-foreground/30 ${
+              className={`h-full shadow-xs transition-all hover:border-foreground/30 hover:shadow-md ${
                 supplierDues > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
               }`}
             >
@@ -608,28 +723,44 @@ export default function DashboardPage() {
                 >
                   {formatCurrency(supplierDues)}
                 </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                  {totalSuppliers} active vendors
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>{totalSuppliers} active vendors</span>
+                  <span className="font-bold">View dues →</span>
                 </p>
               </CardContent>
             </Card>
           </Link>
 
           {/* Card 6: Est. Gross Profit */}
-          <Card className="border-border bg-card shadow-xs">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground truncate">Gross Profit</span>
-              <DollarSign className="h-4 w-4 text-emerald-600 shrink-0" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
-                {formatCurrency(estimatedGrossProfit)}
-              </div>
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                Revenue less item cost
-              </p>
-            </CardContent>
-          </Card>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setActiveModal({ type: "gross_profit" })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setActiveModal({ type: "gross_profit" });
+              }
+            }}
+            aria-label="View gross profit and margin analysis"
+            className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/20 rounded-xl cursor-pointer"
+          >
+            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-emerald-500/40 hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+                <span className="text-xs font-semibold text-muted-foreground truncate">Gross Profit</span>
+                <DollarSign className="h-4 w-4 text-emerald-600 shrink-0" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
+                  {formatCurrency(estimatedGrossProfit)}
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
+                  <span>Revenue less item cost</span>
+                  <span className="font-bold text-emerald-600">Analyze →</span>
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </section>
 
@@ -637,44 +768,71 @@ export default function DashboardPage() {
       {/* SECTION 3: REVENUE HORIZONS (WEEK, MONTH, LIFETIME)             */}
       {/* ============================================================== */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
-        <Card className="border-border bg-card shadow-xs">
-          <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-            <span className="text-xs font-semibold text-muted-foreground">This Week</span>
-            <Activity className="h-4 w-4 text-foreground" />
-          </CardHeader>
-          <CardContent className="p-3 pt-0">
-            <div className="text-lg sm:text-xl font-black text-foreground">
-              {formatCurrency(weekRevenue)}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Past 7 calendar days</p>
-          </CardContent>
-        </Card>
+        <Link
+          href="/dashboard/reports/sales?period=this_week"
+          className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+          aria-label="View sales reports for this week"
+        >
+          <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground">This Week</span>
+              <Activity className="h-4 w-4 text-foreground" />
+            </CardHeader>
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl font-black text-foreground">
+                {formatCurrency(weekRevenue)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-between">
+                <span>Past 7 calendar days</span>
+                <span className="font-bold">View report →</span>
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card className="border-border bg-card shadow-xs">
-          <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-            <span className="text-xs font-semibold text-muted-foreground">This Month</span>
-            <TrendingUp className="h-4 w-4 text-emerald-600" />
-          </CardHeader>
-          <CardContent className="p-3 pt-0">
-            <div className="text-lg sm:text-xl font-black text-emerald-600">
-              {formatCurrency(monthRevenue)}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Month-to-date gross sales</p>
-          </CardContent>
-        </Card>
+        <Link
+          href="/dashboard/reports/sales?period=this_month"
+          className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/20 rounded-xl cursor-pointer"
+          aria-label="View sales reports for this month"
+        >
+          <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-emerald-500/40 hover:shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground">This Month</span>
+              <TrendingUp className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl font-black text-emerald-600">
+                {formatCurrency(monthRevenue)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-between">
+                <span>Month-to-date gross sales</span>
+                <span className="font-bold text-emerald-600">View report →</span>
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card className="border-border bg-card shadow-xs">
-          <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-            <span className="text-xs font-semibold text-muted-foreground">All-Time Revenue</span>
-            <Wallet className="h-4 w-4 text-foreground" />
-          </CardHeader>
-          <CardContent className="p-3 pt-0">
-            <div className="text-lg sm:text-xl font-black text-foreground">
-              {formatCurrency(allTimeRevenue)}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Lifetime verified sales</p>
-          </CardContent>
-        </Card>
+        <Link
+          href="/dashboard/reports/sales?period=all"
+          className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
+          aria-label="View all-time sales analytics"
+        >
+          <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
+              <span className="text-xs font-semibold text-muted-foreground">All-Time Revenue</span>
+              <Wallet className="h-4 w-4 text-foreground" />
+            </CardHeader>
+            <CardContent className="p-3 pt-0">
+              <div className="text-lg sm:text-xl font-black text-foreground">
+                {formatCurrency(allTimeRevenue)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-between">
+                <span>Lifetime verified sales</span>
+                <span className="font-bold">View analytics →</span>
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
       </section>
 
       {/* ============================================================== */}
@@ -757,8 +915,26 @@ export default function DashboardPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {salesTrend30.slice().reverse().slice(0, 10).map((row, idx) => (
-                    <tr key={idx} className="hover:bg-muted/20">
-                      <td className="py-1.5 px-3 font-medium">{row.formatted_date}</td>
+                    <tr
+                      key={idx}
+                      onClick={() => {
+                        window.location.href = `/dashboard/invoices?date=${encodeURIComponent(row.date || row.formatted_date)}`;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          window.location.href = `/dashboard/invoices?date=${encodeURIComponent(row.date || row.formatted_date)}`;
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`View invoices for ${row.formatted_date}`}
+                      className="hover:bg-muted/30 cursor-pointer transition-colors focus:bg-muted/40 focus:outline-none"
+                    >
+                      <td className="py-1.5 px-3 font-medium flex items-center justify-between">
+                        <span>{row.formatted_date}</span>
+                        <span className="text-[10px] text-muted-foreground font-normal">→</span>
+                      </td>
                       <td className="py-1.5 px-3 text-center font-mono">{row.transactions}</td>
                       <td className="py-1.5 px-3 text-right font-mono font-bold text-foreground">
                         {formatCurrency(row.revenue)}
@@ -788,9 +964,17 @@ export default function DashboardPage() {
           <CardContent className="flex-1 space-y-2.5">
             {salesByCategory.length > 0 ? (
               salesByCategory.map((cat, idx) => (
-                <div key={idx} className="space-y-1 rounded-lg border p-2 bg-muted/20 text-xs">
+                <Link
+                  key={idx}
+                  href={`/dashboard/inventory?category=${encodeURIComponent(cat.category)}`}
+                  className="block rounded-lg border p-2 bg-muted/20 hover:bg-muted/40 hover:border-foreground/30 transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-foreground/20 text-xs space-y-1"
+                  aria-label={`View ${cat.category} inventory and products`}
+                >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-foreground">{cat.category}</span>
+                    <span className="font-bold text-foreground flex items-center gap-1.5">
+                      <span>{cat.category}</span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                    </span>
                     <span className="font-mono font-bold">{formatCurrency(cat.total)}</span>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-muted-foreground">
@@ -803,7 +987,7 @@ export default function DashboardPage() {
                       style={{ width: `${Math.min(100, Math.max(0, cat.percentage))}%` }}
                     />
                   </div>
-                </div>
+                </Link>
               ))
             ) : (
               <div className="flex flex-col items-center justify-center h-44 text-center text-muted-foreground">
@@ -836,7 +1020,20 @@ export default function DashboardPage() {
           <CardContent className="flex-1 space-y-2.5">
             {paymentBreakdown.length > 0 ? (
               paymentBreakdown.map((item) => (
-                <div key={item.payment_method} className="space-y-1 rounded-lg border p-2.5 bg-muted/20">
+                <div
+                  key={item.payment_method}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setActiveModal({ type: "payment_channel", method: item.payment_method })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setActiveModal({ type: "payment_channel", method: item.payment_method });
+                    }
+                  }}
+                  aria-label={`View ${item.payment_method} payment summary`}
+                  className="space-y-1 rounded-lg border p-2.5 bg-muted/20 hover:bg-muted/40 hover:border-foreground/30 transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-foreground/20"
+                >
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
                       {getPaymentIcon(item.payment_method)}
@@ -845,11 +1042,12 @@ export default function DashboardPage() {
                         ({item.count} {item.count === 1 ? "txn" : "txns"})
                       </span>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex items-center gap-2">
                       <span className="font-bold text-foreground">{formatCurrency(item.total)}</span>
-                      <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground">
+                      <span className="text-[10px] font-semibold text-muted-foreground">
                         {item.percentage}%
                       </span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
                     </div>
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -1105,11 +1303,20 @@ export default function DashboardPage() {
                   Operational velocity, loyalty retention, and catalog performance
                 </CardDescription>
               </div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-black text-foreground">
-                  {healthData.overall_score}
-                </span>
-                <span className="text-xs text-muted-foreground font-semibold">/ 100</span>
+              <div className="flex items-center gap-3">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-black text-foreground">
+                    {healthData.overall_score}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-semibold">/ 100</span>
+                </div>
+                <Link
+                  href="/dashboard/health"
+                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-1 border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 rounded-md transition-colors"
+                >
+                  <span>Full Health Audit</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
               </div>
             </div>
           </CardHeader>
@@ -1272,6 +1479,282 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ============================================================== */}
+      {/* INTERACTIVE DASHBOARD SUMMARY MODALS                           */}
+      {/* ============================================================== */}
+      <Dialog open={activeModal !== null} onOpenChange={(open) => !open && setActiveModal(null)}>
+        <DialogContent className="max-w-md sm:max-w-lg p-6">
+          {activeModal?.type === "sales_overview" && (
+            <div className="space-y-4">
+              <DialogHeader>
+                <div className="flex items-center gap-2 text-emerald-600 mb-1">
+                  <TrendingUp className="h-5 w-5" />
+                  <span className="text-xs font-bold uppercase tracking-wider">Performance Audit</span>
+                </div>
+                <DialogTitle className="text-xl font-black">Today&apos;s Sales Performance</DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Operational sales velocity, ticket values, and revenue allocations for today.
+                </DialogDescription>
+              </DialogHeader>
+
+              {/* Primary Net Sales */}
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-center">
+                <span className="text-xs font-semibold text-muted-foreground">Net Sales Velocity</span>
+                <div className="text-3xl font-black text-emerald-600 mt-0.5">
+                  {formatCurrency(todayNetSales)}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Gross Billings: <strong className="text-foreground">{formatCurrency(todayGrossSales)}</strong>
+                </p>
+              </div>
+
+              {/* 4 Metric Breakdown Grid */}
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div className="rounded-lg border p-3 bg-muted/20">
+                  <span className="text-muted-foreground font-semibold text-[11px]">Bills Issued</span>
+                  <p className="text-lg font-black text-foreground mt-0.5">{todayTransactionsCount}</p>
+                  <span className="text-[10px] text-muted-foreground">Completed checkout receipts</span>
+                </div>
+                <div className="rounded-lg border p-3 bg-muted/20">
+                  <span className="text-muted-foreground font-semibold text-[11px]">Avg. Ticket Value</span>
+                  <p className="text-lg font-black text-foreground mt-0.5">
+                    {formatCurrency(todayTransactionsCount > 0 ? todayNetSales / todayTransactionsCount : 0)}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground">Per completed checkout</span>
+                </div>
+                <div className="rounded-lg border p-3 bg-muted/20">
+                  <span className="text-muted-foreground font-semibold text-[11px]">Customer Dues</span>
+                  <p className={`text-lg font-black mt-0.5 ${todayOutstanding > 0 ? "text-red-600" : "text-foreground"}`}>
+                    {formatCurrency(todayOutstanding)}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground">Credit receivables created</span>
+                </div>
+                <div className="rounded-lg border p-3 bg-muted/20">
+                  <span className="text-muted-foreground font-semibold text-[11px]">Cash Collections</span>
+                  <p className="text-lg font-black text-foreground mt-0.5">
+                    {formatCurrency(cashAmount)}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground">{cashCount} cash payments</span>
+                </div>
+              </div>
+
+              {/* Quick Payment Channel Mini Bar */}
+              <div className="rounded-lg border p-3 bg-muted/10 space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
+                  <span>Channel Breakdown</span>
+                  <span>UPI: {formatCurrency(upiAmount)} · Card: {formatCurrency(cardAmount)}</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
+                  {todayNetSales > 0 ? (
+                    <>
+                      <div className="bg-emerald-500 h-full" style={{ width: `${(cashAmount / todayNetSales) * 100}%` }} title="Cash" />
+                      <div className="bg-slate-900 dark:bg-slate-100 h-full" style={{ width: `${(upiAmount / todayNetSales) * 100}%` }} title="UPI" />
+                      <div className="bg-slate-600 h-full" style={{ width: `${(cardAmount / todayNetSales) * 100}%` }} title="Card" />
+                    </>
+                  ) : (
+                    <div className="bg-muted h-full w-full" />
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <Link href="/dashboard/invoices?date=today" className="flex-1" onClick={() => setActiveModal(null)}>
+                  <Button className="w-full gap-1.5 font-bold">
+                    <Receipt className="h-4 w-4" /> View Today&apos;s Invoices
+                  </Button>
+                </Link>
+                <Link href="/dashboard/reports/sales?period=today" className="flex-1" onClick={() => setActiveModal(null)}>
+                  <Button variant="outline" className="w-full gap-1.5 font-bold">
+                    <TrendingUp className="h-4 w-4" /> Full Sales Analysis
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {activeModal?.type === "payment_channel" && (() => {
+            const method = activeModal.method;
+            const item = paymentBreakdown.find((p) => p.payment_method.toUpperCase() === method.toUpperCase()) || {
+              payment_method: method,
+              total: method === "CASH" ? cashAmount : method === "UPI" ? upiAmount : cardAmount,
+              count: method === "CASH" ? cashCount : method === "UPI" ? upiCount : cardCount,
+              percentage: todayNetSales > 0 ? Number((((method === "CASH" ? cashAmount : method === "UPI" ? upiAmount : cardAmount) / todayNetSales) * 100).toFixed(1)) : 0,
+            };
+            return (
+              <div className="space-y-4">
+                <DialogHeader>
+                  <div className="flex items-center gap-2 text-foreground mb-1">
+                    {getPaymentIcon(method)}
+                    <span className="text-xs font-bold uppercase tracking-wider">{method} Payment Channel</span>
+                  </div>
+                  <DialogTitle className="text-xl font-black">{method} Channel Overview</DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground">
+                    Reconciliation, volume, and customer checkout allocations for {method} transactions.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="rounded-xl border border-border bg-muted/20 p-4 text-center">
+                  <span className="text-xs font-semibold text-muted-foreground">Total {method} Collected</span>
+                  <div className="text-3xl font-black text-foreground mt-0.5">
+                    {formatCurrency(item.total)}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Accounted across <strong className="text-foreground">{item.count}</strong> transactions
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 text-xs">
+                  <div className="rounded-lg border p-3 bg-muted/20">
+                    <span className="text-muted-foreground font-semibold text-[11px]">Revenue Share</span>
+                    <p className="text-lg font-black text-foreground mt-0.5">{item.percentage}%</p>
+                    <span className="text-[10px] text-muted-foreground">Of today&apos;s gross sales</span>
+                  </div>
+                  <div className="rounded-lg border p-3 bg-muted/20">
+                    <span className="text-muted-foreground font-semibold text-[11px]">Avg. Ticket</span>
+                    <p className="text-lg font-black text-foreground mt-0.5">
+                      {formatCurrency(item.count > 0 ? item.total / item.count : 0)}
+                    </p>
+                    <span className="text-[10px] text-muted-foreground">Average per transaction</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                  <Link
+                    href={`/dashboard/invoices?payment_method=${encodeURIComponent(method)}&date=today`}
+                    className="flex-1"
+                    onClick={() => setActiveModal(null)}
+                  >
+                    <Button className="w-full gap-1.5 font-bold">
+                      <Receipt className="h-4 w-4" /> Filter {method} Invoices
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/reports" className="flex-1" onClick={() => setActiveModal(null)}>
+                    <Button variant="outline" className="w-full gap-1.5 font-bold">
+                      Financial Reports
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            );
+          })()}
+
+          {activeModal?.type === "inventory_valuation" && (
+            <div className="space-y-4">
+              <DialogHeader>
+                <div className="flex items-center gap-2 text-foreground mb-1">
+                  <Boxes className="h-5 w-5" />
+                  <span className="text-xs font-bold uppercase tracking-wider">Asset Valuation</span>
+                </div>
+                <DialogTitle className="text-xl font-black">Inventory Capitalization</DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Current valuation and catalog stock status across your store shelves.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="rounded-xl border border-border bg-muted/20 p-4 text-center">
+                <span className="text-xs font-semibold text-muted-foreground">Total Stock Capitalization</span>
+                <div className="text-3xl font-black text-foreground mt-0.5">
+                  {formatCurrency(stockValue)}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Calculated from active catalog purchase unit values
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div className="rounded-lg border p-3 bg-muted/20">
+                  <span className="text-muted-foreground font-semibold text-[11px]">Total SKUs</span>
+                  <p className="text-lg font-black text-foreground mt-0.5">{totalProducts}</p>
+                  <span className="text-[10px] text-muted-foreground">Catalog products</span>
+                </div>
+                <div className="rounded-lg border p-3 bg-emerald-500/10 border-emerald-500/20">
+                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold text-[11px]">In Stock</span>
+                  <p className="text-lg font-black text-emerald-600 mt-0.5">{inStockCount}</p>
+                  <span className="text-[10px] text-muted-foreground">Available on shelves</span>
+                </div>
+                <div className="rounded-lg border p-3 bg-amber-500/10 border-amber-500/20">
+                  <span className="text-amber-800 dark:text-amber-300 font-semibold text-[11px]">Low Stock</span>
+                  <p className="text-lg font-black text-amber-600 mt-0.5">{lowStockCount}</p>
+                  <span className="text-[10px] text-muted-foreground">Below reorder minimum</span>
+                </div>
+                <div className="rounded-lg border p-3 bg-rose-500/10 border-rose-500/20">
+                  <span className="text-rose-800 dark:text-rose-300 font-semibold text-[11px]">Depleted</span>
+                  <p className="text-lg font-black text-rose-600 mt-0.5">{outOfStockCount}</p>
+                  <span className="text-[10px] text-muted-foreground">Zero quantity SKUs</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <Link href="/dashboard/inventory" className="flex-1" onClick={() => setActiveModal(null)}>
+                  <Button className="w-full gap-1.5 font-bold">
+                    <Boxes className="h-4 w-4" /> Manage Inventory Ledger
+                  </Button>
+                </Link>
+                <Link href="/dashboard/inventory?filter=low_stock" className="flex-1" onClick={() => setActiveModal(null)}>
+                  <Button variant="outline" className="w-full gap-1.5 font-bold">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" /> Filter Low Stock
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {activeModal?.type === "gross_profit" && (
+            <div className="space-y-4">
+              <DialogHeader>
+                <div className="flex items-center gap-2 text-emerald-600 mb-1">
+                  <DollarSign className="h-5 w-5" />
+                  <span className="text-xs font-bold uppercase tracking-wider">Profitability Analysis</span>
+                </div>
+                <DialogTitle className="text-xl font-black">Gross Profit & Margin</DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Estimated operating margin based on net sales less recorded item purchase cost.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-center">
+                <span className="text-xs font-semibold text-muted-foreground">Estimated Gross Profit</span>
+                <div className="text-3xl font-black text-emerald-600 mt-0.5">
+                  {formatCurrency(estimatedGrossProfit)}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Estimated Margin: <strong className="text-foreground">{todayNetSales > 0 ? ((estimatedGrossProfit / todayNetSales) * 100).toFixed(1) : "0.0"}%</strong>
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div className="rounded-lg border p-3 bg-muted/20">
+                  <span className="text-muted-foreground font-semibold text-[11px]">Today&apos;s Net Sales</span>
+                  <p className="text-lg font-black text-foreground mt-0.5">{formatCurrency(todayNetSales)}</p>
+                  <span className="text-[10px] text-muted-foreground">Gross sales less discounts</span>
+                </div>
+                <div className="rounded-lg border p-3 bg-muted/20">
+                  <span className="text-muted-foreground font-semibold text-[11px]">Est. Cost of Goods</span>
+                  <p className="text-lg font-black text-foreground mt-0.5">
+                    {formatCurrency(Math.max(0, todayNetSales - estimatedGrossProfit))}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground">Inventory cost baseline</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <Link href="/dashboard/reports" className="flex-1" onClick={() => setActiveModal(null)}>
+                  <Button className="w-full gap-1.5 font-bold">
+                    <TrendingUp className="h-4 w-4" /> Full Financial Reports
+                  </Button>
+                </Link>
+                <Link href="/dashboard/purchases" className="flex-1" onClick={() => setActiveModal(null)}>
+                  <Button variant="outline" className="w-full gap-1.5 font-bold">
+                    <Truck className="h-4 w-4" /> Purchase Invoices
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

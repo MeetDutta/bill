@@ -147,55 +147,91 @@ export default function StaffDashboardPage() {
         </div>
       </div>
 
-      {/* OVERVIEW METRICS GRID (Black, Red, Green Palette) */}
+      {/* OVERVIEW METRICS GRID (Interactive Cards with Black, Red, Green Palette) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         {/* Today's Sales */}
-        <div className="p-4 rounded-xl border border-border bg-card shadow-xs">
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-xs font-semibold">Today&apos;s Sales</span>
-            <TrendingUp className="h-4 w-4 text-foreground" />
+        <Link
+          href="/staff/invoices?date=today"
+          className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl"
+          aria-label="View today's sales invoices"
+        >
+          <div className="p-4 rounded-xl border border-border bg-card shadow-xs hover:border-foreground/30 hover:shadow-md transition-all cursor-pointer group active:scale-[0.99] h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between text-muted-foreground group-hover:text-foreground transition-colors">
+              <span className="text-xs font-semibold">Today&apos;s Sales</span>
+              <TrendingUp className="h-4 w-4 text-foreground" />
+            </div>
+            <div className="mt-2 text-xl sm:text-2xl font-black text-foreground">
+              {formatCurrency(data?.metrics?.today_sales || 0)}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1 flex items-center justify-between">
+              <span>Personal gross generated</span>
+              <span className="font-bold opacity-0 group-hover:opacity-100 transition-opacity text-foreground">View &rarr;</span>
+            </p>
           </div>
-          <div className="mt-2 text-xl sm:text-2xl font-black text-foreground">
-            {formatCurrency(data?.metrics?.today_sales || 0)}
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-1">Personal gross generated</p>
-        </div>
+        </Link>
 
         {/* Bills Generated */}
-        <div className="p-4 rounded-xl border border-border bg-card shadow-xs">
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-xs font-semibold">Bills Generated</span>
-            <Receipt className="h-4 w-4 text-foreground" />
+        <Link
+          href="/staff/invoices?date=today"
+          className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl"
+          aria-label="View bills generated today in My Invoices"
+        >
+          <div className="p-4 rounded-xl border border-border bg-card shadow-xs hover:border-foreground/30 hover:shadow-md transition-all cursor-pointer group active:scale-[0.99] h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between text-muted-foreground group-hover:text-foreground transition-colors">
+              <span className="text-xs font-semibold">Bills Generated</span>
+              <Receipt className="h-4 w-4 text-foreground" />
+            </div>
+            <div className="mt-2 text-xl sm:text-2xl font-black text-foreground">
+              {data?.metrics?.today_bills_count || 0}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1 flex items-center justify-between">
+              <span>Completed checkouts</span>
+              <span className="font-bold opacity-0 group-hover:opacity-100 transition-opacity text-foreground">View &rarr;</span>
+            </p>
           </div>
-          <div className="mt-2 text-xl sm:text-2xl font-black text-foreground">
-            {data?.metrics?.today_bills_count || 0}
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-1">Completed invoices today</p>
-        </div>
+        </Link>
 
         {/* Collected Amount (Green) */}
-        <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 shadow-xs">
-          <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400">
-            <span className="text-xs font-semibold">Total Collected</span>
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+        <Link
+          href="/staff/invoices?status=paid"
+          className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/30 rounded-xl"
+          aria-label="View collected paid invoices"
+        >
+          <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 shadow-xs hover:border-emerald-500/50 hover:shadow-md transition-all cursor-pointer group active:scale-[0.99] h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400">
+              <span className="text-xs font-semibold">Total Collected</span>
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            </div>
+            <div className="mt-2 text-xl sm:text-2xl font-black text-emerald-700 dark:text-emerald-400">
+              {formatCurrency(data?.metrics?.today_collected || 0)}
+            </div>
+            <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 mt-1 flex items-center justify-between">
+              <span>Cash, UPI &amp; Cards</span>
+              <span className="font-bold opacity-0 group-hover:opacity-100 transition-opacity text-emerald-700 dark:text-emerald-300">View &rarr;</span>
+            </p>
           </div>
-          <div className="mt-2 text-xl sm:text-2xl font-black text-emerald-700 dark:text-emerald-400">
-            {formatCurrency(data?.metrics?.today_collected || 0)}
-          </div>
-          <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 mt-1">Cash, UPI &amp; Cards</p>
-        </div>
+        </Link>
 
         {/* Outstanding Credit (Red) */}
-        <div className="p-4 rounded-xl border border-red-500/20 bg-red-500/5 shadow-xs">
-          <div className="flex items-center justify-between text-red-700 dark:text-red-400">
-            <span className="text-xs font-semibold">Customer Credit</span>
-            <AlertCircle className="h-4 w-4 text-red-600" />
+        <Link
+          href="/staff/invoices?status=credit"
+          className="block focus:outline-none focus:ring-2 focus:ring-red-500/30 rounded-xl"
+          aria-label="View customer credit and outstanding bills"
+        >
+          <div className="p-4 rounded-xl border border-red-500/20 bg-red-500/5 shadow-xs hover:border-red-500/50 hover:shadow-md transition-all cursor-pointer group active:scale-[0.99] h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between text-red-700 dark:text-red-400">
+              <span className="text-xs font-semibold">Customer Credit</span>
+              <AlertCircle className="h-4 w-4 text-red-600" />
+            </div>
+            <div className="mt-2 text-xl sm:text-2xl font-black text-red-700 dark:text-red-400">
+              {formatCurrency(data?.metrics?.today_outstanding || 0)}
+            </div>
+            <p className="text-[11px] text-red-800/80 dark:text-red-300/80 mt-1 flex items-center justify-between">
+              <span>Unsettled credit dues</span>
+              <span className="font-bold opacity-0 group-hover:opacity-100 transition-opacity text-red-700 dark:text-red-300">View &rarr;</span>
+            </p>
           </div>
-          <div className="mt-2 text-xl sm:text-2xl font-black text-red-700 dark:text-red-400">
-            {formatCurrency(data?.metrics?.today_outstanding || 0)}
-          </div>
-          <p className="text-[11px] text-red-800/80 dark:text-red-300/80 mt-1">Unsettled credit dues</p>
-        </div>
+        </Link>
       </div>
 
       {/* QUICK WORKFLOW SHORTCUTS */}

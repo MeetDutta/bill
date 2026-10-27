@@ -63,6 +63,13 @@ class InvoiceListView(generics.ListAPIView):
         if payment_status:
             qs = qs.filter(transaction__payment_status=payment_status)
 
+        payment_method = self.request.query_params.get("payment_method")
+        if payment_method:
+            qs = qs.filter(
+                models.Q(transaction__payment_method__iexact=payment_method) |
+                models.Q(transaction__payments__payment_method__iexact=payment_method)
+            ).distinct()
+
         invoice_type = self.request.query_params.get("invoice_type")
         if invoice_type:
             qs = qs.filter(invoice_type=invoice_type)
@@ -70,6 +77,13 @@ class InvoiceListView(generics.ListAPIView):
         template_format = self.request.query_params.get("template_format")
         if template_format:
             qs = qs.filter(template_format=template_format)
+
+        date_param = self.request.query_params.get("date")
+        if date_param:
+            if date_param == "today":
+                qs = qs.filter(created_at__date=timezone.now().date())
+            else:
+                qs = qs.filter(created_at__date=date_param)
 
         start_date = self.request.query_params.get("start_date")
         if start_date:

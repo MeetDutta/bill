@@ -228,8 +228,10 @@ export const invoiceApi = {
     search?: string;
     customer_id?: string;
     payment_status?: string;
+    payment_method?: string;
     invoice_type?: string;
     template_format?: string;
+    date?: string;
     start_date?: string;
     end_date?: string;
     page?: number;

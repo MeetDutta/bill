@@ -38,6 +38,25 @@ export default function StaffInvoicesPage() {
   // Detail Modal State
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const qStatus = params.get("payment_status") || params.get("status");
+      if (qStatus) setPaymentStatus(qStatus);
+      const qSearch = params.get("search");
+      if (qSearch) setSearchTerm(qSearch);
+      const qDate = params.get("date");
+      if (qDate === "today") {
+        const todayStr = new Date().toISOString().split("T")[0];
+        setStartDate(todayStr);
+        setEndDate(todayStr);
+      } else if (qDate) {
+        setStartDate(qDate);
+        setEndDate(qDate);
+      }
+    }
+  }, []);
+
   const fetchInvoices = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true);
     try {

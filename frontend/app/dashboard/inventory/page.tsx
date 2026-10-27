@@ -33,6 +33,31 @@ export default function CurrentStockPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
+  const [stockFilter, setStockFilter] = useState<"all" | "in_stock" | "low_stock" | "out_of_stock">("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const f = params.get("filter");
+      if (f === "low_stock") {
+        setStockFilter("low_stock");
+        setShowLowStockOnly(true);
+      } else if (f === "out_of_stock") {
+        setStockFilter("out_of_stock");
+      } else if (f === "in_stock") {
+        setStockFilter("in_stock");
+      }
+      const cat = params.get("category");
+      if (cat) {
+        setCategoryFilter(cat);
+      }
+      const s = params.get("search");
+      if (s) {
+        setSearch(s);
+      }
+    }
+  }, []);
 
   // Quick Adjustment Modal
   const [adjustModalOpen, setAdjustModalOpen] = useState(false);
@@ -268,15 +293,28 @@ export default function CurrentStockPage() {
     const name = (p.name || "").toLowerCase();
     const sku = (p.sku || "").toLowerCase();
     const matchesSearch = name.includes(term) || sku.includes(term);
+    if (!matchesSearch) return false;
+
+    if (categoryFilter) {
+      const catVal = (p as any).category_name || (p as any).category;
+      const cStr = typeof catVal === "string" ? catVal : (catVal?.name || "");
+      if (cStr.toLowerCase() !== categoryFilter.toLowerCase()) return false;
+    }
 
     const stock = parseFloat(String(p.current_stock || 0));
     const reorder = parseFloat(String((p as any).reorder_level || 5));
     const isLow = stock <= reorder;
 
-    if (showLowStockOnly) {
-      return matchesSearch && isLow;
+    if (showLowStockOnly || stockFilter === "low_stock") {
+      return isLow;
     }
-    return matchesSearch;
+    if (stockFilter === "out_of_stock") {
+      return stock <= 0;
+    }
+    if (stockFilter === "in_stock") {
+      return stock > 0;
+    }
+    return true;
   });
 
   const totalSKUs = products.length;
@@ -399,16 +437,63 @@ export default function CurrentStockPage() {
 
           <div className="flex gap-2 w-full sm:w-auto">
             <Button
-              variant={showLowStockOnly ? "destructive" : "outline"}
+              variant={showLowStockOnly || stockFilter === "low_stock" ? "destructive" : "outline"}
               size="sm"
-              onClick={() => setShowLowStockOnly(!showLowStockOnly)}
+              onClick={() => {
+                if (showLowStockOnly || stockFilter === "low_stock") {
+                  setShowLowStockOnly(false);
+                  setStockFilter("all");
+                } else {
+                  setShowLowStockOnly(true);
+                  setStockFilter("low_stock");
+                }
+              }}
               className="gap-2"
             >
               <AlertTriangle className="w-4 h-4" />
-              {showLowStockOnly ? "Showing Low Stock" : "Filter Low Stock"}
+              {showLowStockOnly || stockFilter === "low_stock" ? "Showing Low Stock" : "Filter Low Stock"}
             </Button>
           </div>
         </CardContent>
+
+        {(stockFilter !== "all" || categoryFilter) && (
+          <div className="px-4 pb-3 flex flex-wrap items-center gap-2 text-xs border-t pt-2.5 bg-muted/20">
+            <span className="font-semibold text-muted-foreground">Active Filter:</span>
+            {stockFilter === "low_stock" && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold border border-amber-500/20">
+                Low Stock (at or below reorder level)
+              </span>
+            )}
+            {stockFilter === "out_of_stock" && (
+              <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-700 dark:text-red-400 font-bold border border-red-500/20">
+                Out of Stock (Zero quantity)
+              </span>
+            )}
+            {stockFilter === "in_stock" && (
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-bold border border-emerald-500/20">
+                In Stock (Available units)
+              </span>
+            )}
+            {categoryFilter && (
+              <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary font-bold border border-primary/20">
+                Category: {categoryFilter}
+              </span>
+            )}
+            <button
+              onClick={() => {
+                setStockFilter("all");
+                setShowLowStockOnly(false);
+                setCategoryFilter("");
+                if (typeof window !== "undefined") {
+                  window.history.replaceState({}, "", window.location.pathname);
+                }
+              }}
+              className="ml-auto text-xs text-muted-foreground hover:text-foreground underline font-semibold"
+            >
+              Clear Filter
+            </button>
+          </div>
+        )}
       </Card>
 
       {/* Inventory Table */}

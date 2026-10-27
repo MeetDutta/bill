@@ -38,9 +38,42 @@ export default function InvoicesPage() {
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
   const [invoiceType, setInvoiceType] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const qStatus = params.get("payment_status") || params.get("status");
+      if (qStatus) setPaymentStatus(qStatus);
+
+      const qMethod = params.get("payment_method") || params.get("method");
+      if (qMethod) setPaymentMethod(qMethod.toLowerCase());
+
+      const qType = params.get("invoice_type") || params.get("type");
+      if (qType) setInvoiceType(qType);
+
+      const qDate = params.get("date");
+      if (qDate === "today") {
+        const todayStr = new Date().toISOString().split("T")[0];
+        setStartDate(todayStr);
+        setEndDate(todayStr);
+      } else if (qDate) {
+        setStartDate(qDate);
+        setEndDate(qDate);
+      }
+
+      const qStart = params.get("start_date");
+      if (qStart) setStartDate(qStart);
+      const qEnd = params.get("end_date");
+      if (qEnd) setEndDate(qEnd);
+
+      const qSearch = params.get("search");
+      if (qSearch) setSearchTerm(qSearch);
+    }
+  }, []);
 
   // Detail Modal
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -54,6 +87,7 @@ export default function InvoicesPage() {
       const res = await invoiceApi.list({
         search: searchTerm || undefined,
         payment_status: paymentStatus || undefined,
+        payment_method: paymentMethod || undefined,
         invoice_type: invoiceType || undefined,
         start_date: startDate || undefined,
         end_date: endDate || undefined,
@@ -77,7 +111,7 @@ export default function InvoicesPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, paymentStatus, invoiceType, startDate, endDate, page]);
+  }, [searchTerm, paymentStatus, paymentMethod, invoiceType, startDate, endDate, page]);
 
   useEffect(() => {
     fetchInvoices();
@@ -269,6 +303,22 @@ export default function InvoicesPage() {
             </select>
 
             <select
+              value={paymentMethod}
+              onChange={(e) => {
+                setPaymentMethod(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter by payment channel"
+              className="rounded-lg border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="">All Payment Channels</option>
+              <option value="cash">Cash Tender</option>
+              <option value="upi">UPI / QR Code</option>
+              <option value="card">Card POS</option>
+              <option value="credit">Credit / Udhaar</option>
+            </select>
+
+            <select
               value={invoiceType}
               onChange={(e) => {
                 setInvoiceType(e.target.value);
@@ -309,17 +359,21 @@ export default function InvoicesPage() {
               />
             </div>
 
-            {(searchTerm || paymentStatus || invoiceType || startDate || endDate) && (
+            {(searchTerm || paymentStatus || paymentMethod || invoiceType || startDate || endDate) && (
               <button
                 onClick={() => {
                   setSearchTerm("");
                   setPaymentStatus("");
+                  setPaymentMethod("");
                   setInvoiceType("");
                   setStartDate("");
                   setEndDate("");
                   setPage(1);
+                  if (typeof window !== "undefined") {
+                    window.history.replaceState({}, "", window.location.pathname);
+                  }
                 }}
-                className="rounded-lg border bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="rounded-lg border bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors font-semibold"
                 title="Clear Filters"
               >
                 Clear
