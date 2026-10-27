@@ -173,6 +173,38 @@ class TestUniversalPOS:
         results = search_resp.json()["results"]
         assert any(p["sku"] == "BOSCH-DRL-500" for p in results)
 
+    def test_quick_create_persists_opening_stock_and_custom_category(self, pos_setup):
+        client = pos_setup["client"]
+        org = pos_setup["org"]
+
+        response = client.post("/api/v1/pos/products/quick-create/", {
+            "name": "New Category Product",
+            "sku": "NEW-CAT-001",
+            "category": "Seasonal Goods",
+            "selling_price": "125.00",
+            "purchase_price": "75.00",
+            "opening_stock": "7.00",
+            "min_stock": "2.00",
+            "tax_rate": "0.00",
+        }, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+        product_data = response.json()
+        product = Product.objects.get(id=product_data["id"], organization=org)
+        assert product.category.name == "Seasonal Goods"
+        assert product.current_stock == Decimal("7.00")
+        assert InventoryMovement.objects.filter(
+            organization=org,
+            product=product,
+            movement_type="OPENING_STOCK",
+            quantity=Decimal("7.00"),
+        ).exists()
+
+        # The exact product is immediately discoverable by POS search and category.
+        search_response = client.get("/api/v1/pos/products/?q=NEW-CAT-001&category=Seasonal%20Goods")
+        assert search_response.status_code == status.HTTP_200_OK
+        assert any(item["sku"] == "NEW-CAT-001" for item in search_response.json()["results"])
+
     def test_complete_pos_sale_and_inventory_deduction(self, pos_setup):
         client = pos_setup["client"]
         org = pos_setup["org"]

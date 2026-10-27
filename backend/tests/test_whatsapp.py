@@ -135,3 +135,63 @@ class WhatsAppPipelineTests(TestCase):
         msg.refresh_from_db()
         self.assertEqual(msg.status, "read")
         self.assertIsNotNone(msg.read_at)
+
+
+class WhatsAppConnectionDiagnosticTests(TestCase):
+    def setUp(self):
+        from tests.factories import UserFactory
+        self.user = UserFactory()
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+        self.config = WhatsAppConfig.objects.create(
+            organization=self.user.organization,
+            business_account_id="WABA_TEST",
+            phone_number_id="PHONE_TEST",
+            access_token="SECRET_TEST_TOKEN",
+            is_active=True,
+        )
+
+    @patch("apps.whatsapp.views.requests.get")
+    def test_connection_test_reports_success_without_sending_message(self, mock_get):
+        from unittest.mock import Mock
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            "id": "PHONE_TEST",
+            "display_phone_number": "+1 555 0100",
+            "verified_name": "Test Shop",
+        }
+        mock_get.return_value = mock_response
+
+        response = self.client.post("/api/v1/whatsapp/test-connection/", {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["connected"])
+        self.assertEqual(response.data["phone_number"], "+1 555 0100")
+        self.assertNotIn("SECRET_TEST_TOKEN", str(response.data))
+        mock_get.assert_called_once()
+        self.assertNotIn("/messages", mock_get.call_args.args[0])
+
+    @patch("apps.whatsapp.views.requests.get")
+    def test_connection_test_sanitizes_invalid_token_error(self, mock_get):
+        from unittest.mock import Mock
+        mock_response = Mock()
+        mock_response.ok = False
+        mock_response.status_code = 401
+        mock_get.return_value = mock_response
+
+        response = self.client.post("/api/v1/whatsapp/test-connection/", {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["connected"])
+        self.assertEqual(response.data["reason"], "invalid_credentials")
+        self.assertNotIn("SECRET_TEST_TOKEN", str(response.data))
+
+    def test_connection_test_is_tenant_scoped(self):
+        from tests.factories import UserFactory
+        other_user = UserFactory()
+        other_client = APIClient()
+        other_client.force_authenticate(user=other_user)
+        response = other_client.post("/api/v1/whatsapp/test-connection/", {}, format="json")
+        self.assertFalse(response.data["connected"])
+        self.assertEqual(response.data["reason"], "not_configured")

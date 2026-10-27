@@ -4,6 +4,19 @@ from .models import Product, ProductCategory
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
+    def validate_name(self, value):
+        normalized = value.strip()
+        if not normalized:
+            raise serializers.ValidationError("Category name cannot be empty.")
+        request = self.context.get("request")
+        organization = getattr(getattr(request, "user", None), "organization", None)
+        queryset = ProductCategory.objects.filter(organization=organization, name__iexact=normalized)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("A category with this name already exists.")
+        return normalized
+
     class Meta:
         model = ProductCategory
         fields = ["id", "name", "description", "parent", "is_active", "created_at"]
@@ -16,15 +29,41 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            "id", "external_id", "name", "description", "sku", "barcode",
+            "id", "external_id", "name", "description", "brand", "sku", "barcode",
             "category", "category_name", "unit_price", "cost_price",
-            "tax_rate", "hsn_code", "image", "is_active",
+            "selling_price", "purchase_price", "mrp", "unit",
+            "tax_rate", "hsn_code", "current_stock", "min_stock",
+            "track_inventory", "image", "is_active",
             "organization", "created_at",
         ]
-        read_only_fields = ["id", "created_at", "organization"]
+        read_only_fields = ["id", "created_at", "organization", "current_stock"]
         extra_kwargs = {
             "external_id": {"required": False, "allow_blank": True},
         }
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        if "selling_price" in data and "unit_price" not in data:
+            data["unit_price"] = data["selling_price"]
+        if "purchase_price" in data and "cost_price" not in data:
+            data["cost_price"] = data["purchase_price"]
+
+        category_val = data.get("category")
+        if isinstance(category_val, str) and category_val.strip():
+            cat_str = category_val.strip()
+            import uuid
+            try:
+                uuid.UUID(cat_str)
+            except ValueError:
+                request = self.context.get("request")
+                org = getattr(getattr(request, "user", None), "organization", None)
+                if org:
+                    cat_obj, _ = ProductCategory.objects.get_or_create(
+                        organization=org,
+                        name=cat_str,
+                    )
+                    data["category"] = str(cat_obj.id)
+        return super().to_internal_value(data)
 
     def create(self, validated_data):
         if not validated_data.get("external_id"):
@@ -34,9 +73,16 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class ProductListSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source="category.name", read_only=True, default="General")
+
     class Meta:
         model = Product
-        fields = ["id", "external_id", "name", "sku", "unit_price", "tax_rate", "is_active"]
+        fields = [
+            "id", "external_id", "name", "brand", "sku", "barcode",
+            "category", "category_name", "unit_price", "cost_price",
+            "selling_price", "purchase_price", "tax_rate", "unit",
+            "current_stock", "min_stock", "track_inventory", "is_active"
+        ]
 
 
 class SupplierSerializer(serializers.ModelSerializer):

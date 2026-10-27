@@ -55,10 +55,18 @@ export const customerApi = {
 
 // Products
 export const productApi = {
-  list: () => api.get<PaginatedResponse<Product>>("/products/"),
+  listCategories: (params?: { all?: boolean; active_only?: boolean; page_size?: number }) =>
+    api.get<PaginatedResponse<{ id: string; name: string; is_active: boolean }>>("/products/categories/", {
+      params: { all: true, ...params },
+    }),
+  createCategory: (data: { name: string; description?: string }) => api.post("/products/categories/", data),
+  deleteCategory: (id: string) => api.delete(`/products/categories/${id}/`),
+  list: (params?: { search?: string; category?: string; is_active?: boolean; page?: number; page_size?: number }) =>
+    api.get<PaginatedResponse<Product>>("/products/", { params }),
   get: (id: string) => api.get<Product>(`/products/${id}/`),
   create: (data: Partial<Product>) => api.post<Product>("/products/", data),
   update: (id: string, data: Partial<Product>) => api.patch<Product>(`/products/${id}/`, data),
+  delete: (id: string) => api.delete(`/products/${id}/`),
 };
 
 // Transactions
@@ -106,6 +114,7 @@ export const loyaltyApi = {
 export const whatsappApi = {
   getConfig: () => api.get("/whatsapp/config/"),
   updateConfig: (data: unknown) => api.patch("/whatsapp/config/", data),
+  testConnection: () => api.post<{ connected: boolean; checked_at: string; message: string; phone_number?: string; verified_name?: string }>("/whatsapp/test-connection/"),
   getMessages: () => api.get("/whatsapp/messages/"),
   getTemplates: () => api.get("/whatsapp/templates/"),
 };

@@ -26,7 +26,7 @@ from apps.billing.services.credit_service import CreditService
 from apps.billing.services.register_service import RegisterService
 from apps.billing.services.inventory_service import InventoryService
 from apps.billing.services.reports_service import ReportsService
-from common.permissions import IsInventoryStaffOrAbove
+from common.permissions import IsAdminOrManager, IsInventoryStaffOrAbove
 
 
 class StandardPOSPagination(PageNumberPagination):
@@ -53,6 +53,11 @@ class BusinessConfigView(APIView):
         return self._update(request, partial=True)
 
     def _update(self, request, partial=True):
+        from rest_framework.exceptions import PermissionDenied
+        ADMIN_ROLES = ("super_admin", "org_admin", "owner", "store_manager", "manager")
+        if request.user.role not in ADMIN_ROLES and not request.user.is_superuser:
+            raise PermissionDenied("Only administrators and managers can modify business configuration.")
+
         config, _ = BusinessConfig.objects.get_or_create(
             organization=request.user.organization,
             defaults={"business_type": "retail"},
@@ -195,6 +200,17 @@ class POSProductQuickCreateView(APIView):
                     reference_type="manual",
                     notes="Quick Product Create Opening Stock",
                 )
+
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=org,
+                event_type="product_created",
+                payload={"product_id": str(product.id), "category": cat_obj.name},
+            )
+        except Exception:
+            # The product write must succeed even if the optional event stream is unavailable.
+            pass
 
         return Response(POSProductSerializer(product).data, status=status.HTTP_201_CREATED)
 
@@ -487,7 +503,7 @@ class POSInventoryAdjustView(APIView):
             RealtimeService.publish_event(
                 organization=request.user.organization,
                 store=store,
-                event_type="stock_adjusted",
+                event_type="inventory_updated",
                 payload={
                     "product_id": str(request.data.get("product_id")),
                     "quantity_delta": str(qty_delta),
@@ -640,7 +656,7 @@ class POSManualAdjustmentsListView(APIView):
 
 
 class POSPaymentLedgerView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         from apps.transactions.models import TransactionPayment, CustomerCreditPayment
@@ -730,7 +746,7 @@ class POSPaymentLedgerView(APIView):
 
 
 class POSReceivablesView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         from apps.transactions.models import Transaction
@@ -775,7 +791,7 @@ class POSReceivablesView(APIView):
 
 
 class POSPayablesView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         from django.utils import timezone
@@ -818,7 +834,7 @@ class POSPayablesView(APIView):
 
 
 class POSSupplierPaymentCreateView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def post(self, request):
         from apps.products.models import Supplier, PurchaseOrder, SupplierPayment
@@ -871,7 +887,7 @@ class POSSupplierPaymentCreateView(APIView):
 
 
 class POSRegisterOperationalReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         from apps.billing.models import CashRegister
@@ -910,7 +926,7 @@ class POSRegisterOperationalReportView(APIView):
 
 # POS Reports Views
 class POSSalesReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         result = ReportsService.get_sales_report(
@@ -925,7 +941,7 @@ class POSSalesReportView(APIView):
 
 
 class POSPaymentReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         result = ReportsService.get_payment_report(
@@ -939,7 +955,7 @@ class POSPaymentReportView(APIView):
 
 
 class POSProductSalesReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         result = ReportsService.get_product_sales_report(
@@ -953,7 +969,7 @@ class POSProductSalesReportView(APIView):
 
 
 class POSTaxReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         result = ReportsService.get_tax_report(
@@ -967,7 +983,7 @@ class POSTaxReportView(APIView):
 
 
 class POSReturnsReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         result = ReportsService.get_returns_report(
@@ -979,7 +995,7 @@ class POSReturnsReportView(APIView):
 
 
 class POSOutstandingReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         result = ReportsService.get_outstanding_credit_report(
@@ -989,7 +1005,7 @@ class POSOutstandingReportView(APIView):
 
 
 class POSDailyClosingReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
     def get(self, request):
         result = ReportsService.get_daily_closing_report(

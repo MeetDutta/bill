@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { formatCurrency, parseApiError } from "@/lib/utils";
-import { posApi, quotationApi, customerApi } from "@/services/api";
+import { posApi, quotationApi, customerApi, productApi } from "@/services/api";
 import type { Product, Quotation, Customer } from "@/types";
 import {
   Search,
@@ -101,6 +101,27 @@ export default function MobilePOSPage() {
     raw?: any;
   } | null>(null);
 
+  // Load all tenant categories on mount
+  useEffect(() => {
+    const loadAllCategories = async () => {
+      try {
+        const catRes = await productApi.listCategories({ all: true });
+        const raw = catRes.data as any;
+        const list = Array.isArray(raw) ? raw : raw?.results || [];
+        const names = list
+          .filter((c: any) => c.is_active !== false)
+          .map((c: any) => c.name)
+          .filter(Boolean);
+        if (names.length > 0) {
+          setCategories((prev) => Array.from(new Set([...prev, ...names])));
+        }
+      } catch (err) {
+        console.error("Failed to load categories for mobile POS:", err);
+      }
+    };
+    loadAllCategories();
+  }, []);
+
   // Load products on search / category filter
   const fetchProducts = useCallback(async (query: string, category: string) => {
     setLoadingProducts(true);
@@ -113,8 +134,14 @@ export default function MobilePOSPage() {
       const list = res.data?.results || [];
       setProducts(list);
 
-      // Extract unique categories
-      const cats = Array.from(new Set(list.map((p: Product) => p.category?.name).filter(Boolean))) as string[];
+      // Extract unique categories from products
+      const cats = Array.from(
+        new Set(
+          list
+            .map((p: any) => p.category_name || p.category?.name || (typeof p.category === "string" ? p.category : null))
+            .filter(Boolean)
+        )
+      ) as string[];
       if (cats.length > 0) {
         setCategories((prev) => Array.from(new Set([...prev, ...cats])));
       }

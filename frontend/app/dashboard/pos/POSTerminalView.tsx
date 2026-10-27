@@ -31,7 +31,8 @@ import {
   ChevronRight,
   ShieldAlert,
 } from "lucide-react";
-import { posApi, customerApi, storeApi, quotationApi } from "@/services/api";
+import { posApi, customerApi, storeApi, quotationApi, productApi } from "@/services/api";
+import { useRealtimeSubscription } from "@/services/realtime";
 import {
   POSProduct,
   POSCartItem,
@@ -49,6 +50,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { cn, parseApiError } from "@/lib/utils";
 import { IsolatedReceiptModal } from "@/components/pos/IsolatedReceiptModal";
+
+const POS_CATALOG_EVENT_FILTER = ["product_created", "product_updated", "inventory_updated", "inventory_adjusted", "stock_adjusted", "stock_received", "purchase_received", "sale_completed", "return_completed"];
 
 export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?: string } = {}) {
   // Config & Metadata
@@ -232,7 +235,21 @@ export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?
     init();
   }, [handleLoadQuotation]);
 
-  // Fetch Products on search/category change
+  const fetchCategories = useCallback(async () => {
+    try {
+      const categoryRes = await productApi.listCategories();
+      const categoryData = Array.isArray(categoryRes.data) ? categoryRes.data : (categoryRes.data as any)?.results || [];
+      const categoryNames = categoryData
+        .filter((category: any) => category.is_active !== false)
+        .map((category: any) => category.name)
+        .filter(Boolean) as string[];
+      setCategories((previous) => Array.from(new Set([...previous, ...categoryNames])).sort((a, b) => a.localeCompare(b)));
+    } catch (err) {
+      console.error("Failed to load POS categories", err);
+    }
+  }, []);
+
+  // Fetch products using the same tenant-scoped catalog endpoint used by inventory.
   const fetchProducts = useCallback(async (query: string, cat: string) => {
     setProductsLoading(true);
     try {
@@ -244,10 +261,9 @@ export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?
       const data = res.data;
       const list: POSProduct[] = Array.isArray(data) ? data : data.results || [];
       setProducts(list);
-
-      // Extract unique categories
-      const cats = Array.from(new Set(list.map((p) => p.category).filter(Boolean))) as string[];
-      setCategories((prev) => Array.from(new Set([...prev, ...cats])));
+      // Preserve categories even when the current search/page has no matching products.
+      const visibleCategories = list.map((product) => product.category).filter(Boolean) as string[];
+      setCategories((previous) => Array.from(new Set([...previous, ...visibleCategories])).sort((a, b) => a.localeCompare(b)));
     } catch (err) {
       console.error("Failed to fetch products", err);
     } finally {
@@ -256,11 +272,33 @@ export default function POSTerminalView({ basePath = "/dashboard" }: { basePath?
   }, []);
 
   useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
       fetchProducts(searchTerm, selectedCategory);
     }, 250);
     return () => clearTimeout(timer);
   }, [searchTerm, selectedCategory, fetchProducts]);
+
+  // Refresh the visible POS catalog when inventory/product events are committed.
+  // A slow fallback refresh covers missed events or a disconnected stream.
+  const handleCatalogRealtimeEvent = useCallback((event: { event_type: string }) => {
+    if (POS_CATALOG_EVENT_FILTER.includes(event.event_type)) {
+      fetchProducts(searchTerm, selectedCategory);
+      fetchCategories();
+    }
+  }, [fetchCategories, fetchProducts, searchTerm, selectedCategory]);
+  useRealtimeSubscription(handleCatalogRealtimeEvent, POS_CATALOG_EVENT_FILTER);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      fetchProducts(searchTerm, selectedCategory);
+      fetchCategories();
+    }, 30000);
+    return () => window.clearInterval(interval);
+  }, [fetchCategories, fetchProducts, searchTerm, selectedCategory]);
 
   // Recalculate Cart on changes
   useEffect(() => {

@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.pagination import StandardPagination
+from common.permissions import IsAdminOrManager
 
 from .models import CampaignAnalytics, CustomerAnalytics, DailySalesReport
 from .serializers import CampaignAnalyticsSerializer, CustomerAnalyticsSerializer, DailySalesReportSerializer
@@ -507,12 +508,16 @@ def compute_analytics(org):
 
 
 class DashboardView(APIView):
+    permission_classes = [IsAdminOrManager]
+
     def get(self, request):
         data = compute_analytics(request.user.organization)
         return Response(data)
 
 
 class RevenueTrendView(APIView):
+    permission_classes = [IsAdminOrManager]
+
     def get(self, request):
         data = compute_analytics(request.user.organization)
         return Response({
@@ -522,6 +527,8 @@ class RevenueTrendView(APIView):
 
 
 class CustomerGrowthView(APIView):
+    permission_classes = [IsAdminOrManager]
+
     def get(self, request):
         data = compute_analytics(request.user.organization)
         return Response({

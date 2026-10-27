@@ -101,6 +101,7 @@ class HeldCartSerializer(serializers.ModelSerializer):
 
 class POSProductSerializer(serializers.ModelSerializer):
     is_low_stock = serializers.BooleanField(read_only=True)
+    category_name = serializers.CharField(source="category.name", read_only=True, default="General")
 
     class Meta:
         model = Product
@@ -111,6 +112,7 @@ class POSProductSerializer(serializers.ModelSerializer):
             "barcode",
             "qr_code",
             "category",
+            "category_name",
             "brand",
             "description",
             "selling_price",

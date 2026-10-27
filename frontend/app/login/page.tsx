@@ -25,7 +25,15 @@ export default function LoginPage() {
       const res = await authApi.login({ email, password });
       localStorage.setItem("access_token", res.data.access);
       localStorage.setItem("refresh_token", res.data.refresh);
-      router.push("/dashboard");
+      // Route users directly to the workspace appropriate for their role.
+      try {
+        const profile = await authApi.getProfile();
+        const adminRoles = ["super_admin", "org_admin", "owner", "store_manager", "manager"];
+        router.replace(adminRoles.includes(profile.data?.role) ? "/dashboard" : "/staff/dashboard");
+      } catch {
+        // The destination workspace performs its own authenticated role check.
+        router.replace("/dashboard");
+      }
     } catch (err: unknown) {
       const errorMessage = parseApiError(err, "Invalid email or password. Please check your credentials.");
       setError(errorMessage);

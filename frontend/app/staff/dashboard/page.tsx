@@ -73,6 +73,9 @@ export default function StaffDashboardPage() {
 
   useEffect(() => {
     fetchOverview();
+    // Keep the staff view current even if a realtime event is missed.
+    const interval = window.setInterval(() => fetchOverview(true), 30000);
+    return () => window.clearInterval(interval);
   }, [fetchOverview]);
 
   // Realtime subscription: auto-refresh on transaction events
@@ -119,6 +122,7 @@ export default function StaffDashboardPage() {
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
+            {lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ` : ""}
             Store Context: <span className="font-semibold text-foreground">{data?.store?.name || "Main Store"}</span> &bull; Operator:{" "}
             <span className="font-semibold text-foreground">{data?.staff?.name || "Cashier"}</span>
           </p>

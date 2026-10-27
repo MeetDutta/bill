@@ -43,6 +43,12 @@ export function useRealtimeSubscription(
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastEventIdRef = useRef<string | null>(null);
 
+  const filterKey = (eventFilter || []).slice().sort().join(",");
+  const eventFilterRef = useRef(eventFilter);
+  useEffect(() => {
+    eventFilterRef.current = eventFilter;
+  }, [filterKey]);
+
   const onEventCallback = useRef(onEvent);
   useEffect(() => {
     onEventCallback.current = onEvent;
@@ -102,10 +108,11 @@ export function useRealtimeSubscription(
             lastEventIdRef.current = parsed.id;
           }
 
+          const currentFilter = eventFilterRef.current;
           if (
-            !eventFilter ||
-            eventFilter.length === 0 ||
-            eventFilter.includes(parsed.event_type)
+            !currentFilter ||
+            currentFilter.length === 0 ||
+            currentFilter.includes(parsed.event_type)
           ) {
             setLastEvent(parsed);
             if (onEventCallback.current) {
@@ -134,7 +141,7 @@ export function useRealtimeSubscription(
       setIsConnected(false);
       setConnectionError(err?.message || "Failed to initialize EventSource");
     }
-  }, [eventFilter]);
+  }, []);
 
   useEffect(() => {
     connect();

@@ -56,7 +56,8 @@ export default function DashboardPage() {
   const [, setEngagement] = useState<EngagementDashboard | null>(null);
   const [healthData, setHealthData] = useState<BusinessHealthData | null>(null);
   const [alerts, setAlerts] = useState<BusinessAlertItem[]>([]);
-  const [, setLastUpdated] = useState<Date>(new Date());
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [dashboardError, setDashboardError] = useState("");
   const [liveEventsCount, setLiveEventsCount] = useState(0);
 
   const fetchDashboard = useCallback(async (silent = false) => {
@@ -69,14 +70,19 @@ export default function DashboardPage() {
         intelligenceAnalyticsApi.getAlerts(),
       ]);
 
-      if (res.status === "fulfilled" && res.value.data) setData(res.value.data);
+      if (res.status === "fulfilled" && res.value.data) {
+        setData(res.value.data);
+        setDashboardError("");
+        setLastUpdated(new Date());
+      } else {
+        setDashboardError("Dashboard totals could not be refreshed. Showing the last available data; use Refresh to try again.");
+      }
       if (engagementRes.status === "fulfilled" && engagementRes.value.data) setEngagement(engagementRes.value.data);
       if (healthRes.status === "fulfilled" && healthRes.value.data) setHealthData(healthRes.value.data);
       if (alertsRes.status === "fulfilled" && alertsRes.value.data) {
         const raw = alertsRes.value.data;
         setAlerts(raw.alerts || raw || []);
       }
-      setLastUpdated(new Date());
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -85,6 +91,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchDashboard();
+    // Reconcile in case an SSE event was missed or the stream temporarily disconnects.
+    const interval = window.setInterval(() => fetchDashboard(true), 30000);
+    return () => window.clearInterval(interval);
   }, [fetchDashboard]);
 
   // Real-time SSE Live Event Handling
@@ -223,7 +232,7 @@ export default function DashboardPage() {
                 }`}
               ></span>
             </span>
-            <span className="text-[11px] font-bold">{isConnected ? "Live Sync" : "Connecting..."}</span>
+            <span className="text-[11px] font-bold">{isConnected ? "Live updates" : "Refresh fallback"}</span>
             {liveEventsCount > 0 && (
               <Badge variant="secondary" className="h-4 px-1 text-[9px] font-mono">
                 {liveEventsCount}
@@ -231,6 +240,11 @@ export default function DashboardPage() {
             )}
           </div>
 
+          {lastUpdated && (
+            <span className="hidden md:inline text-[10px] text-muted-foreground whitespace-nowrap">
+              Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -243,6 +257,41 @@ export default function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      {/* Quick Action Operations Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 pb-1">
+        <Link href="/pos">
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 font-bold shadow-xs">
+            <Receipt className="h-4 w-4" /> + New POS Sale
+          </Button>
+        </Link>
+        <Link href="/dashboard/inventory">
+          <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
+            <Boxes className="h-4 w-4" /> Manage Inventory
+          </Button>
+        </Link>
+        <Link href="/dashboard/invoices">
+          <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
+            <Receipt className="h-4 w-4" /> Invoices & Bills
+          </Button>
+        </Link>
+        <Link href="/dashboard/quotations">
+          <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
+            <Clock className="h-4 w-4" /> Quotations
+          </Button>
+        </Link>
+        <Link href="/dashboard/reports">
+          <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
+            <TrendingUp className="h-4 w-4" /> Financial Reports
+          </Button>
+        </Link>
+      </div>
+
+      {dashboardError && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300" role="status" aria-live="polite">
+          {dashboardError}
+        </div>
+      )}
 
       {/* Smart Business Alerts Banner */}
       {alerts && alerts.filter((a) => !a.is_dismissed).length > 0 && (
@@ -1110,80 +1159,48 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* 14-Day Charts */}
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
-        <Card className="flex flex-col shadow-xs">
+      {/* Customer Growth & Retention Overview */}
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-12">
+        <Card className="md:col-span-4 flex flex-col shadow-xs">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-bold">14-Day Revenue Trajectory</CardTitle>
+            <CardTitle className="text-sm font-bold flex items-center gap-2">
+              <Activity className="h-4 w-4 text-emerald-600" />
+              Customer Base & Retention
+            </CardTitle>
             <CardDescription className="text-xs">
-              Daily revenue trend across all store counters
+              Client acquisition and retention health
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex-1 pb-4">
-            {hasRevenueData && data?.revenue_trend ? (
-              <div className="h-56 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={data.revenue_trend}
-                    margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                  >
-                    <defs>
-                      <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#16a34a" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#16a34a" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis
-                      dataKey="formatted_date"
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 10 }}
-                    />
-                    <YAxis
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 10 }}
-                      tickFormatter={(val) =>
-                        `₹${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`
-                      }
-                    />
-                    <Tooltip
-                      formatter={(val: number) => [formatCurrency(val), "Revenue"]}
-                      labelFormatter={(label) => `Date: ${label}`}
-                      contentStyle={{
-                        backgroundColor: "#ffffff",
-                        borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
-                        fontSize: "12px",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="revenue"
-                      stroke="#16a34a"
-                      strokeWidth={2}
-                      fillOpacity={1}
-                      fill="url(#revenueGradient)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+          <CardContent className="flex-1 space-y-3">
+            <div className="rounded-lg border p-3 bg-muted/20">
+              <span className="text-[10px] uppercase font-semibold text-muted-foreground">Total Registered Customers</span>
+              <div className="text-2xl font-black text-foreground mt-0.5">
+                {(data?.total_customers || 0).toLocaleString()}
               </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-56 text-center p-6 text-muted-foreground">
-                <Receipt className="h-8 w-8 mb-2 opacity-30 stroke-1" />
-                <p className="text-xs font-semibold text-foreground">
-                  No revenue data available yet.
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
-                  Committed POS checkouts will populate your revenue trend curve.
-                </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Active directory across all store counters</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg border p-2.5 bg-background">
+                <span className="text-[10px] font-semibold text-muted-foreground">Retention Rate</span>
+                <p className="text-base font-bold text-emerald-600 mt-0.5">{healthData?.customer_retention || 0}%</p>
+                <span className="text-[9px] text-muted-foreground">Repeat buyers</span>
               </div>
-            )}
+              <div className="rounded-lg border p-2.5 bg-background">
+                <span className="text-[10px] font-semibold text-muted-foreground">Loyalty Score</span>
+                <p className="text-base font-bold text-foreground mt-0.5">{healthData?.customer_loyalty || 0}%</p>
+                <span className="text-[9px] text-muted-foreground">Engagement rank</span>
+              </div>
+            </div>
+            <Link href="/dashboard/customers" className="block pt-1">
+              <Button variant="outline" size="sm" className="w-full text-xs font-semibold justify-between">
+                <span>View Full Customer Directory</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
           </CardContent>
         </Card>
 
-        <Card className="flex flex-col shadow-xs">
+        <Card className="md:col-span-8 flex flex-col shadow-xs">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-bold">Customer Growth Curve</CardTitle>
             <CardDescription className="text-xs">

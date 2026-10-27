@@ -494,10 +494,12 @@ export interface POSProduct {
   barcode: string;
   qr_code?: string;
   category?: string;
+  category_name?: string;
   brand?: string;
   description?: string;
   selling_price: string | number;
   purchase_price: string | number;
+  cost_price?: string | number;
   mrp?: string | number | null;
   tax_rate: string | number;
   hsn_code?: string;

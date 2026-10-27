@@ -12,10 +12,29 @@ class ProductCategoryListView(generics.ListCreateAPIView):
     search_fields = ["name"]
 
     def get_queryset(self):
-        return ProductCategory.objects.filter(organization=self.request.user.organization)
+        qs = ProductCategory.objects.filter(organization=self.request.user.organization)
+        active_only = self.request.query_params.get("active_only")
+        if active_only and active_only.lower() in ("true", "1"):
+            qs = qs.filter(is_active=True)
+        return qs.order_by("name")
+
+    @property
+    def paginator(self):
+        if self.request.query_params.get("all") in ("true", "1", "yes"):
+            return None
+        return super().paginator
 
     def perform_create(self, serializer):
-        serializer.save(organization=self.request.user.organization)
+        category = serializer.save(organization=self.request.user.organization)
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=category.organization,
+                event_type="category_created",
+                payload={"category_id": str(category.id), "name": category.name},
+            )
+        except Exception:
+            pass
 
 
 class ProductListView(generics.ListCreateAPIView):
@@ -24,7 +43,7 @@ class ProductListView(generics.ListCreateAPIView):
     filterset_fields = ["category", "is_active"]
 
     def get_queryset(self):
-        return Product.objects.filter(organization=self.request.user.organization)
+        return Product.objects.filter(organization=self.request.user.organization).order_by("name")
 
     def get_serializer_class(self):
         if self.request.method == "GET":
@@ -32,7 +51,16 @@ class ProductListView(generics.ListCreateAPIView):
         return ProductSerializer
 
     def perform_create(self, serializer):
-        serializer.save(organization=self.request.user.organization)
+        product = serializer.save(organization=self.request.user.organization)
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=product.organization,
+                event_type="product_created",
+                payload={"product_id": str(product.id), "name": product.name},
+            )
+        except Exception:
+            pass
 
 
 class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -40,6 +68,33 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Product.objects.filter(organization=self.request.user.organization)
+
+    def perform_update(self, serializer):
+        product = serializer.save()
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=product.organization,
+                event_type="product_updated",
+                payload={"product_id": str(product.id), "name": product.name},
+            )
+        except Exception:
+            pass
+
+    def perform_destroy(self, instance):
+        org = instance.organization
+        prod_id = str(instance.id)
+        prod_name = instance.name
+        instance.delete()
+        try:
+            from apps.billing.services.realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=org,
+                event_type="product_deleted",
+                payload={"product_id": prod_id, "name": prod_name},
+            )
+        except Exception:
+            pass
 
 
 class SupplierListView(generics.ListCreateAPIView):

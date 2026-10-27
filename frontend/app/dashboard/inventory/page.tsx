@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { posApi } from "@/services/api";
+import { posApi, productApi } from "@/services/api";
 import type { POSProduct } from "@/types";
 import {
   Boxes,
@@ -13,6 +13,7 @@ import {
   Filter,
   ArrowUpRight,
   PlusCircle,
+  Pencil,
   Tag,
   CheckCircle2,
 } from "lucide-react";
@@ -21,9 +22,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useRealtimeSubscription } from "@/services/realtime";
 
 export default function CurrentStockPage() {
   const [products, setProducts] = useState<POSProduct[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [creatingCategory, setCreatingCategory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
@@ -37,6 +43,25 @@ export default function CurrentStockPage() {
     notes: "",
   });
   const [submittingAdjust, setSubmittingAdjust] = useState(false);
+
+  // Edit Product Modal
+  const [editProductModalOpen, setEditProductModalOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<{
+    id: string;
+    name: string;
+    sku: string;
+    barcode: string;
+    category: string;
+    unit: string;
+    selling_price: string;
+    purchase_price: string;
+    min_stock: string;
+    tax_rate: string;
+    hsn_code: string;
+    is_active: boolean;
+  } | null>(null);
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [editProductError, setEditProductError] = useState("");
 
   // Add Product Modal
   const [addProductModalOpen, setAddProductModalOpen] = useState(false);
@@ -59,9 +84,14 @@ export default function CurrentStockPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const prodRes = await posApi.searchProducts({ page_size: 100 });
+      const [prodRes, categoryRes] = await Promise.all([
+        posApi.searchProducts({ page_size: 200 }),
+        productApi.listCategories({ all: true }),
+      ]);
       const prodList = Array.isArray(prodRes.data) ? prodRes.data : (prodRes.data as any)?.results || [];
+      const categoryData = Array.isArray(categoryRes.data) ? categoryRes.data : (categoryRes.data as any)?.results || [];
       setProducts(prodList);
+      setCategories(categoryData.filter((c: any) => c.is_active !== false).map((c: any) => ({ id: c.id, name: c.name })));
     } catch (err) {
       console.error("Failed to load inventory products", err);
     } finally {
@@ -72,6 +102,13 @@ export default function CurrentStockPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useRealtimeSubscription(
+    () => {
+      loadData();
+    },
+    ["product_created", "product_updated", "product_deleted", "stock_adjusted", "sale_completed", "return_completed", "purchase_received"]
+  );
 
   const handleAdjustStock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,6 +131,91 @@ export default function CurrentStockPage() {
     }
   };
 
+  const handleCreateCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    if (categories.some((category) => category.name.toLowerCase() === name.toLowerCase())) {
+      setProductError("That category already exists.");
+      setEditProductError("That category already exists.");
+      return;
+    }
+    setCreatingCategory(true);
+    setProductError("");
+    setEditProductError("");
+    try {
+      const response = await productApi.createCategory({ name });
+      const created = response.data as { id: string; name: string };
+      setCategories((previous) => [...previous, created].sort((a, b) => a.name.localeCompare(b.name)));
+      if (editProductModalOpen) {
+        setEditingProduct((previous) => (previous ? { ...previous, category: created.name } : null));
+      } else {
+        setNewProduct((previous) => ({ ...previous, category: created.name }));
+      }
+      setNewCategoryName("");
+      setShowNewCategory(false);
+    } catch (err: any) {
+      const errDetail = err.response?.data?.name?.[0] || err.response?.data?.detail || "Could not create category. Please try again.";
+      setProductError(errDetail);
+      setEditProductError(errDetail);
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
+  const handleOpenEditProduct = (prod: POSProduct) => {
+    const catVal = (prod as any).category_name || (prod as any).category || "General";
+    setEditingProduct({
+      id: prod.id,
+      name: prod.name || "",
+      sku: prod.sku || "",
+      barcode: prod.barcode || "",
+      category: typeof catVal === "string" ? catVal : (catVal?.name || "General"),
+      unit: prod.unit || "PCS",
+      selling_price: String((prod as any).selling_price ?? (prod as any).price ?? ""),
+      purchase_price: String((prod as any).purchase_price ?? (prod as any).cost_price ?? ""),
+      min_stock: String((prod as any).min_stock ?? (prod as any).reorder_level ?? "5"),
+      tax_rate: String(prod.tax_rate ?? "18"),
+      hsn_code: prod.hsn_code || "",
+      is_active: prod.is_active !== false,
+    });
+    setEditProductError("");
+    setEditProductModalOpen(true);
+  };
+
+  const handleUpdateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+    if (!editingProduct.name.trim()) {
+      setEditProductError("Product name is required.");
+      return;
+    }
+    setSubmittingEdit(true);
+    setEditProductError("");
+    try {
+      await productApi.update(editingProduct.id, {
+        name: editingProduct.name.trim(),
+        sku: editingProduct.sku.trim() || undefined,
+        barcode: editingProduct.barcode.trim() || undefined,
+        category: editingProduct.category || "General",
+        unit: editingProduct.unit || "PCS",
+        selling_price: parseFloat(editingProduct.selling_price) || 0,
+        purchase_price: parseFloat(editingProduct.purchase_price) || 0,
+        unit_price: parseFloat(editingProduct.selling_price) || 0,
+        min_stock: Number.isFinite(Number(editingProduct.min_stock)) ? Number(editingProduct.min_stock) : 5,
+        tax_rate: Number.isFinite(Number(editingProduct.tax_rate)) ? Number(editingProduct.tax_rate) : 18,
+        hsn_code: editingProduct.hsn_code.trim() || undefined,
+        is_active: editingProduct.is_active,
+      } as any);
+      setEditProductModalOpen(false);
+      setEditingProduct(null);
+      loadData();
+    } catch (err: any) {
+      setEditProductError(err.response?.data?.error || err.response?.data?.detail || "Failed to update product.");
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProduct.name.trim()) {
@@ -111,9 +233,10 @@ export default function CurrentStockPage() {
         unit: newProduct.unit || "PCS",
         selling_price: parseFloat(newProduct.selling_price) || 0,
         purchase_price: parseFloat(newProduct.purchase_price) || 0,
-        current_stock: parseFloat(newProduct.current_stock) || 0,
-        min_stock: parseFloat(newProduct.min_stock) || 5,
-        tax_rate: parseFloat(newProduct.tax_rate) || 18,
+        // The quick-create API accepts opening_stock; current_stock is read-only state.
+        opening_stock: Number.isFinite(Number(newProduct.current_stock)) ? Number(newProduct.current_stock) : 0,
+        min_stock: Number.isFinite(Number(newProduct.min_stock)) ? Number(newProduct.min_stock) : 5,
+        tax_rate: Number.isFinite(Number(newProduct.tax_rate)) ? Number(newProduct.tax_rate) : 18,
         hsn_code: newProduct.hsn_code.trim() || undefined,
       };
 
@@ -365,6 +488,15 @@ export default function CurrentStockPage() {
                               variant="outline"
                               size="sm"
                               className="h-8 text-xs gap-1"
+                              onClick={() => handleOpenEditProduct(prod)}
+                              title="Edit Product Details & Category"
+                            >
+                              <Pencil className="w-3.5 h-3.5 text-amber-600" /> Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs gap-1"
                               onClick={() => {
                                 setSelectedProduct(prod);
                                 setAdjustmentData({ movement_type: "ADJUSTMENT", quantity: "", notes: "" });
@@ -504,11 +636,24 @@ export default function CurrentStockPage() {
 
               <div>
                 <label className="font-semibold block mb-1">Category</label>
-                <Input
-                  placeholder="e.g. Hardware, Apparel, Groceries"
-                  value={newProduct.category}
-                  onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
-                />
+                <div className="flex gap-2">
+                  <select
+                    value={newProduct.category}
+                    onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
+                    className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-xs focus:ring-2 focus:ring-primary/20"
+                  >
+                    {!categories.some((category) => category.name === newProduct.category) && newProduct.category && <option value={newProduct.category}>{newProduct.category}</option>}
+                    {categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}
+                    {!categories.length && <option value="General">General</option>}
+                  </select>
+                  <Button type="button" variant="outline" size="sm" onClick={() => { setShowNewCategory((open) => !open); setProductError(""); }}>
+                    <PlusCircle className="h-3.5 w-3.5 mr-1" /> Add
+                  </Button>
+                </div>
+                {showNewCategory && <div className="flex gap-2 mt-2">
+                  <Input aria-label="New category name" placeholder="New category name" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} maxLength={255} />
+                  <Button type="button" size="sm" disabled={creatingCategory || !newCategoryName.trim()} onClick={handleCreateCategory}>{creatingCategory ? "Adding…" : "Save"}</Button>
+                </div>}
               </div>
 
               <div>
@@ -613,6 +758,209 @@ export default function CurrentStockPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Edit Product Modal */}
+      {editProductModalOpen && editingProduct && (
+        <Dialog open={editProductModalOpen} onOpenChange={setEditProductModalOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+                <Pencil className="h-5 w-5 text-amber-600" />
+                Edit Product: {editingProduct.name}
+              </DialogTitle>
+            </DialogHeader>
+
+            <form onSubmit={handleUpdateProduct} className="space-y-4 py-2 text-xs">
+              {editProductError && (
+                <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-destructive font-medium">
+                  {editProductError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="font-semibold block mb-1">Product / Item Name *</label>
+                  <Input
+                    required
+                    placeholder="Product Name"
+                    value={editingProduct.name}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">SKU / Item Code</label>
+                  <Input
+                    placeholder="SKU"
+                    value={editingProduct.sku}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, sku: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Barcode / EAN</label>
+                  <Input
+                    placeholder="Barcode"
+                    value={editingProduct.barcode}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, barcode: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Category</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={editingProduct.category}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value })}
+                      className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-xs focus:ring-2 focus:ring-primary/20"
+                    >
+                      {!categories.some((c) => c.name === editingProduct.category) && editingProduct.category && (
+                        <option value={editingProduct.category}>{editingProduct.category}</option>
+                      )}
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                      {!categories.length && <option value="General">General</option>}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setShowNewCategory((open) => !open);
+                        setEditProductError("");
+                      }}
+                    >
+                      <PlusCircle className="h-3.5 w-3.5 mr-1" /> Add
+                    </Button>
+                  </div>
+                  {showNewCategory && (
+                    <div className="flex gap-2 mt-2">
+                      <Input
+                        aria-label="New category name"
+                        placeholder="New category name"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        maxLength={255}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={creatingCategory || !newCategoryName.trim()}
+                        onClick={handleCreateCategory}
+                      >
+                        {creatingCategory ? "Adding…" : "Save"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Unit of Measurement</label>
+                  <select
+                    value={editingProduct.unit}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, unit: e.target.value })}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="PCS">PCS (Pieces)</option>
+                    <option value="KG">KG (Kilograms)</option>
+                    <option value="GM">GM (Grams)</option>
+                    <option value="MTR">MTR (Meters)</option>
+                    <option value="LTR">LTR (Liters)</option>
+                    <option value="BOX">BOX (Boxes)</option>
+                    <option value="SET">SET (Sets)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Purchase / Cost Price (₹)</label>
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="0.00"
+                    value={editingProduct.purchase_price}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, purchase_price: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Selling Price (₹) *</label>
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    required
+                    placeholder="0.00"
+                    value={editingProduct.selling_price}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, selling_price: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Reorder Threshold (Min Stock)</label>
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="5"
+                    value={editingProduct.min_stock}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, min_stock: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">GST Tax Rate (%)</label>
+                  <select
+                    value={editingProduct.tax_rate}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, tax_rate: e.target.value })}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-xs focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="0">0% (Exempt)</option>
+                    <option value="5">5% (Essential)</option>
+                    <option value="12">12% (Standard)</option>
+                    <option value="18">18% (Standard GST)</option>
+                    <option value="28">28% (Luxury / High)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">HSN / SAC Code</label>
+                  <Input
+                    placeholder="e.g. 6205, 8471"
+                    value={editingProduct.hsn_code}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, hsn_code: e.target.value })}
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    id="edit_is_active"
+                    checked={editingProduct.is_active}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, is_active: e.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300 text-primary"
+                  />
+                  <label htmlFor="edit_is_active" className="font-semibold cursor-pointer">
+                    Product is active and available in catalog & POS
+                  </label>
+                </div>
+              </div>
+
+              <DialogFooter className="pt-3 border-t">
+                <Button type="button" variant="outline" onClick={() => setEditProductModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submittingEdit} className="bg-amber-600 hover:bg-amber-700 text-white font-semibold">
+                  {submittingEdit ? "Updating..." : "Save Product Changes"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

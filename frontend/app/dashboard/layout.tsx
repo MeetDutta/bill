@@ -2,16 +2,14 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   ShoppingCart,
   FileText,
   FileCheck,
-  Receipt,
   RotateCcw,
-  Tag,
   Boxes,
   SlidersHorizontal,
   Truck,
@@ -41,6 +39,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { CopilotDrawer } from "@/components/CopilotDrawer";
+import { authApi } from "@/services/api";
 
 interface NavItem {
   name: string;
@@ -57,15 +56,13 @@ interface NavSection {
 
 const navSections: NavSection[] = [
   {
-    title: "DASHBOARD",
-    key: "dashboard",
-    items: [
-      { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    ],
+    title: "OVERVIEW",
+    key: "overview",
+    items: [{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard }],
   },
   {
-    title: "SALES",
-    key: "sales",
+    title: "SELL",
+    key: "sell",
     items: [
       { name: "POS Terminal", href: "/dashboard/pos", icon: ShoppingCart },
       { name: "Invoices", href: "/dashboard/invoices", icon: FileText },
@@ -74,21 +71,15 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: "PURCHASING",
-    key: "purchasing",
-    items: [
-      { name: "Purchase Orders", href: "/dashboard/purchases", icon: ClipboardList },
-      { name: "Purchase History", href: "/dashboard/purchases/history", icon: History },
-      { name: "Suppliers", href: "/dashboard/suppliers", icon: Truck },
-    ],
-  },
-  {
-    title: "INVENTORY",
-    key: "inventory",
+    title: "STOCK & SUPPLIERS",
+    key: "stock",
     items: [
       { name: "Current Stock", href: "/dashboard/inventory", icon: Boxes },
       { name: "Stock Movements", href: "/dashboard/inventory/movements", icon: History },
       { name: "Stock Adjustments", href: "/dashboard/inventory/adjustments", icon: SlidersHorizontal },
+      { name: "Purchase Orders", href: "/dashboard/purchases", icon: ClipboardList },
+      { name: "Purchase History", href: "/dashboard/purchases/history", icon: History },
+      { name: "Suppliers", href: "/dashboard/suppliers", icon: Truck },
     ],
   },
   {
@@ -101,19 +92,13 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: "FINANCE",
-    key: "finance",
+    title: "MONEY & REPORTS",
+    key: "money",
     items: [
       { name: "Payment Ledger", href: "/dashboard/finance/payments", icon: CreditCard },
       { name: "Receivables (Udhaar)", href: "/dashboard/finance/receivables", icon: AlertCircle },
       { name: "Payables", href: "/dashboard/finance/payables", icon: FileSpreadsheet },
       { name: "Cash Register", href: "/dashboard/register", icon: Landmark },
-    ],
-  },
-  {
-    title: "REPORTS",
-    key: "reports",
-    items: [
       { name: "Sales Report", href: "/dashboard/reports/sales", icon: TrendingUp },
       { name: "POS / Register Report", href: "/dashboard/reports/pos", icon: FileSpreadsheet },
       { name: "Daily Business Closing", href: "/dashboard/reports/daily-closing", icon: CalendarCheck },
@@ -121,18 +106,12 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: "GROWTH",
-    key: "growth",
+    title: "MANAGE",
+    key: "manage",
     items: [
       { name: "Coupons", href: "/dashboard/coupons", icon: Ticket },
       { name: "Campaigns", href: "/dashboard/campaigns", icon: Megaphone },
       { name: "AI Assistant", href: "/dashboard/ai-campaigns", icon: Sparkles },
-    ],
-  },
-  {
-    title: "ADMINISTRATION",
-    key: "administration",
-    items: [
       { name: "Staff Management", href: "/dashboard/staff", icon: Users },
       { name: "Stores", href: "/dashboard/stores", icon: Store },
       { name: "System Health", href: "/dashboard/health", icon: Activity },
@@ -147,7 +126,38 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [authChecking, setAuthChecking] = useState(true);
   const [currentTab, setCurrentTab] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const authorizeWorkspace = async () => {
+      const token = localStorage.getItem("access_token");
+      if (!token) {
+        router.replace("/login");
+        return;
+      }
+      try {
+        const response = await authApi.getProfile();
+        const role = response.data?.role;
+        const adminRoles = ["super_admin", "org_admin", "owner", "store_manager", "manager"];
+        if (!adminRoles.includes(role)) {
+          router.replace("/staff/dashboard");
+          return;
+        }
+      } catch {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        router.replace("/login");
+        return;
+      } finally {
+        if (active) setAuthChecking(false);
+      }
+    };
+    authorizeWorkspace();
+    return () => { active = false; };
+  }, [router]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -237,6 +247,17 @@ export default function DashboardLayout({
   }, [isItemActive]);
 
   const closeMobile = () => setMobileOpen(false);
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <div className="flex items-center gap-3 text-sm text-muted-foreground" role="status" aria-live="polite">
+          <span className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          Checking workspace access…
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -377,7 +398,7 @@ export default function DashboardLayout({
             </button>
             <div className="flex items-center gap-2">
               <span className="text-xs uppercase font-semibold text-muted-foreground tracking-wider hidden sm:inline">
-                BillFree /
+                BillMeet /
               </span>
               <h2 className="text-base md:text-lg font-bold text-foreground">
                 {activePageTitle}

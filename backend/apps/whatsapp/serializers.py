@@ -16,7 +16,8 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at", "organization"]
         extra_kwargs = {
-            "access_token": {"write_only": True, "required": False},
+            "access_token": {"write_only": True, "required": False, "allow_blank": True},
+            "webhook_verify_token": {"required": False, "allow_blank": True},
         }
 
     def get_has_access_token(self, obj):
@@ -26,6 +27,14 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
         if obj.access_token:
             return "••••" + obj.access_token[-4:] if len(obj.access_token) >= 4 else "••••"
         return ""
+
+    def update(self, instance, validated_data):
+        # Preserve existing access_token if empty string, whitespace, or not provided
+        if "access_token" in validated_data and not validated_data["access_token"].strip():
+            validated_data.pop("access_token")
+        if "webhook_verify_token" in validated_data and not validated_data["webhook_verify_token"].strip():
+            validated_data.pop("webhook_verify_token")
+        return super().update(instance, validated_data)
 
 
 class WhatsAppTemplateSerializer(serializers.ModelSerializer):

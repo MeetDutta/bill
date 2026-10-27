@@ -25,6 +25,9 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [savingPos, setSavingPos] = useState(false);
   const [savingWhatsApp, setSavingWhatsApp] = useState(false);
+  const [testingWhatsApp, setTestingWhatsApp] = useState(false);
+  const [hasSavedWhatsAppToken, setHasSavedWhatsAppToken] = useState(false);
+  const [whatsappTest, setWhatsappTest] = useState<{ connected: boolean; checked_at: string; message: string; phone_number?: string; verified_name?: string } | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -66,10 +69,11 @@ export default function SettingsPage() {
         ]);
 
         if (waRes.data) {
+          setHasSavedWhatsAppToken(Boolean(waRes.data.has_access_token));
           setWhatsappData({
             business_account_id: waRes.data.business_account_id || "",
             phone_number_id: waRes.data.phone_number_id || "",
-            access_token: waRes.data.access_token || "",
+            access_token: "",
             is_active: waRes.data.is_active ?? true,
           });
         }
@@ -105,6 +109,23 @@ export default function SettingsPage() {
     }
   };
 
+  const handleTestWhatsApp = async () => {
+    setTestingWhatsApp(true);
+    setWhatsappTest(null);
+    try {
+      const response = await whatsappApi.testConnection();
+      setWhatsappTest(response.data);
+    } catch (err: any) {
+      setWhatsappTest({
+        connected: false,
+        checked_at: new Date().toISOString(),
+        message: parseApiError(err, "Connection test failed. Check the server and try again."),
+      });
+    } finally {
+      setTestingWhatsApp(false);
+    }
+  };
+
   const handleSaveWhatsApp = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingWhatsApp(true);
@@ -112,7 +133,13 @@ export default function SettingsPage() {
     setError("");
 
     try {
-      await whatsappApi.updateConfig(whatsappData);
+      const updatePayload = { ...whatsappData } as Record<string, unknown>;
+      if (!whatsappData.access_token.trim() && hasSavedWhatsAppToken) {
+        delete updatePayload.access_token;
+      }
+      await whatsappApi.updateConfig(updatePayload);
+      if (whatsappData.access_token.trim()) setHasSavedWhatsAppToken(true);
+      setWhatsappData((previous) => ({ ...previous, access_token: "" }));
       setMessage("WhatsApp API configuration updated successfully!");
     } catch (err: any) {
       setError(parseApiError(err, "Failed to update WhatsApp configuration."));
@@ -437,7 +464,78 @@ export default function SettingsPage() {
                 onChange={(e) => setWhatsappData({ ...whatsappData, access_token: e.target.value })}
                 className="text-xs font-mono"
               />
-              <p className="text-[11px] text-muted-foreground">Meta System User Access Token with `whatsapp_business_messaging` permission.</p>
+              <p className="text-[11px] text-muted-foreground">Meta System User Access Token with `whatsapp_business_messaging` permission. {hasSavedWhatsAppToken ? "A token is already saved; leave blank to keep it." : ""}</p>
+            </div>
+
+            <div className="rounded-lg border p-4 space-y-3 bg-muted/20">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-sm">WhatsApp Cloud API Status</p>
+                    {testingWhatsApp ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                        <span className="animate-spin mr-1">◌</span> Checking
+                      </span>
+                    ) : whatsappTest?.connected ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        <CheckCircle className="w-3.5 h-3.5 mr-1" /> Connected
+                      </span>
+                    ) : whatsappTest && !whatsappTest.connected ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-destructive/15 text-destructive">
+                        Failed
+                      </span>
+                    ) : !whatsappData.phone_number_id && !hasSavedWhatsAppToken ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-muted text-muted-foreground">
+                        Not configured
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
+                        Configured (Untested)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Validates credentials against your Meta WhatsApp Business number without sending customer messages.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestWhatsApp}
+                  disabled={testingWhatsApp || (!whatsappData.phone_number_id && !hasSavedWhatsAppToken)}
+                  className="gap-1.5"
+                >
+                  {testingWhatsApp ? <span className="animate-spin">◌</span> : <MessageSquare className="h-3.5 w-3.5" />}
+                  {testingWhatsApp ? "Testing connection…" : "Test connection"}
+                </Button>
+              </div>
+
+              {whatsappTest && (
+                <div
+                  className={`rounded-md p-3 text-xs border ${
+                    whatsappTest.connected
+                      ? "bg-green-50/80 border-green-200 text-green-900 dark:bg-green-950/30 dark:border-green-800 dark:text-green-300"
+                      : "bg-red-50/80 border-red-200 text-red-900 dark:bg-red-950/30 dark:border-red-800 dark:text-red-300"
+                  }`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <p className="font-semibold">
+                    {whatsappTest.connected ? "✓ Meta Cloud API Connected & Verified" : "✕ Meta Cloud API Diagnostic Failed"}
+                  </p>
+                  <p className="mt-1">{whatsappTest.message}</p>
+                  {whatsappTest.connected && (whatsappTest.verified_name || whatsappTest.phone_number) && (
+                    <p className="mt-1 font-mono text-[11px]">
+                      Registered Line: {[whatsappTest.verified_name, whatsappTest.phone_number].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-current/10 text-[11px] opacity-80">
+                    <span>Last checked: {new Date(whatsappTest.checked_at).toLocaleString()}</span>
+                    <span>{whatsappTest.connected ? "API auth verified (delivery depends on customer opt-in)" : "Action: Check token permissions or Phone ID"}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between pt-2">

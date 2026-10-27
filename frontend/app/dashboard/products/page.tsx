@@ -29,7 +29,10 @@ import {
   ArrowRight,
   ShieldCheck,
   CheckCircle,
+  Pencil,
+  PlusCircle,
 } from "lucide-react";
+import { useRealtimeSubscription } from "@/services/realtime";
 
 export default function ProductsPage() {
   const [activeTab, setActiveTab] = useState<"catalog" | "intelligence" | "bundles">("catalog");
@@ -48,13 +51,45 @@ export default function ProductsPage() {
   const [bundles, setBundles] = useState<ProductBundleItem[]>([]);
   const [approvedBundles, setApprovedBundles] = useState<Record<string, boolean>>({});
 
+  // Categories
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [creatingCategory, setCreatingCategory] = useState(false);
+
+  // Edit Product Dialog
+  const [editOpen, setEditOpen] = useState(false);
+  const [editProduct, setEditProduct] = useState<{
+    id: string;
+    name: string;
+    sku: string;
+    external_id: string;
+    category: string;
+    unit_price: string;
+    tax_rate: string;
+    is_active: boolean;
+  } | null>(null);
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+
   const [formData, setFormData] = useState({
     name: "",
     sku: "",
     external_id: "",
+    category: "General",
     unit_price: "",
     tax_rate: "18.00",
   });
+
+  const fetchCategories = async () => {
+    try {
+      const res = await productApi.listCategories({ all: true });
+      const catList = Array.isArray(res.data) ? res.data : (res.data as any)?.results || [];
+      setCategories(catList.filter((c: any) => c.is_active !== false).map((c: any) => ({ id: c.id, name: c.name })));
+    } catch {
+      // Fallback
+    }
+  };
 
   const fetchProducts = async () => {
     try {
@@ -66,6 +101,10 @@ export default function ProductsPage() {
       setLoading(false);
     }
   };
+
+  useRealtimeSubscription(() => {
+    fetchProducts();
+  }, ["product_created", "product_updated", "product_deleted"]);
 
   const fetchIntelligence = async () => {
     setIntelLoading(true);
@@ -93,13 +132,39 @@ export default function ProductsPage() {
 
   useEffect(() => {
     fetchProducts();
+    fetchCategories();
   }, []);
 
-  useEffect(() => {
-    if (activeTab === "intelligence" || activeTab === "bundles") {
-      fetchIntelligence();
+  const handleCreateCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    if (categories.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      setError("Category already exists.");
+      setEditError("Category already exists.");
+      return;
     }
-  }, [activeTab]);
+    setCreatingCategory(true);
+    setError("");
+    setEditError("");
+    try {
+      const res = await productApi.createCategory({ name });
+      const created = res.data as { id: string; name: string };
+      setCategories((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      if (editOpen) {
+        setEditProduct((prev) => (prev ? { ...prev, category: created.name } : null));
+      } else {
+        setFormData((prev) => ({ ...prev, category: created.name }));
+      }
+      setNewCategoryName("");
+      setShowNewCategory(false);
+    } catch (err: any) {
+      const detail = err.response?.data?.name?.[0] || err.response?.data?.detail || "Could not create category.";
+      setError(detail);
+      setEditError(detail);
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +181,7 @@ export default function ProductsPage() {
         name: formData.name.trim(),
         sku: formData.sku.trim() || `SKU-${Date.now().toString().slice(-6)}`,
         external_id: formData.external_id.trim() || `P-${Date.now().toString().slice(-6)}`,
+        category: formData.category || "General",
         unit_price: Number(formData.unit_price),
         tax_rate: Number(formData.tax_rate || 0),
         is_active: true,
@@ -126,6 +192,7 @@ export default function ProductsPage() {
         name: "",
         sku: "",
         external_id: "",
+        category: "General",
         unit_price: "",
         tax_rate: "18.00",
       });
@@ -134,6 +201,50 @@ export default function ProductsPage() {
       setError(parseApiError(err, "Failed to create product. Please check input values."));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleOpenEdit = (p: Product) => {
+    const catVal = (p as any).category_name || (p as any).category;
+    setEditProduct({
+      id: p.id,
+      name: p.name || "",
+      sku: p.sku || "",
+      external_id: p.external_id || "",
+      category: typeof catVal === "string" ? catVal : (catVal?.name || "General"),
+      unit_price: String(p.unit_price || ""),
+      tax_rate: String(p.tax_rate ?? "18.00"),
+      is_active: p.is_active !== false,
+    });
+    setEditError("");
+    setEditOpen(true);
+  };
+
+  const handleUpdateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editProduct || !editProduct.name.trim() || !editProduct.unit_price) {
+      setEditError("Product Name and Unit Price are required.");
+      return;
+    }
+    setSubmittingEdit(true);
+    setEditError("");
+    try {
+      await productApi.update(editProduct.id, {
+        name: editProduct.name.trim(),
+        sku: editProduct.sku.trim() || undefined,
+        external_id: editProduct.external_id.trim() || undefined,
+        category: editProduct.category || "General",
+        unit_price: Number(editProduct.unit_price),
+        tax_rate: Number(editProduct.tax_rate || 0),
+        is_active: editProduct.is_active,
+      } as any);
+      setEditOpen(false);
+      setEditProduct(null);
+      await fetchProducts();
+    } catch (err: unknown) {
+      setEditError(parseApiError(err, "Failed to update product."));
+    } finally {
+      setSubmittingEdit(false);
     }
   };
 
@@ -211,6 +322,56 @@ export default function ProductsPage() {
                       onChange={(e) => setFormData({ ...formData, external_id: e.target.value })}
                     />
                   </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Category</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={formData.category}
+                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-xs"
+                    >
+                      {!categories.some((c) => c.name === formData.category) && formData.category && (
+                        <option value={formData.category}>{formData.category}</option>
+                      )}
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                      {!categories.length && <option value="General">General</option>}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setShowNewCategory((open) => !open);
+                        setError("");
+                      }}
+                    >
+                      <PlusCircle className="h-3.5 w-3.5 mr-1" /> Add
+                    </Button>
+                  </div>
+                  {showNewCategory && (
+                    <div className="flex gap-2 mt-2">
+                      <Input
+                        placeholder="New category name"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        className="text-xs"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={creatingCategory || !newCategoryName.trim()}
+                        onClick={handleCreateCategory}
+                      >
+                        {creatingCategory ? "..." : "Save"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -324,27 +485,46 @@ export default function ProductsPage() {
                     <tr className="border-b text-left text-sm font-medium text-muted-foreground">
                       <th className="pb-3 pr-4">Product Name</th>
                       <th className="pb-3 pr-4">SKU</th>
+                      <th className="pb-3 pr-4">Category</th>
                       <th className="pb-3 pr-4">External ID</th>
                       <th className="pb-3 pr-4">Price</th>
                       <th className="pb-3 pr-4">Tax Rate</th>
-                      <th className="pb-3">Status</th>
+                      <th className="pb-3 pr-4">Status</th>
+                      <th className="pb-3 text-center">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((product) => (
-                      <tr key={product.id} className="border-b">
-                        <td className="py-3 pr-4 font-medium">{product.name}</td>
-                        <td className="py-3 pr-4">{product.sku || "—"}</td>
-                        <td className="py-3 pr-4">{product.external_id || "—"}</td>
-                        <td className="py-3 pr-4">₹{Number(product.unit_price).toLocaleString()}</td>
-                        <td className="py-3 pr-4">{product.tax_rate}%</td>
-                        <td className="py-3">
-                          <span className="inline-flex rounded-full bg-green-100 dark:bg-green-950/40 px-2 py-0.5 text-xs font-semibold text-green-700 dark:text-green-400">
-                            Active
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {filtered.map((product) => {
+                      const catName =
+                        (product as any).category_name ||
+                        (typeof product.category === "string" ? product.category : product.category?.name) ||
+                        "General";
+                      return (
+                        <tr key={product.id} className="border-b">
+                          <td className="py-3 pr-4 font-medium">{product.name}</td>
+                          <td className="py-3 pr-4">{product.sku || "—"}</td>
+                          <td className="py-3 pr-4 text-muted-foreground">{catName}</td>
+                          <td className="py-3 pr-4">{product.external_id || "—"}</td>
+                          <td className="py-3 pr-4">₹{Number(product.unit_price).toLocaleString()}</td>
+                          <td className="py-3 pr-4">{product.tax_rate}%</td>
+                          <td className="py-3 pr-4">
+                            <span className="inline-flex rounded-full bg-green-100 dark:bg-green-950/40 px-2 py-0.5 text-xs font-semibold text-green-700 dark:text-green-400">
+                              Active
+                            </span>
+                          </td>
+                          <td className="py-3 text-center">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs gap-1"
+                              onClick={() => handleOpenEdit(product)}
+                            >
+                              <Pencil className="h-3 w-3 text-amber-600" /> Edit
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -590,6 +770,166 @@ export default function ProductsPage() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* Edit Product Dialog */}
+      {editOpen && editProduct && (
+        <Dialog
+          open={editOpen}
+          onOpenChange={(val) => {
+            setEditOpen(val);
+            if (!val) setEditError("");
+          }}
+        >
+          <DialogContent className="sm:max-w-[425px]">
+            <form onSubmit={handleUpdateProduct}>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Pencil className="h-5 w-5 text-amber-600" />
+                  Edit Product: {editProduct.name}
+                </DialogTitle>
+                <DialogDescription>Update product details and category.</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                {editError && (
+                  <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
+                    {editError}
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Product Name *</label>
+                  <Input
+                    placeholder="Product Name"
+                    value={editProduct.name}
+                    onChange={(e) => setEditProduct({ ...editProduct, name: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">SKU</label>
+                    <Input
+                      placeholder="SKU"
+                      value={editProduct.sku}
+                      onChange={(e) => setEditProduct({ ...editProduct, sku: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">External ID</label>
+                    <Input
+                      placeholder="External ID"
+                      value={editProduct.external_id}
+                      onChange={(e) => setEditProduct({ ...editProduct, external_id: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Category</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={editProduct.category}
+                      onChange={(e) => setEditProduct({ ...editProduct, category: e.target.value })}
+                      className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-xs"
+                    >
+                      {!categories.some((c) => c.name === editProduct.category) && editProduct.category && (
+                        <option value={editProduct.category}>{editProduct.category}</option>
+                      )}
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                      {!categories.length && <option value="General">General</option>}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setShowNewCategory((open) => !open);
+                        setEditError("");
+                      }}
+                    >
+                      <PlusCircle className="h-3.5 w-3.5 mr-1" /> Add
+                    </Button>
+                  </div>
+                  {showNewCategory && (
+                    <div className="flex gap-2 mt-2">
+                      <Input
+                        placeholder="New category name"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        className="text-xs"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={creatingCategory || !newCategoryName.trim()}
+                        onClick={handleCreateCategory}
+                      >
+                        {creatingCategory ? "..." : "Save"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">Unit Price (₹) *</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="999"
+                      value={editProduct.unit_price}
+                      onChange={(e) => setEditProduct({ ...editProduct, unit_price: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">Tax Rate (%)</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="18"
+                      value={editProduct.tax_rate}
+                      onChange={(e) => setEditProduct({ ...editProduct, tax_rate: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="edit_prod_active"
+                    checked={editProduct.is_active}
+                    onChange={(e) => setEditProduct({ ...editProduct, is_active: e.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300 text-primary"
+                  />
+                  <label htmlFor="edit_prod_active" className="text-xs font-medium cursor-pointer">
+                    Product is active and visible in catalog & POS
+                  </label>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submittingEdit} className="min-w-[120px] bg-amber-600 hover:bg-amber-700">
+                  {submittingEdit ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
