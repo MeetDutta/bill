@@ -23,6 +23,8 @@ services:
     plan: free
     healthCheckPath: /health/liveness/
     envVars:
+      - key: PORT
+        value: "10000"
       - key: ENVIRONMENT
         value: production
       - key: DEBUG

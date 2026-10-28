@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8000
+ENV PORT=10000
 
 WORKDIR /app
 
@@ -30,6 +30,6 @@ RUN DJANGO_SECRET_KEY="build-phase-placeholder-secret-key-32chars" \
 
 RUN chmod +x /app/start.sh /app/build.sh 2>/dev/null || true
 
-EXPOSE 8000
+EXPOSE 10000
 
 CMD ["/app/start.sh"]

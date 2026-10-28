@@ -2,8 +2,8 @@
 # Exit on error
 set -o errexit
 
-PORT="${PORT:-8000}"
-WEB_CONCURRENCY="${WEB_CONCURRENCY:-2}"
+PORT="${PORT:-10000}"
+WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}"
 
 echo "===> [Backend Start] Running database migrations..."
 python manage.py migrate --no-input
