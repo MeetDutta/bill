@@ -554,7 +554,7 @@ export default function QuotationsPage() {
                           {!isConverted ? (
                             <>
                               <Link
-                                href={`/dashboard/pos?quote=${encodeURIComponent(q.quotation_number)}`}
+                                href={`/dashboard/billing?quote=${encodeURIComponent(q.quotation_number)}`}
                                 className="flex items-center gap-1 rounded bg-blue-600 hover:bg-blue-700 px-2 py-1 text-[11px] font-semibold text-white shadow-xs"
                                 title="Proceed to Checkout (Load in POS)"
                               >
@@ -915,7 +915,7 @@ export default function QuotationsPage() {
 
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <Link
-                    href={`/dashboard/invoices`}
+                    href={`/dashboard/billing?view=history`}
                     className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm"
                   >
                     View in Invoices
@@ -1153,7 +1153,7 @@ export default function QuotationsPage() {
                     <span className="font-semibold text-xs">Converted to Invoice: </span>
                     <span className="font-mono text-xs">{selectedQuotation.converted_invoice_number || "Issued"}</span>
                   </div>
-                  <Link href={`/dashboard/invoices`} className="text-xs underline font-semibold flex items-center gap-1">
+                  <Link href={`/dashboard/billing?view=history`} className="text-xs underline font-semibold flex items-center gap-1">
                     <span>View Invoices</span>
                     <ExternalLink className="h-3 w-3" />
                   </Link>
@@ -1166,7 +1166,7 @@ export default function QuotationsPage() {
                 {selectedQuotation.status !== "converted" ? (
                   <>
                     <Link
-                      href={`/dashboard/pos?quote=${encodeURIComponent(selectedQuotation.quotation_number)}`}
+                      href={`/dashboard/billing?quote=${encodeURIComponent(selectedQuotation.quotation_number)}`}
                       className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 font-semibold shadow-sm text-xs"
                     >
                       <ShoppingCart className="h-4 w-4" />

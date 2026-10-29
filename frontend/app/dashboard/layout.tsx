@@ -10,6 +10,7 @@ import {
   FileText,
   FileCheck,
   RotateCcw,
+  Receipt,
   Boxes,
   SlidersHorizontal,
   Truck,
@@ -37,9 +38,10 @@ import {
   Menu,
   X,
   Smartphone,
+  Bell,
 } from "lucide-react";
 import { CopilotDrawer } from "@/components/CopilotDrawer";
-import { authApi } from "@/services/api";
+import { authApi, notificationApi } from "@/services/api";
 
 interface NavItem {
   name: string;
@@ -64,8 +66,7 @@ const navSections: NavSection[] = [
     title: "SELL",
     key: "sell",
     items: [
-      { name: "POS Terminal", href: "/dashboard/pos", icon: ShoppingCart },
-      { name: "Invoices", href: "/dashboard/invoices", icon: FileText },
+      { name: "Billing", href: "/dashboard/billing", icon: Receipt },
       { name: "Quotations", href: "/dashboard/quotations", icon: FileCheck },
       { name: "Returns", href: "/dashboard/returns", icon: RotateCcw },
     ],
@@ -129,6 +130,30 @@ export default function DashboardLayout({
   const router = useRouter();
   const [authChecking, setAuthChecking] = useState(true);
   const [currentTab, setCurrentTab] = useState<string | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchUnread = async () => {
+      try {
+        const res = await notificationApi.getSummary();
+        if (isMounted) {
+          setUnreadNotifications(res.data?.unread || 0);
+        }
+      } catch {
+        // silent layout fallback
+      }
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    const handleUpdate = () => fetchUnread();
+    window.addEventListener("notifications_updated", handleUpdate);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener("notifications_updated", handleUpdate);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -172,6 +197,19 @@ export default function DashboardLayout({
   // Helper to determine if an item is active
   const isItemActive = React.useCallback((item: NavItem) => {
     const [itemPath] = item.href.split("?");
+    if (itemPath === "/dashboard/billing") {
+      if (
+        pathname === "/dashboard/billing" ||
+        pathname === "/dashboard/pos" ||
+        pathname === "/dashboard/invoices" ||
+        pathname?.startsWith("/dashboard/billing")
+      ) {
+        return true;
+      }
+    }
+    if (itemPath === "/dashboard/notifications") {
+      return pathname === "/dashboard/notifications" || pathname?.startsWith("/dashboard/notifications");
+    }
     if (pathname !== itemPath) return false;
     if (item.tab) {
       return currentTab === item.tab;
@@ -236,6 +274,9 @@ export default function DashboardLayout({
 
   // Find current active page title
   const activePageTitle = useMemo(() => {
+    if (pathname === "/dashboard/notifications" || pathname?.startsWith("/dashboard/notifications")) {
+      return "Notifications";
+    }
     for (const section of navSections) {
       for (const item of section.items) {
         if (isItemActive(item)) {
@@ -244,7 +285,7 @@ export default function DashboardLayout({
       }
     }
     return "Dashboard";
-  }, [isItemActive]);
+  }, [isItemActive, pathname]);
 
   const closeMobile = () => setMobileOpen(false);
 
@@ -408,19 +449,29 @@ export default function DashboardLayout({
 
           <div className="flex items-center gap-2">
             <Link
-              href="/m/pos"
-              className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1.5 text-xs font-semibold shadow-sm transition-all"
-              title="Open Dedicated Mobile Smartphone POS"
+              href="/dashboard/notifications"
+              className={cn(
+                "relative flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-2xs transition-all",
+                pathname === "/dashboard/notifications"
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border bg-card hover:bg-accent text-foreground"
+              )}
+              title="Notifications Center"
             >
-              <Smartphone className="h-3.5 w-3.5" />
-              <span>Mobile POS</span>
+              <Bell className="h-3.5 w-3.5" />
+              <span>Notifications</span>
+              {unreadNotifications > 0 && (
+                <span className="inline-flex items-center justify-center rounded-full bg-red-600 px-1.5 py-0.2 text-[10px] font-bold text-white min-w-[18px] h-[18px]">
+                  {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                </span>
+              )}
             </Link>
             <Link
-              href="/dashboard/pos"
+              href="/dashboard/billing"
               className="flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all"
             >
-              <ShoppingCart className="h-3.5 w-3.5" />
-              <span>POS Terminal</span>
+              <Receipt className="h-3.5 w-3.5" />
+              <span>Billing</span>
             </Link>
           </div>
         </header>

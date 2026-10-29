@@ -586,6 +586,15 @@ class CheckoutService:
         except Exception as e:
             logger.warning("Failed to publish sale_completed realtime event: %s", e)
         try:
+            from apps.notifications.services import NotificationService
+            for p in db_products.values():
+                if p.track_inventory:
+                    NotificationService.evaluate_product_low_stock(p)
+            NotificationService.notify_sale(organization, tx, cashier=tx.cashier)
+        except Exception as e:
+            logger.warning("Failed to evaluate notifications after checkout: %s", e)
+
+        try:
             from apps.invoices.tasks import generate_invoice_task
             generate_invoice_task.delay(str(tx.id))
         except Exception as e:

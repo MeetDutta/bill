@@ -15,6 +15,7 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
     city = models.CharField(max_length=100, blank=True)
     state = models.CharField(max_length=100, blank=True)
     postal_code = models.CharField(max_length=20, blank=True)
+    gstin = models.CharField(max_length=50, blank=True)
     tags = models.JSONField(default=list, blank=True)
     preferred_store = models.ForeignKey(
         "stores.Store",

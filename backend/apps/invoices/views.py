@@ -51,7 +51,8 @@ class InvoiceListView(generics.ListAPIView):
         if search:
             qs = qs.filter(
                 models.Q(invoice_number__icontains=search) |
-                models.Q(transaction__customer__full_name__icontains=search) |
+                models.Q(transaction__customer__first_name__icontains=search) |
+                models.Q(transaction__customer__last_name__icontains=search) |
                 models.Q(transaction__customer__phone__icontains=search)
             )
 

@@ -18,8 +18,9 @@ import {
   Store,
   RefreshCw,
   Receipt,
+  Bell,
 } from "lucide-react";
-import { authApi } from "@/services/api";
+import { authApi, notificationApi } from "@/services/api";
 import type { User } from "@/types";
 
 interface StaffNavItem {
@@ -30,8 +31,8 @@ interface StaffNavItem {
 
 const staffNavItems: StaffNavItem[] = [
   { name: "Overview", href: "/staff/dashboard", icon: LayoutDashboard },
-  { name: "POS Terminal", href: "/staff/pos", icon: ShoppingCart },
-  { name: "My Invoices", href: "/staff/invoices", icon: FileText },
+  { name: "Billing", href: "/staff/billing", icon: Receipt },
+  { name: "Notifications", href: "/staff/notifications", icon: Bell },
   { name: "My Quotations", href: "/staff/quotations", icon: FileCheck },
   { name: "My Sales Profile", href: "/staff/profile", icon: UserCheck },
 ];
@@ -44,6 +45,30 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const [user, setUser] = useState<User | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchUnread = async () => {
+      try {
+        const res = await notificationApi.getSummary();
+        if (isMounted) {
+          setUnreadNotifications(res.data?.unread || 0);
+        }
+      } catch {
+        // silent fallback
+      }
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    const handleUpdate = () => fetchUnread();
+    window.addEventListener("notifications_updated", handleUpdate);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener("notifications_updated", handleUpdate);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -105,13 +130,14 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
           <nav className="hidden md:flex items-center gap-1 lg:gap-2">
             {staffNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href || (item.href !== "/staff/dashboard" && pathname?.startsWith(item.href));
+              const isBilling = item.href === "/staff/billing" && (pathname === "/staff/pos" || pathname === "/staff/invoices" || pathname?.startsWith("/staff/billing"));
+              const isActive = pathname === item.href || isBilling || (item.href !== "/staff/dashboard" && item.href !== "/staff/billing" && pathname?.startsWith(item.href));
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-colors",
+                    "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-colors relative",
                     isActive
                       ? "bg-foreground text-background shadow-xs font-bold"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -119,6 +145,16 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   <span>{item.name}</span>
+                  {item.name === "Notifications" && unreadNotifications > 0 && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.2 text-[10px] font-extrabold shrink-0",
+                        isActive ? "bg-background text-foreground" : "bg-red-600 text-white"
+                      )}
+                    >
+                      {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -195,21 +231,34 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
             {staffNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href;
+              const isBilling = item.href === "/staff/billing" && (pathname === "/staff/pos" || pathname === "/staff/invoices" || pathname?.startsWith("/staff/billing"));
+              const isActive = pathname === item.href || isBilling;
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   onClick={() => setMobileOpen(false)}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors",
+                    "flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors",
                     isActive
                       ? "bg-foreground text-background font-bold"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground"
                   )}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span>{item.name}</span>
+                  <div className="flex items-center gap-3">
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{item.name}</span>
+                  </div>
+                  {item.name === "Notifications" && unreadNotifications > 0 && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.2 text-[10px] font-extrabold shrink-0",
+                        isActive ? "bg-background text-foreground" : "bg-red-600 text-white"
+                      )}
+                    >
+                      {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                    </span>
+                  )}
                 </Link>
               );
             })}

@@ -703,7 +703,7 @@ export default function StaffQuotationsPage() {
                 </div>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <Link
-                    href={`/staff/invoices`}
+                    href={`/staff/billing?view=history`}
                     className="rounded-lg bg-foreground text-background px-4 py-2 text-xs font-bold shadow-xs"
                   >
                     View in My Invoices

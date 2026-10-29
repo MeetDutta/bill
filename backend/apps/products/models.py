@@ -48,6 +48,7 @@ class Product(UUIDModel, TenantModel, TimeStampedModel):
     current_stock = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     min_stock = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     max_stock = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    baseline_stock = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, help_text="Configured replenishment baseline stock quantity for percentage threshold alerts")
     supplier = models.CharField(max_length=255, blank=True)
     product_attributes = models.JSONField(default=dict, blank=True)  # Business-specific specs (metal, purity, vehicle model, size, color, etc.)
     track_inventory = models.BooleanField(default=True)

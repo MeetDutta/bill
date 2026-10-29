@@ -34,6 +34,10 @@ from .views import (
     POSReturnsReportView,
     POSOutstandingReportView,
     POSDailyClosingReportView,
+    POSTallyPreviewView,
+    POSTallyExportView,
+    POSTallyConfigView,
+    POSTallyHistoryView,
     POSRealtimeEventStreamView,
     POSRealtimeRecentEventsView,
     POSRealtimeTicketView,
@@ -108,6 +112,10 @@ urlpatterns = [
 
     # Reports
     path("reports/sales/", POSSalesReportView.as_view(), name="pos-report-sales"),
+    path("reports/sales/tally-preview/", POSTallyPreviewView.as_view(), name="pos-report-tally-preview"),
+    path("reports/sales/tally-export/", POSTallyExportView.as_view(), name="pos-report-tally-export"),
+    path("reports/sales/tally-config/", POSTallyConfigView.as_view(), name="pos-report-tally-config"),
+    path("reports/sales/tally-history/", POSTallyHistoryView.as_view(), name="pos-report-tally-history"),
     path("reports/payments/", POSPaymentReportView.as_view(), name="pos-report-payments"),
     path("reports/product-sales/", POSProductSalesReportView.as_view(), name="pos-report-product-sales"),
     path("reports/tax/", POSTaxReportView.as_view(), name="pos-report-tax"),

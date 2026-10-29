@@ -19,6 +19,11 @@ import type {
   Quotation,
   Supplier,
   PurchaseOrder,
+  NotificationItem,
+  NotificationSummary,
+  TallyPreviewData,
+  TallyLedgerConfigData,
+  TallyExportHistoryItem,
 } from "@/types";
 
 // Auth
@@ -397,5 +402,65 @@ export const adminStaffSalesApi = {
       }>;
     }>("/billing/admin/staff-sales/", { params }),
 };
+
+// Notifications & Low-Stock Alerts
+export const notificationApi = {
+  list: (params?: {
+    category?: string;
+    severity?: string;
+    is_read?: boolean;
+    is_dismissed?: boolean;
+    active_low_stock?: boolean;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }) => api.get<PaginatedResponse<NotificationItem>>("/notifications/", { params }),
+
+  getSummary: () => api.get<NotificationSummary>("/notifications/summary/"),
+
+  markRead: (id: string) => api.post<NotificationItem>(`/notifications/${id}/mark-read/`),
+
+  markUnread: (id: string) => api.post<NotificationItem>(`/notifications/${id}/mark-unread/`),
+
+  markAllRead: (category?: string) =>
+    api.post<{ status: string; marked_read_count: number }>("/notifications/mark-all-read/", {
+      category,
+    }),
+
+  dismiss: (id: string) =>
+    api.post<{ status: string; id: string; is_dismissed: boolean }>(`/notifications/${id}/dismiss/`),
+};
+
+// Tally Indian GST Accounting Export
+export const tallyExportApi = {
+  getPreview: (params?: {
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+    store_id?: string;
+    include_previously_exported?: boolean;
+  }) => api.get<TallyPreviewData>("/pos/reports/sales/tally-preview/", { params }),
+
+  exportXml: async (data: {
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+    store_id?: string;
+    include_previously_exported?: boolean;
+  }) => {
+    return api.post("/pos/reports/sales/tally-export/?download=true", data, {
+      responseType: "blob",
+    });
+  },
+
+  getConfig: () => api.get<TallyLedgerConfigData>("/pos/reports/sales/tally-config/"),
+
+  updateConfig: (data: Partial<TallyLedgerConfigData>) =>
+    api.post<{ status: string; message: string }>("/pos/reports/sales/tally-config/", data),
+
+  getHistory: () => api.get<{ history: TallyExportHistoryItem[] }>("/pos/reports/sales/tally-history/"),
+};
+
+
 
 

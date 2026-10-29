@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path("", views.QuotationListView.as_view(), name="root-quotation-list"),
+    path("lookup/<str:number>/", views.QuotationLookupView.as_view(), name="root-quotation-lookup"),
     path("<uuid:pk>/", views.QuotationDetailView.as_view(), name="root-quotation-detail"),
     path("<uuid:pk>/convert/", views.QuotationConvertView.as_view(), name="root-quotation-convert"),
 ]

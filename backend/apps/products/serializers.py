@@ -32,7 +32,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "id", "external_id", "name", "description", "brand", "sku", "barcode",
             "category", "category_name", "unit_price", "cost_price",
             "selling_price", "purchase_price", "mrp", "unit",
-            "tax_rate", "hsn_code", "current_stock", "min_stock",
+            "tax_rate", "hsn_code", "current_stock", "min_stock", "baseline_stock",
             "track_inventory", "image", "is_active",
             "organization", "created_at",
         ]

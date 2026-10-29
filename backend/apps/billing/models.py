@@ -356,4 +356,67 @@ class RealtimeEvent(UUIDModel, TenantModel, TimeStampedModel):
         return f"{self.organization.name} - {self.event_type} @ {self.created_at}"
 
 
+class TallyLedgerConfig(UUIDModel, TenantModel, TimeStampedModel):
+    """
+    Configurable Tally Ledger mapping for Indian GST Accounting exports.
+    """
+    company_name = models.CharField(max_length=255, blank=True)
+    sales_ledger = models.CharField(max_length=150, default="Sales Account")
+    cgst_ledger = models.CharField(max_length=150, default="Output CGST")
+    sgst_ledger = models.CharField(max_length=150, default="Output SGST")
+    igst_ledger = models.CharField(max_length=150, default="Output IGST")
+    cash_ledger = models.CharField(max_length=150, default="Cash")
+    bank_ledger = models.CharField(max_length=150, default="Bank Account")
+    upi_ledger = models.CharField(max_length=150, default="UPI Collections")
+    card_ledger = models.CharField(max_length=150, default="Card Collections")
+    debtor_ledger = models.CharField(max_length=150, default="Sundry Debtors")
+    discount_ledger = models.CharField(max_length=150, default="Discount Allowed")
+    round_off_ledger = models.CharField(max_length=150, default="Round Off")
+    credit_note_ledger = models.CharField(max_length=150, default="Sales Returns")
+    include_inventory_details = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Tally Ledger Configuration"
+        verbose_name_plural = "Tally Ledger Configurations"
+
+    def __str__(self):
+        return f"Tally Config for {self.organization.name}"
+
+
+class TallyExportLog(UUIDModel, TenantModel, TimeStampedModel):
+    """
+    Audit log of generated and downloaded Tally XML accounting voucher exports.
+    """
+    exported_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    period = models.CharField(max_length=50, default="custom")
+    start_date = models.DateTimeField()
+    end_date = models.DateTimeField()
+    sales_vouchers_count = models.PositiveIntegerField(default=0)
+    receipt_vouchers_count = models.PositiveIntegerField(default=0)
+    credit_notes_count = models.PositiveIntegerField(default=0)
+    total_taxable_value = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    total_cgst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    total_sgst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    total_igst = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    total_invoice_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    total_recorded_payments = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    outstanding_receivables = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    total_refund_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    transaction_ids = models.JSONField(default=list, blank=True)
+    validation_warnings = models.JSONField(default=list, blank=True)
+    xml_filename = models.CharField(max_length=255)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Tally Export #{self.id} on {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+
+
+
 

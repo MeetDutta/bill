@@ -881,3 +881,126 @@ export interface Supplier {
   updated_at?: string;
 }
 
+export type NotificationCategory = "inventory" | "sales" | "payments" | "invoices" | "system";
+export type NotificationSeverity = "critical" | "warning" | "info" | "success";
+
+export interface NotificationItem {
+  id: string;
+  notification_type: "in_app" | "whatsapp" | "email" | "sms";
+  category: NotificationCategory;
+  severity: NotificationSeverity;
+  title: string;
+  message: string;
+  data: {
+    product_id?: string;
+    product_name?: string;
+    sku?: string;
+    current_stock?: string;
+    baseline?: string;
+    percentage?: string;
+    alert_type?: "warning" | "critical" | "out_of_stock" | "resolved";
+    action_url?: string;
+    action_label?: string;
+    transaction_id?: string;
+    invoice_number?: string;
+    total?: string;
+    amount?: string;
+    payment_method?: string;
+    [key: string]: any;
+  };
+  related_entity_type?: string;
+  related_entity_id?: string;
+  audience: "all" | "admin" | "staff" | "user";
+  is_read: boolean;
+  read_at?: string | null;
+  is_dismissed: boolean;
+  dismissed_at?: string | null;
+  resolved_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface NotificationSummary {
+  total: number;
+  unread: number;
+  critical: number;
+  active_low_stock: number;
+  categories: Record<string, number>;
+}
+
+export interface TallyPreviewData {
+  period: string;
+  start_date: string;
+  end_date: string;
+  summary: {
+    sales_vouchers_count: number;
+    receipt_vouchers_count: number;
+    credit_notes_count: number;
+    total_taxable_value: string;
+    total_cgst: string;
+    total_sgst: string;
+    total_igst: string;
+    total_tax: string;
+    total_invoice_value: string;
+    total_recorded_payments: string;
+    outstanding_receivables: string;
+    total_refund_amount: string;
+  };
+  gst_breakdown: {
+    intra_state_sales: string;
+    inter_state_sales: string;
+    exempt_zero_rated_sales: string;
+    seller_state: string;
+    seller_gstin: string;
+  };
+  ledger_mapping: Record<string, string>;
+  validation: {
+    is_valid: boolean;
+    can_export: boolean;
+    blocking_errors: string[];
+    warnings: string[];
+  };
+  disclaimer: string;
+}
+
+export interface TallyLedgerConfigData {
+  company_name: string;
+  sales_ledger: string;
+  cgst_ledger: string;
+  sgst_ledger: string;
+  igst_ledger: string;
+  cash_ledger: string;
+  bank_ledger: string;
+  upi_ledger: string;
+  card_ledger: string;
+  debtor_ledger: string;
+  discount_ledger: string;
+  round_off_ledger: string;
+  credit_note_ledger: string;
+  include_inventory_details: boolean;
+}
+
+export interface TallyExportHistoryItem {
+  id: string;
+  created_at: string;
+  exported_by: string;
+  period: string;
+  start_date: string;
+  end_date: string;
+  sales_count: number;
+  receipts_count: number;
+  credit_notes_count: number;
+  total_invoice_amount: string;
+  total_taxable: string;
+  total_cgst: string;
+  total_sgst: string;
+  total_igst: string;
+  total_payments: string;
+  outstanding_receivables: string;
+  total_refund_amount: string;
+  xml_filename: string;
+  warnings_count: number;
+}
+
+
+

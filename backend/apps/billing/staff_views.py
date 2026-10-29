@@ -179,7 +179,8 @@ class StaffInvoiceListView(StaffBaseView):
         if search:
             qs = qs.filter(
                 Q(invoice_number__icontains=search)
-                | Q(transaction__customer__full_name__icontains=search)
+                | Q(transaction__customer__first_name__icontains=search)
+                | Q(transaction__customer__last_name__icontains=search)
                 | Q(transaction__customer__phone__icontains=search)
             )
 
@@ -230,7 +231,8 @@ class StaffQuotationListView(StaffBaseView):
         if search:
             qs = qs.filter(
                 Q(quotation_number__icontains=search)
-                | Q(customer__full_name__icontains=search)
+                | Q(customer__first_name__icontains=search)
+                | Q(customer__last_name__icontains=search)
                 | Q(customer_name__icontains=search)
                 | Q(customer_phone__icontains=search)
             )

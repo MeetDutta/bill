@@ -275,7 +275,7 @@ export default function DashboardPage() {
 
       {/* Quick Action Operations Toolbar */}
       <div className="flex flex-wrap items-center gap-2 pb-1">
-        <Link href="/pos">
+        <Link href="/dashboard/billing">
           <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 font-bold shadow-xs">
             <Receipt className="h-4 w-4" /> + New POS Sale
           </Button>
@@ -285,7 +285,7 @@ export default function DashboardPage() {
             <Boxes className="h-4 w-4" /> Manage Inventory
           </Button>
         </Link>
-        <Link href="/dashboard/invoices">
+        <Link href="/dashboard/billing?view=history">
           <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
             <Receipt className="h-4 w-4" /> Invoices & Bills
           </Button>
@@ -403,7 +403,7 @@ export default function DashboardPage() {
 
           {/* Card 2: Number of Transactions */}
           <Link
-            href="/dashboard/invoices?date=today"
+            href="/dashboard/billing?view=history&date=today"
             className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
             aria-label="View all invoices issued today"
           >
@@ -918,12 +918,12 @@ export default function DashboardPage() {
                     <tr
                       key={idx}
                       onClick={() => {
-                        window.location.href = `/dashboard/invoices?date=${encodeURIComponent(row.date || row.formatted_date)}`;
+                        window.location.href = `/dashboard/billing?view=history&date=${encodeURIComponent(row.date || row.formatted_date)}`;
                       }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          window.location.href = `/dashboard/invoices?date=${encodeURIComponent(row.date || row.formatted_date)}`;
+                          window.location.href = `/dashboard/billing?view=history&date=${encodeURIComponent(row.date || row.formatted_date)}`;
                         }
                       }}
                       tabIndex={0}
@@ -1560,7 +1560,7 @@ export default function DashboardPage() {
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-2 pt-2">
-                <Link href="/dashboard/invoices?date=today" className="flex-1" onClick={() => setActiveModal(null)}>
+                <Link href="/dashboard/billing?view=history&date=today" className="flex-1" onClick={() => setActiveModal(null)}>
                   <Button className="w-full gap-1.5 font-bold">
                     <Receipt className="h-4 w-4" /> View Today&apos;s Invoices
                   </Button>
@@ -1622,7 +1622,7 @@ export default function DashboardPage() {
 
                 <div className="flex flex-col sm:flex-row gap-2 pt-2">
                   <Link
-                    href={`/dashboard/invoices?payment_method=${encodeURIComponent(method)}&date=today`}
+                    href={`/dashboard/billing?view=history&payment_method=${encodeURIComponent(method)}&date=today`}
                     className="flex-1"
                     onClick={() => setActiveModal(null)}
                   >

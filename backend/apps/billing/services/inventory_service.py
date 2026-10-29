@@ -59,6 +59,12 @@ class InventoryService:
                 notes=notes,
             )
 
+        try:
+            from apps.notifications.services import NotificationService
+            NotificationService.evaluate_product_low_stock(product)
+        except Exception:
+            pass
+
         return {
             "product_id": str(product.id),
             "product_name": product.name,
@@ -259,6 +265,13 @@ class InventoryService:
                     reference_id=str(po.id),
                     notes=f"Received PO #{po.po_number} (Inv: {po.supplier_invoice_number})",
                 )
+
+        try:
+            from apps.notifications.services import NotificationService
+            for it in po.items.all():
+                NotificationService.evaluate_product_low_stock(it.product)
+        except Exception:
+            pass
 
         return {
             "id": str(po.id),

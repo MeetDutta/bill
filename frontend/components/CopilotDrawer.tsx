@@ -17,7 +17,11 @@ export function CopilotDrawer() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const pathname = usePathname();
-  const isPos = pathname?.startsWith("/dashboard/pos");
+  const isPos =
+    pathname?.startsWith("/dashboard/pos") ||
+    pathname?.startsWith("/dashboard/billing") ||
+    pathname?.startsWith("/staff/pos") ||
+    pathname?.startsWith("/staff/billing");
 
   useEffect(() => {
     const handleOpen = () => setIsOpen(true);

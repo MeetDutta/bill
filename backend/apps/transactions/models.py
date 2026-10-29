@@ -68,6 +68,7 @@ class Transaction(UUIDModel, TenantModel, TimeStampedModel):
     loyalty_points_redeemed = models.PositiveIntegerField(default=0)
     bill_sent = models.BooleanField(default=False)
     bill_sent_at = models.DateTimeField(null=True, blank=True)
+    tally_exported_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-transaction_date"]
@@ -187,6 +188,7 @@ class SalesReturn(UUIDModel, TenantModel, TimeStampedModel):
         null=True,
         blank=True,
     )
+    tally_exported_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]

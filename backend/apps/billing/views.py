@@ -940,6 +940,146 @@ class POSSalesReportView(APIView):
         return Response(result)
 
 
+class POSTallyPreviewView(APIView):
+    """
+    Validates and previews Tally XML accounting voucher data before export.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def get(self, request):
+        from .services.tally_export_service import TallyExportService
+        include_prev = request.GET.get("include_previously_exported", "false").lower() in ["true", "1"]
+        preview = TallyExportService.validate_and_preview(
+            organization=request.user.organization,
+            store_id=request.GET.get("store_id"),
+            period=request.GET.get("period", "today"),
+            start_date=request.GET.get("start_date"),
+            end_date=request.GET.get("end_date"),
+            include_previously_exported=include_prev,
+        )
+        return Response(preview)
+
+
+class POSTallyExportView(APIView):
+    """
+    Generates and downloads Tally-compatible XML vouchers.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def post(self, request):
+        from django.http import HttpResponse
+        from .services.tally_export_service import TallyExportService
+        include_prev = request.data.get("include_previously_exported", False)
+        if isinstance(include_prev, str):
+            include_prev = include_prev.lower() in ["true", "1"]
+
+        try:
+            xml_content, filename, summary = TallyExportService.generate_tally_xml(
+                organization=request.user.organization,
+                user=request.user,
+                store_id=request.data.get("store_id") or request.GET.get("store_id"),
+                period=request.data.get("period") or request.GET.get("period", "today"),
+                start_date=request.data.get("start_date") or request.GET.get("start_date"),
+                end_date=request.data.get("end_date") or request.GET.get("end_date"),
+                include_previously_exported=include_prev,
+            )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Download directly as XML file if requested
+        if request.GET.get("download", "true").lower() in ["true", "1"] and not request.data.get("return_json"):
+            resp = HttpResponse(xml_content, content_type="application/xml; charset=utf-8")
+            resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return resp
+
+        return Response({
+            "status": "success",
+            "filename": filename,
+            "xml_content": xml_content,
+            "summary": summary,
+        })
+
+
+class POSTallyConfigView(APIView):
+    """
+    Configurable Tally Ledger mappings.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def get(self, request):
+        from .services.tally_export_service import TallyExportService
+        cfg = TallyExportService.get_or_create_config(request.user.organization)
+        return Response({
+            "company_name": cfg.company_name,
+            "sales_ledger": cfg.sales_ledger,
+            "cgst_ledger": cfg.cgst_ledger,
+            "sgst_ledger": cfg.sgst_ledger,
+            "igst_ledger": cfg.igst_ledger,
+            "cash_ledger": cfg.cash_ledger,
+            "bank_ledger": cfg.bank_ledger,
+            "upi_ledger": cfg.upi_ledger,
+            "card_ledger": cfg.card_ledger,
+            "debtor_ledger": cfg.debtor_ledger,
+            "discount_ledger": cfg.discount_ledger,
+            "round_off_ledger": cfg.round_off_ledger,
+            "credit_note_ledger": cfg.credit_note_ledger,
+            "include_inventory_details": cfg.include_inventory_details,
+        })
+
+    def post(self, request):
+        from .services.tally_export_service import TallyExportService
+        cfg = TallyExportService.get_or_create_config(request.user.organization)
+        data = request.data
+        fields = [
+            "company_name", "sales_ledger", "cgst_ledger", "sgst_ledger", "igst_ledger",
+            "cash_ledger", "bank_ledger", "upi_ledger", "card_ledger", "debtor_ledger",
+            "discount_ledger", "round_off_ledger", "credit_note_ledger", "include_inventory_details",
+        ]
+        for f in fields:
+            if f in data:
+                setattr(cfg, f, data[f])
+        cfg.save()
+        return Response({"status": "success", "message": "Tally ledger configuration updated."})
+
+
+class POSTallyHistoryView(APIView):
+    """
+    Audit log of previously executed Tally exports.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def get(self, request):
+        from .models import TallyExportLog
+        logs = TallyExportLog.objects.filter(
+            organization=request.user.organization
+        ).select_related("exported_by").order_by("-created_at")[:50]
+
+        rows = []
+        for l in logs:
+            rows.append({
+                "id": str(l.id),
+                "created_at": l.created_at.isoformat(),
+                "exported_by": l.exported_by.get_full_name() if l.exported_by else "System",
+                "period": l.period,
+                "start_date": l.start_date.isoformat(),
+                "end_date": l.end_date.isoformat(),
+                "sales_count": l.sales_vouchers_count,
+                "receipts_count": l.receipt_vouchers_count,
+                "credit_notes_count": l.credit_notes_count,
+                "total_invoice_amount": str(l.total_invoice_amount),
+                "total_taxable": str(l.total_taxable_value),
+                "total_cgst": str(l.total_cgst),
+                "total_sgst": str(l.total_sgst),
+                "total_igst": str(l.total_igst),
+                "total_payments": str(l.total_recorded_payments),
+                "outstanding_receivables": str(l.outstanding_receivables),
+                "total_refund_amount": str(l.total_refund_amount),
+                "xml_filename": l.xml_filename,
+                "warnings_count": len(l.validation_warnings or []),
+            })
+        return Response({"history": rows})
+
+
 class POSPaymentReportView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
 
