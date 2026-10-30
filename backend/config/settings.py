@@ -109,6 +109,17 @@ if render_hostname:
     if clean_render not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(clean_render)
 
+# Automatically register Render internal private service names
+render_service_name = os.environ.get("RENDER_SERVICE_NAME")
+if render_service_name:
+    clean_svc = render_service_name.strip().replace("https://", "").replace("http://", "").split("/")[0]
+    if clean_svc not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(clean_svc)
+
+for default_internal in ["billmeet-backend", "backend", "web"]:
+    if default_internal not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(default_internal)
+
 if "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")
 

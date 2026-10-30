@@ -7,6 +7,9 @@ class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
+    def validate_email(self, value):
+        return value.strip().lower()
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
@@ -15,11 +18,15 @@ class RegisterSerializer(serializers.ModelSerializer):
         model = User
         fields = ["email", "first_name", "last_name", "phone", "password"]
 
+    def validate_email(self, value):
+        return value.strip().lower()
+
     def create(self, validated_data):
         from apps.organizations.models import Organization
 
         password = validated_data.pop("password")
-        org = Organization.objects.create(name=validated_data["first_name"] + "'s Organization")
+        first_name = validated_data.get("first_name", "User")
+        org = Organization.objects.create(name=f"{first_name}'s Organization")
         user = User.objects.create_user(
             organization=org,
             role="org_admin",

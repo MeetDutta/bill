@@ -16,12 +16,32 @@ class LoginView(generics.GenericAPIView):
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        raw_email = serializer.validated_data["email"].strip().lower()
+        password = serializer.validated_data["password"]
+
         user = authenticate(
-            email=serializer.validated_data["email"],
-            password=serializer.validated_data["password"],
+            request=request,
+            email=raw_email,
+            password=password,
         )
         if not user:
+            # Case-insensitive PostgreSQL fallback
+            matched_user = User.objects.filter(email__iexact=raw_email).first()
+            if matched_user and matched_user.check_password(password) and matched_user.is_active:
+                user = matched_user
+
+        if not user:
             return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Ensure user is linked to an organization so multi-tenant views do not fail
+        if not user.organization:
+            from apps.organizations.models import Organization
+            org = Organization.objects.first()
+            if not org:
+                org = Organization.objects.create(name=f"{user.first_name or 'Default'}'s Organization")
+            user.organization = org
+            user.save(update_fields=["organization"])
+
         refresh = RefreshToken.for_user(user)
         return Response({
             "access": str(refresh.access_token),

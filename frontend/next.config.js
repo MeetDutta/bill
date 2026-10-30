@@ -40,6 +40,15 @@ const nextConfig = {
       }
     }
 
+    // On Render's private network, ensure internal services default to backend port 10000
+    try {
+      const parsed = new URL(backendUrl);
+      if (!parsed.port && !parsed.hostname.includes(".") && parsed.hostname !== "localhost") {
+        parsed.port = process.env.PORT || "10000";
+        backendUrl = parsed.toString().replace(/\/+$/, "");
+      }
+    } catch (_) {}
+
     return [
       {
         source: "/api/v1/:path*",

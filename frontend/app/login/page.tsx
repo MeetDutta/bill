@@ -79,6 +79,50 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>
+
+            {/* Quick Demo Credentials */}
+            <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-2">
+              <div className="font-semibold text-muted-foreground">Demo Credentials (1-Click Fill):</div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail("superadmin@digitalbill.local");
+                    setPassword("SuperAdmin@123456");
+                  }}
+                  className="rounded-md border bg-background p-2 text-left hover:bg-accent hover:border-primary/50 transition-colors"
+                >
+                  <div className="font-semibold text-foreground text-[11px]">Super Admin</div>
+                  <div className="text-[9px] text-muted-foreground truncate">superadmin@digitalbill.local</div>
+                  <div className="text-[9px] text-muted-foreground font-mono">SuperAdmin@123456</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail("admin@digitalbill.local");
+                    setPassword("Admin@123456");
+                  }}
+                  className="rounded-md border bg-background p-2 text-left hover:bg-accent hover:border-primary/50 transition-colors"
+                >
+                  <div className="font-semibold text-foreground text-[11px]">Admin</div>
+                  <div className="text-[9px] text-muted-foreground truncate">admin@digitalbill.local</div>
+                  <div className="text-[9px] text-muted-foreground font-mono">Admin@123456</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail("cashier@digitalbill.local");
+                    setPassword("Cashier@123456");
+                  }}
+                  className="rounded-md border bg-background p-2 text-left hover:bg-accent hover:border-primary/50 transition-colors"
+                >
+                  <div className="font-semibold text-foreground text-[11px]">Cashier</div>
+                  <div className="text-[9px] text-muted-foreground truncate">cashier@digitalbill.local</div>
+                  <div className="text-[9px] text-muted-foreground font-mono">Cashier@123456</div>
+                </button>
+              </div>
+            </div>
+
             <p className="text-center text-sm text-muted-foreground">
               Don&apos;t have an account?{" "}
               <Link href="/register" className="text-primary hover:underline">

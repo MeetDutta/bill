@@ -13,9 +13,17 @@ export const getApiBaseUrl = (): string => {
     let clean = envUrl.trim().replace(/\/+$/, "");
 
     if (typeof window !== "undefined") {
-      const isLocalhostEnv = clean.includes("localhost:8000") || clean.includes("127.0.0.1:8000");
+      const isLocalhostEnv = clean.includes("localhost") || clean.includes("127.0.0.1");
       const isBrowserOnRemote = window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
-      if (isLocalhostEnv && isBrowserOnRemote) {
+
+      // Detect if clean is a private container hostname without public domain dot (e.g. 'billmeet-backend')
+      const hostPart = clean.replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
+      const isPrivateInternalHost = !hostPart.includes(".");
+      const isMixedContent = window.location.protocol === "https:" && clean.startsWith("http://");
+
+      // On remote deployments (e.g. Render), browser cannot reach private internal hosts,
+      // insecure http endpoints from https, or localhost. Delegate to same-origin "/api/v1".
+      if (isBrowserOnRemote && (isLocalhostEnv || isPrivateInternalHost || isMixedContent)) {
         return "/api/v1";
       }
     }
@@ -40,11 +48,23 @@ export const getApiBaseUrl = (): string => {
     if (window.location.port === "3000") {
       return `http://${window.location.hostname}:8000/api/v1`;
     }
-    // Production client on same-origin Nginx reverse proxy
+    // Production client on same-origin Nginx or Next.js rewrites reverse proxy
     return "/api/v1";
   }
 
-  return process.env.INTERNAL_API_URL || "http://localhost:8000/api/v1";
+  const internalUrl = process.env.INTERNAL_API_URL || process.env.BACKEND_INTERNAL_URL;
+  if (internalUrl && internalUrl.trim() !== "") {
+    let cleanInternal = internalUrl.trim().replace(/\/+$/, "");
+    if (!cleanInternal.startsWith("http://") && !cleanInternal.startsWith("https://")) {
+      cleanInternal = `http://${cleanInternal}`;
+    }
+    if (!cleanInternal.endsWith("/api/v1")) {
+      cleanInternal = `${cleanInternal}/api/v1`;
+    }
+    return cleanInternal;
+  }
+
+  return "http://localhost:8000/api/v1";
 };
 
 export const api = axios.create({
