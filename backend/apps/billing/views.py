@@ -167,10 +167,8 @@ def resolve_request_store(request):
     if store_id:
         s = Store.objects.filter(organization=org, id=store_id).first()
         if not s:
-            # Fallback instead of crashing checkout
-            s = Store.objects.filter(organization=org).first()
-        if s:
-            return s
+            raise ValidationError(f"Store '{store_id}' not found.")
+        return s
 
     if hasattr(request.user, "stores"):
         s = request.user.stores.first()
