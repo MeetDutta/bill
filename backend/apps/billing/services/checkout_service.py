@@ -107,6 +107,26 @@ class CheckoutService:
             if qty <= Decimal("0.00"):
                 raise ValidationError(f"Invalid quantity {qty} for item {item.get('name')}.")
 
+            # If an explicit product identifier was passed, verify it is valid and active
+            if not p:
+                ident = item.get("product_id") or item.get("sku") or item.get("barcode")
+                if ident:
+                    lookup_q = Product.objects.filter(organization=organization)
+                    if item.get("product_id"):
+                        lookup_q = lookup_q.filter(id=item.get("product_id"))
+                    elif item.get("sku"):
+                        lookup_q = lookup_q.filter(sku=item.get("sku"))
+                    elif item.get("barcode"):
+                        lookup_q = lookup_q.filter(barcode=item.get("barcode"))
+
+                    matched_prod = lookup_q.first()
+                    if matched_prod and not matched_prod.is_active:
+                        raise ValidationError(f"Product '{matched_prod.name}' is inactive and cannot be sold.")
+                    elif matched_prod:
+                        p = matched_prod
+                    else:
+                        raise ValidationError(f"Product '{ident}' not found.")
+
             # Price from product or override
             if p:
                 unit_price = Decimal(str(item.get("unit_price") or p.selling_price))
@@ -157,6 +177,22 @@ class CheckoutService:
                             f"Cashier discount limit exceeded. Maximum allowed: {config.max_cashier_discount_percent}% "
                             f"(applied fixed discount represents {round_decimal(effective_pct)}% of subtotal)."
                         )
+            # Check line-item discounts against cashier limits
+            for it in prepared_items:
+                item_disc = it["discount"]
+                if item_disc > Decimal("0.00"):
+                    line_sub = it["unit_price"] * it["quantity"]
+                    if it["discount_type"] == "percentage" and item_disc > config.max_cashier_discount_percent:
+                        raise ValidationError(
+                            f"Cashier discount limit exceeded on item '{it['name']}'. Maximum allowed: {config.max_cashier_discount_percent}%"
+                        )
+                    elif it["discount_type"] == "fixed" and line_sub > Decimal("0.00"):
+                        item_pct = (item_disc / line_sub) * Decimal("100.00")
+                        if item_pct > config.max_cashier_discount_percent:
+                            raise ValidationError(
+                                f"Cashier discount limit exceeded on item '{it['name']}'. Maximum allowed: {config.max_cashier_discount_percent}% "
+                                f"(applied fixed discount represents {round_decimal(item_pct)}% of item subtotal)."
+                            )
 
         # 5. Calculate Cart via CartEngine
         is_interstate = bool(cart_data.get("is_interstate", False))
