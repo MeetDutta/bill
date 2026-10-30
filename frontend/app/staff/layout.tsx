@@ -267,17 +267,104 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
       </header>
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8 pb-24 md:pb-8">
         {children}
       </main>
 
       {/* FOOTER */}
-      <footer className="border-t py-4 text-center text-xs text-muted-foreground bg-card">
+      <footer className="border-t py-4 text-center text-xs text-muted-foreground bg-card mb-14 md:mb-0">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>BillMeet POS Terminal &mdash; Authorized Staff Workspace</span>
           <span>Security Enforced &bull; Tenant Isolated</span>
         </div>
       </footer>
+
+      {/* Mobile Bottom Navigation Bar for Staff */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-card/95 border-t border-border backdrop-blur-md safe-area-bottom shadow-lg">
+        <div className="grid grid-cols-5 h-14 items-center">
+          {/* 1. Overview */}
+          <Link
+            href="/staff/dashboard"
+            className={cn(
+              "flex flex-col items-center justify-center h-full transition-colors",
+              pathname === "/staff/dashboard"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <LayoutDashboard className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="text-[10px] leading-tight mt-0.5">Overview</span>
+          </Link>
+
+          {/* 2. Billing */}
+          <Link
+            href="/staff/billing"
+            className={cn(
+              "flex flex-col items-center justify-center h-full transition-colors",
+              pathname === "/staff/billing" || pathname === "/staff/pos"
+                ? "text-emerald-600 font-extrabold"
+                : "text-muted-foreground hover:text-emerald-600"
+            )}
+          >
+            <div className={cn(
+              "p-1 rounded-full",
+              pathname === "/staff/billing" || pathname === "/staff/pos" ? "bg-emerald-500/15" : ""
+            )}>
+              <Receipt className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-600" />
+            </div>
+            <span className="text-[10px] leading-tight font-bold text-emerald-600">POS</span>
+          </Link>
+
+          {/* 3. Quotations */}
+          <Link
+            href="/staff/quotations"
+            className={cn(
+              "flex flex-col items-center justify-center h-full transition-colors",
+              pathname === "/staff/quotations"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <FileCheck className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="text-[10px] leading-tight mt-0.5">Quotes</span>
+          </Link>
+
+          {/* 4. Notifications */}
+          <Link
+            href="/staff/notifications"
+            className={cn(
+              "relative flex flex-col items-center justify-center h-full transition-colors",
+              pathname === "/staff/notifications"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <div className="relative">
+              <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
+              {unreadNotifications > 0 && (
+                <span className="absolute -top-1 -right-2 inline-flex items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold text-white min-w-[15px] h-[15px]">
+                  {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] leading-tight mt-0.5">Alerts</span>
+          </Link>
+
+          {/* 5. Profile */}
+          <Link
+            href="/staff/profile"
+            className={cn(
+              "flex flex-col items-center justify-center h-full transition-colors",
+              pathname === "/staff/profile"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <UserCheck className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="text-[10px] leading-tight mt-0.5">Profile</span>
+          </Link>
+        </div>
+      </nav>
     </div>
   );
 }

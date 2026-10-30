@@ -273,9 +273,9 @@ export function NotificationCenter({ userRole = "admin" }: NotificationCenterPro
       </div>
 
       {/* SUMMARY INDICATORS / KPIS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         {/* Total Notifications */}
-        <div className="rounded-xl border bg-card p-4 shadow-xs">
+        <div className="rounded-xl border bg-card p-3 sm:p-4 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">Total Notifications</span>
             <div className="h-7 w-7 rounded-lg bg-muted flex items-center justify-center text-muted-foreground">
@@ -287,7 +287,7 @@ export function NotificationCenter({ userRole = "admin" }: NotificationCenterPro
         </div>
 
         {/* Unread Alerts */}
-        <div className="rounded-xl border bg-card p-4 shadow-xs">
+        <div className="rounded-xl border bg-card p-3 sm:p-4 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">Unread Alerts</span>
             <div className="h-7 w-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
@@ -301,7 +301,7 @@ export function NotificationCenter({ userRole = "admin" }: NotificationCenterPro
         </div>
 
         {/* Critical Alerts */}
-        <div className="rounded-xl border bg-card p-4 shadow-xs">
+        <div className="rounded-xl border bg-card p-3 sm:p-4 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">Critical Alerts</span>
             <div className="h-7 w-7 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center">
@@ -315,7 +315,7 @@ export function NotificationCenter({ userRole = "admin" }: NotificationCenterPro
         </div>
 
         {/* Active Low Stock */}
-        <div className="rounded-xl border bg-card p-4 shadow-xs">
+        <div className="rounded-xl border bg-card p-3 sm:p-4 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">Active Low Stock</span>
             <div className="h-7 w-7 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">

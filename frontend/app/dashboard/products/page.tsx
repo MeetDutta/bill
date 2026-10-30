@@ -479,55 +479,95 @@ export default function ProductsPage() {
                 No products found
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b text-left text-sm font-medium text-muted-foreground">
-                      <th className="pb-3 pr-4">Product Name</th>
-                      <th className="pb-3 pr-4">SKU</th>
-                      <th className="pb-3 pr-4">Category</th>
-                      <th className="pb-3 pr-4">External ID</th>
-                      <th className="pb-3 pr-4">Price</th>
-                      <th className="pb-3 pr-4">Tax Rate</th>
-                      <th className="pb-3 pr-4">Status</th>
-                      <th className="pb-3 text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((product) => {
-                      const catName =
-                        (product as any).category_name ||
-                        (typeof product.category === "string" ? product.category : product.category?.name) ||
-                        "General";
-                      return (
-                        <tr key={product.id} className="border-b">
-                          <td className="py-3 pr-4 font-medium">{product.name}</td>
-                          <td className="py-3 pr-4">{product.sku || "—"}</td>
-                          <td className="py-3 pr-4 text-muted-foreground">{catName}</td>
-                          <td className="py-3 pr-4">{product.external_id || "—"}</td>
-                          <td className="py-3 pr-4">₹{Number(product.unit_price).toLocaleString()}</td>
-                          <td className="py-3 pr-4">{product.tax_rate}%</td>
-                          <td className="py-3 pr-4">
-                            <span className="inline-flex rounded-full bg-green-100 dark:bg-green-950/40 px-2 py-0.5 text-xs font-semibold text-green-700 dark:text-green-400">
-                              Active
-                            </span>
-                          </td>
-                          <td className="py-3 text-center">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 text-xs gap-1"
-                              onClick={() => handleOpenEdit(product)}
-                            >
-                              <Pencil className="h-3 w-3 text-amber-600" /> Edit
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                {/* Mobile Responsive Cards */}
+                <div className="sm:hidden space-y-2.5">
+                  {filtered.map((product) => {
+                    const catName =
+                      (product as any).category_name ||
+                      (typeof product.category === "string" ? product.category : product.category?.name) ||
+                      "General";
+                    return (
+                      <div key={product.id} className="rounded-lg border bg-card p-3 shadow-2xs space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-sm text-foreground truncate">{product.name}</h4>
+                            <p className="text-[11px] font-mono text-muted-foreground">{product.sku || "No SKU"} • {catName}</p>
+                          </div>
+                          <span className="inline-flex rounded-full bg-green-100 dark:bg-green-950/40 px-2 py-0.5 text-[10px] font-semibold text-green-700 dark:text-green-400 shrink-0">
+                            Active
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between pt-1 border-t text-xs">
+                          <div>
+                            <span className="font-bold text-sm text-foreground">₹{Number(product.unit_price).toLocaleString()}</span>
+                            <span className="text-[10px] text-muted-foreground ml-1.5">({product.tax_rate}% GST)</span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs gap-1 px-3 touch-target-min"
+                            onClick={() => handleOpenEdit(product)}
+                          >
+                            <Pencil className="h-3.5 w-3.5 text-amber-600" /> Edit
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Data Table */}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b text-left text-sm font-medium text-muted-foreground">
+                        <th className="pb-3 pr-4">Product Name</th>
+                        <th className="pb-3 pr-4">SKU</th>
+                        <th className="pb-3 pr-4">Category</th>
+                        <th className="pb-3 pr-4">External ID</th>
+                        <th className="pb-3 pr-4">Price</th>
+                        <th className="pb-3 pr-4">Tax Rate</th>
+                        <th className="pb-3 pr-4">Status</th>
+                        <th className="pb-3 text-center">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((product) => {
+                        const catName =
+                          (product as any).category_name ||
+                          (typeof product.category === "string" ? product.category : product.category?.name) ||
+                          "General";
+                        return (
+                          <tr key={product.id} className="border-b">
+                            <td className="py-3 pr-4 font-medium">{product.name}</td>
+                            <td className="py-3 pr-4">{product.sku || "—"}</td>
+                            <td className="py-3 pr-4 text-muted-foreground">{catName}</td>
+                            <td className="py-3 pr-4">{product.external_id || "—"}</td>
+                            <td className="py-3 pr-4">₹{Number(product.unit_price).toLocaleString()}</td>
+                            <td className="py-3 pr-4">{product.tax_rate}%</td>
+                            <td className="py-3 pr-4">
+                              <span className="inline-flex rounded-full bg-green-100 dark:bg-green-950/40 px-2 py-0.5 text-xs font-semibold text-green-700 dark:text-green-400">
+                                Active
+                              </span>
+                            </td>
+                            <td className="py-3 text-center">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs gap-1"
+                                onClick={() => handleOpenEdit(product)}
+                              >
+                                <Pencil className="h-3 w-3 text-amber-600" /> Edit
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

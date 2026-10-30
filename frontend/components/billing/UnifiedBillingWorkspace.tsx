@@ -1233,26 +1233,26 @@ export default function UnifiedBillingWorkspace({
               type="button"
               onClick={() => setMobileTab("catalog")}
               className={cn(
-                "flex-1 py-1.5 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all",
+                "flex-1 py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all min-h-[40px] touch-target-min",
                 mobileTab === "catalog"
-                  ? "bg-background text-foreground shadow-xs border"
+                  ? "bg-background text-foreground shadow-xs border font-bold"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <ShoppingBag className="h-3.5 w-3.5" />
+              <ShoppingBag className="h-4 w-4" />
               <span>Catalog & Items</span>
             </button>
             <button
               type="button"
               onClick={() => setMobileTab("cart")}
               className={cn(
-                "flex-1 py-1.5 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all relative",
+                "flex-1 py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all relative min-h-[40px] touch-target-min",
                 mobileTab === "cart"
-                  ? "bg-background text-foreground shadow-xs border"
+                  ? "bg-background text-foreground shadow-xs border font-bold"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <Receipt className="h-3.5 w-3.5" />
+              <Receipt className="h-4 w-4 text-emerald-600" />
               <span>Cart & Checkout</span>
               {cart.length > 0 && (
                 <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground leading-none">
@@ -1496,30 +1496,36 @@ export default function UnifiedBillingWorkspace({
                           </div>
 
                           {/* Quantity Controls */}
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 shrink-0">
                             <button
+                              type="button"
                               onClick={() => updateCartItemQuantity(idx, -1)}
-                              className="flex h-6 w-6 items-center justify-center rounded border bg-muted hover:bg-muted/80"
+                              className="flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border bg-muted hover:bg-muted/80 active:bg-muted/60 transition-colors"
+                              aria-label="Decrease quantity"
                             >
-                              <Minus className="h-3 w-3" />
+                              <Minus className="h-3.5 w-3.5" />
                             </button>
-                            <span className="w-6 text-center font-bold text-xs">{item.quantity}</span>
+                            <span className="w-7 text-center font-bold text-xs">{item.quantity}</span>
                             <button
+                              type="button"
                               onClick={() => updateCartItemQuantity(idx, 1)}
-                              className="flex h-6 w-6 items-center justify-center rounded border bg-muted hover:bg-muted/80"
+                              className="flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border bg-muted hover:bg-muted/80 active:bg-muted/60 transition-colors"
+                              aria-label="Increase quantity"
                             >
-                              <Plus className="h-3 w-3" />
+                              <Plus className="h-3.5 w-3.5" />
                             </button>
                           </div>
 
                           {/* Line Total & Remove */}
-                          <div className="text-right">
+                          <div className="text-right shrink-0">
                             <p className="font-bold text-foreground">₹{lineTotal.toFixed(2)}</p>
                             <button
+                              type="button"
                               onClick={() => removeFromCart(idx)}
-                              className="text-[11px] text-destructive hover:underline"
+                              className="p-1 text-destructive hover:bg-destructive/10 rounded-md inline-flex items-center justify-center transition-colors"
+                              aria-label="Remove item"
                             >
-                              <Trash2 className="h-3.5 w-3.5 inline" />
+                              <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </div>
@@ -1633,39 +1639,39 @@ export default function UnifiedBillingWorkspace({
             </div>
           </div>
 
-          {/* Sticky Floating Mobile Checkout Bar */}
+          {/* Sticky Floating Mobile Checkout Bar (Sits safely above mobile bottom navigation) */}
           {mobileTab === "catalog" && cart.length > 0 && (
-            <div className="lg:hidden fixed bottom-3 left-3 right-3 z-30 flex items-center justify-between rounded-xl bg-slate-900/95 text-white p-3 shadow-2xl border border-slate-700/80 backdrop-blur-md animate-in slide-in-from-bottom-2">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs shadow-sm">
+            <div className="lg:hidden fixed bottom-[calc(3.75rem+env(safe-area-inset-bottom,0px))] left-2.5 right-2.5 sm:left-4 sm:right-4 z-30 flex items-center justify-between rounded-xl bg-slate-900/95 text-white p-2.5 sm:p-3 shadow-2xl border border-slate-700/80 backdrop-blur-md animate-in slide-in-from-bottom-2">
+              <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white font-bold text-xs shadow-sm shrink-0">
                   {cart.reduce((s, i) => s + i.quantity, 0)}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-emerald-400">₹{grandTotalNum.toFixed(2)}</span>
-                    <span className="text-[10px] text-slate-400">({cart.length} items)</span>
+                    <span className="text-xs sm:text-sm font-bold text-emerald-400">₹{grandTotalNum.toFixed(2)}</span>
+                    <span className="text-[10px] text-slate-400 truncate">({cart.length} items)</span>
                   </div>
-                  <p className="text-[10px] text-slate-300">
-                    {isWalkIn ? "Walk-in Customer" : selectedCustomer?.full_name || "Customer Selected"}
+                  <p className="text-[10px] text-slate-300 truncate">
+                    {isWalkIn ? "Walk-in" : selectedCustomer?.full_name || "Customer Selected"}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => setMobileTab("cart")}
-                  className="text-xs h-8 px-2.5 font-medium border-slate-600 bg-slate-800 text-white hover:bg-slate-700"
+                  className="text-xs h-9 px-2.5 font-medium border-slate-600 bg-slate-800 text-white hover:bg-slate-700 active:bg-slate-600"
                 >
                   View Cart
                 </Button>
                 <Button
                   size="sm"
                   onClick={openPaymentModal}
-                  className="text-xs h-8 px-3 font-bold bg-primary hover:bg-primary/90 text-primary-foreground gap-1 shadow-sm"
+                  className="text-xs h-9 px-3 font-bold bg-emerald-600 hover:bg-emerald-500 text-white gap-1 shadow-sm active:bg-emerald-700"
                 >
                   <CreditCard className="h-3.5 w-3.5" />
-                  Pay Now
+                  <span>Pay</span>
                 </Button>
               </div>
             </div>
@@ -2278,12 +2284,13 @@ export default function UnifiedBillingWorkspace({
             )}
           </div>
 
-          <DialogFooter className="mt-2 pt-2 border-t flex flex-row items-center justify-between sm:justify-end gap-2 shrink-0 bg-background">
+          <DialogFooter className="mt-auto pt-3 border-t flex flex-row items-center justify-between sm:justify-end gap-2 shrink-0 bg-background sticky bottom-0 z-20 safe-area-bottom">
             <Button
               type="button"
               variant="outline"
               onClick={() => setPaymentModalOpen(false)}
               disabled={checkoutLoading}
+              className="h-11 sm:h-9 text-xs sm:text-sm touch-target-min"
             >
               Cancel
             </Button>
@@ -2291,7 +2298,7 @@ export default function UnifiedBillingWorkspace({
               type="button"
               onClick={handleCheckout}
               disabled={checkoutLoading || (payments.some((p) => p.method === "CREDIT") && isWalkIn)}
-              className="font-bold bg-primary text-primary-foreground gap-1.5 min-w-[130px]"
+              className="h-11 sm:h-9 font-bold bg-primary text-primary-foreground gap-1.5 min-w-[140px] text-xs sm:text-sm touch-target-min shadow-md"
             >
               {checkoutLoading ? (
                 <>

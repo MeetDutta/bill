@@ -368,8 +368,8 @@ export default function DashboardPage() {
           </span>
         </div>
 
-        {/* 6-Card Responsive Grid: 2 cols on mobile, 3 cols on tablet, 6 cols on desktop */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
+        {/* 6-Card Responsive Grid: 1 col on 320px, 2 cols on 360px+, 3 cols on tablet, 6 cols on desktop */}
+        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
           {/* Card 1: Today's Net Sales */}
           <div
             role="button"
@@ -571,7 +571,7 @@ export default function DashboardPage() {
         </div>
 
         {/* 6-Card Responsive Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
+        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
           {/* Card 1: Stock Value */}
           <div
             role="button"

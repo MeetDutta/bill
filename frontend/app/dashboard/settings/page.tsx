@@ -513,7 +513,7 @@ export default function SettingsPage() {
 
               {whatsappTest && (
                 <div
-                  className={`rounded-md p-3 text-xs border ${
+                  className={`rounded-md p-3 text-xs border break-all ${
                     whatsappTest.connected
                       ? "bg-green-50/80 border-green-200 text-green-900 dark:bg-green-950/30 dark:border-green-800 dark:text-green-300"
                       : "bg-red-50/80 border-red-200 text-red-900 dark:bg-red-950/30 dark:border-red-800 dark:text-red-300"
@@ -524,13 +524,13 @@ export default function SettingsPage() {
                   <p className="font-semibold">
                     {whatsappTest.connected ? "✓ Meta Cloud API Connected & Verified" : "✕ Meta Cloud API Diagnostic Failed"}
                   </p>
-                  <p className="mt-1">{whatsappTest.message}</p>
+                  <p className="mt-1 break-words">{whatsappTest.message}</p>
                   {whatsappTest.connected && (whatsappTest.verified_name || whatsappTest.phone_number) && (
-                    <p className="mt-1 font-mono text-[11px]">
+                    <p className="mt-1 font-mono text-[11px] break-all">
                       Registered Line: {[whatsappTest.verified_name, whatsappTest.phone_number].filter(Boolean).join(" · ")}
                     </p>
                   )}
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-current/10 text-[11px] opacity-80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mt-2 pt-2 border-t border-current/10 text-[11px] opacity-80">
                     <span>Last checked: {new Date(whatsappTest.checked_at).toLocaleString()}</span>
                     <span>{whatsappTest.connected ? "API auth verified (delivery depends on customer opt-in)" : "Action: Check token permissions or Phone ID"}</span>
                   </div>
@@ -538,7 +538,7 @@ export default function SettingsPage() {
               )}
             </div>
 
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -552,7 +552,7 @@ export default function SettingsPage() {
                 </label>
               </div>
 
-              <Button type="submit" disabled={savingWhatsApp} size="sm" className="gap-1.5 text-xs">
+              <Button type="submit" disabled={savingWhatsApp} className="w-full sm:w-auto h-10 sm:h-9 gap-1.5 text-xs touch-target-min">
                 <Save className="h-3.5 w-3.5" />
                 {savingWhatsApp ? "Saving..." : "Save WhatsApp Credentials"}
               </Button>
@@ -575,7 +575,7 @@ export default function SettingsPage() {
         <CardContent className="space-y-4 text-xs">
           <div className="space-y-1">
             <label className="font-medium">Transaction Ingestion API Endpoint</label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <Input
                 readOnly
                 value="http://localhost:8000/api/v1/transactions/ingest/"
@@ -585,7 +585,7 @@ export default function SettingsPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => navigator.clipboard.writeText("http://localhost:8000/api/v1/transactions/ingest/")}
-                className="text-xs shrink-0"
+                className="text-xs shrink-0 h-10 sm:h-9 touch-target-min"
               >
                 Copy Endpoint
               </Button>

@@ -496,10 +496,107 @@ export default function CurrentStockPage() {
         )}
       </Card>
 
-      {/* Inventory Table */}
+      {/* Inventory Table & Mobile Cards */}
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          {/* Mobile Inventory Cards */}
+          <div className="md:hidden divide-y">
+            {loading ? (
+              <div className="py-12 text-center text-xs text-muted-foreground">
+                Loading current stock...
+              </div>
+            ) : filteredProducts.length === 0 ? (
+              <div className="py-12 text-center text-xs text-muted-foreground">
+                No products found.
+              </div>
+            ) : (
+              filteredProducts.map((prod) => {
+                const currentStock = parseFloat(String(prod.current_stock || 0));
+                const reorder = parseFloat(String((prod as any).reorder_level || 5));
+                const cost = parseFloat(String((prod as any).cost_price || (prod as any).purchase_price || 0));
+                const selling = parseFloat(String((prod as any).price || prod.selling_price || 0));
+                const lineValue = currentStock * cost;
+                const isLow = currentStock <= reorder;
+                const isOutOfStock = currentStock <= 0;
+
+                return (
+                  <div key={prod.id} className="p-3.5 space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-sm text-foreground truncate">{prod.name}</h4>
+                        <p className="text-[11px] font-mono text-muted-foreground">
+                          {prod.sku || "No SKU"} • {(prod as any).category_name || (prod as any).category || "General"}
+                        </p>
+                      </div>
+                      {isOutOfStock ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-700 border border-red-500/20 shrink-0">
+                          Out of Stock
+                        </span>
+                      ) : isLow ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-700 border border-amber-500/20 shrink-0">
+                          Low Stock
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 shrink-0">
+                          In Stock
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Stock & Financial Metrics Row */}
+                    <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/30 p-2 text-xs">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground block">On-Hand</span>
+                        <span className="font-extrabold text-foreground">{currentStock}</span>
+                        <span className="text-[9px] text-muted-foreground block">(Min: {reorder})</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground block">Sell Price</span>
+                        <span className="font-bold text-foreground">₹{selling.toFixed(2)}</span>
+                        <span className="text-[9px] text-muted-foreground block">Cost: ₹{cost.toFixed(0)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground block">Total Value</span>
+                        <span className="font-bold text-emerald-600">₹{lineValue.toFixed(0)}</span>
+                      </div>
+                    </div>
+
+                    {/* Mobile Action Controls */}
+                    <div className="flex items-center justify-end gap-1.5 pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs gap-1 px-2.5 touch-target-min"
+                        onClick={() => handleOpenEditProduct(prod)}
+                      >
+                        <Pencil className="w-3.5 h-3.5 text-amber-600" /> Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs gap-1 px-2.5 touch-target-min"
+                        onClick={() => {
+                          setSelectedProduct(prod);
+                          setAdjustmentData({ movement_type: "ADJUSTMENT", quantity: "", notes: "" });
+                          setAdjustModalOpen(true);
+                        }}
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" /> Adjust
+                      </Button>
+                      <Link href={`/dashboard/inventory/movements?product_id=${prod.id}`}>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="History">
+                          <History className="w-4 h-4 text-blue-600" />
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 border-b">
                 <tr>

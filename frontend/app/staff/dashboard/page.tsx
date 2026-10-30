@@ -330,7 +330,70 @@ export default function StaffDashboardPage() {
             </Link>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Transaction Cards (< sm) */}
+          <div className="sm:hidden divide-y divide-border">
+            {(!data?.recent_bills || data.recent_bills.length === 0) ? (
+              <div className="py-8 text-center text-xs text-muted-foreground">
+                No transactions recorded yet today. Click &quot;Open POS&quot; to begin billing.
+              </div>
+            ) : (
+              data.recent_bills.map((bill) => {
+                const isPaid = bill.payment_status === "paid";
+                return (
+                  <div key={bill.id} className="p-3.5 space-y-2 hover:bg-muted/30 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-xs text-foreground">
+                        #{bill.invoice_number}
+                      </span>
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          isPaid
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                            : "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20"
+                        }`}
+                      >
+                        {bill.payment_status}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs">
+                      <div>
+                        <p className="font-medium text-foreground">{bill.customer_name}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {new Date(bill.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-bold text-sm text-foreground">
+                          {formatCurrency(bill.total)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-border/50">
+                      <button
+                        onClick={() => handlePrintPdf(bill.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium text-foreground hover:bg-muted touch-target-min"
+                      >
+                        <Printer className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>Print</span>
+                      </button>
+                      <button
+                        onClick={() => handleDownloadPdf(bill.id, bill.invoice_number)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium text-foreground hover:bg-muted touch-target-min"
+                      >
+                        <Download className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>Download</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop Table (>= sm) */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="border-b bg-muted/30 text-muted-foreground uppercase text-[10px] font-bold">
                 <tr>

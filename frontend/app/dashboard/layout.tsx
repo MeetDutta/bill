@@ -39,6 +39,7 @@ import {
   X,
   Smartphone,
   Bell,
+  Search,
 } from "lucide-react";
 import { CopilotDrawer } from "@/components/CopilotDrawer";
 import { authApi, notificationApi } from "@/services/api";
@@ -192,6 +193,7 @@ export default function DashboardLayout({
   }, [pathname]);
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [menuSearch, setMenuSearch] = useState("");
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   // Helper to determine if an item is active
@@ -314,12 +316,12 @@ export default function DashboardLayout({
       {/* Sidebar (Desktop fixed & Mobile drawer) */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r bg-card transition-transform duration-200 ease-in-out lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-72 sm:w-80 lg:w-64 flex-col border-r bg-card transition-transform duration-200 ease-in-out lg:translate-x-0 safe-area-top",
           mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
         )}
       >
         {/* Brand header */}
-        <div className="flex h-16 items-center justify-between border-b px-5">
+        <div className="flex h-16 items-center justify-between border-b px-5 shrink-0">
           <Link href="/dashboard" onClick={closeMobile} className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-black text-lg tracking-wider shadow-sm">
               BM
@@ -331,17 +333,49 @@ export default function DashboardLayout({
           </Link>
           <button
             onClick={closeMobile}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden touch-target-min"
             aria-label="Close menu"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
+        {/* Quick Menu Search (Mobile friendly) */}
+        <div className="px-3 pt-3 pb-1 shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search all 25+ pages..."
+              value={menuSearch}
+              onChange={(e) => setMenuSearch(e.target.value)}
+              className="w-full pl-8 pr-7 py-1.5 text-xs rounded-md border bg-muted/30 placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            {menuSearch && (
+              <button
+                type="button"
+                onClick={() => setMenuSearch("")}
+                className="absolute right-2 top-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Scrollable Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-4 text-xs select-none">
+        <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-4 text-xs select-none">
           {navSections.map((section) => {
-            const isCollapsed = Boolean(collapsedSections[section.key]);
+            const filteredItems = menuSearch.trim()
+              ? section.items.filter((item) =>
+                  item.name.toLowerCase().includes(menuSearch.toLowerCase()) ||
+                  section.title.toLowerCase().includes(menuSearch.toLowerCase())
+                )
+              : section.items;
+
+            if (menuSearch.trim() && filteredItems.length === 0) return null;
+
+            const isCollapsed = Boolean(collapsedSections[section.key]) && !menuSearch.trim();
             const containsActive = section.items.some(isItemActive);
 
             return (
@@ -349,7 +383,7 @@ export default function DashboardLayout({
                 {/* Section header toggle */}
                 <button
                   type="button"
-                  onClick={() => toggleSection(section.key)}
+                  onClick={() => !menuSearch.trim() && toggleSection(section.key)}
                   className={cn(
                     "flex w-full items-center justify-between px-2.5 py-1.5 text-[11px] font-bold tracking-wider rounded-md uppercase transition-colors",
                     containsActive
@@ -358,17 +392,19 @@ export default function DashboardLayout({
                   )}
                 >
                   <span>{section.title}</span>
-                  {isCollapsed ? (
-                    <ChevronRight className="h-3.5 w-3.5 opacity-70" />
-                  ) : (
-                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                  {!menuSearch.trim() && (
+                    isCollapsed ? (
+                      <ChevronRight className="h-3.5 w-3.5 opacity-70" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                    )
                   )}
                 </button>
 
                 {/* Section children */}
-                {!isCollapsed && (
+                {(!isCollapsed || menuSearch.trim()) && (
                   <div className="space-y-0.5 pt-0.5 pl-1">
-                    {section.items.map((item) => {
+                    {filteredItems.map((item) => {
                       const active = isItemActive(item);
                       const Icon = item.icon;
 
@@ -378,7 +414,7 @@ export default function DashboardLayout({
                           href={item.href}
                           onClick={closeMobile}
                           className={cn(
-                            "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs font-medium transition-all",
+                            "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs font-medium transition-all min-h-[38px]",
                             active
                               ? "bg-primary text-primary-foreground font-semibold shadow-sm"
                               : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -397,14 +433,14 @@ export default function DashboardLayout({
         </nav>
 
         {/* Sidebar Footer / Logout */}
-        <div className="border-t p-3 bg-card/50">
+        <div className="border-t p-3 bg-card/50 shrink-0 safe-area-bottom">
           <button
             onClick={() => {
               localStorage.removeItem("access_token");
               localStorage.removeItem("refresh_token");
               window.location.href = "/login";
             }}
-            className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+            className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors min-h-[44px]"
           >
             <LogOut className="h-4 w-4 shrink-0" />
             <span>Sign Out</span>
@@ -413,85 +449,150 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 flex-col lg:pl-64 min-w-0">
+      <div className="flex flex-1 flex-col lg:pl-64 min-w-0 w-full overflow-x-hidden">
         {/* Controlled Pilot Mode Monitored Banner */}
-        <div className="bg-gradient-to-r from-blue-900/90 via-indigo-900/90 to-purple-900/90 border-b border-indigo-700/50 px-4 py-1.5 text-xs text-indigo-100 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+        <div className="bg-gradient-to-r from-blue-900/90 via-indigo-900/90 to-purple-900/90 border-b border-indigo-700/50 px-3 sm:px-4 py-1.5 text-xs text-indigo-100 flex flex-wrap items-center justify-between gap-1.5 shadow-sm">
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30">
               PILOT v1.0
             </span>
-            <span className="font-medium text-xs">Controlled Business Pilot Deployment — Real-time Financial & System Integrity Monitored</span>
+            <span className="font-medium text-[11px] sm:text-xs">Business Deployment — Real-time Monitored</span>
           </div>
-          <Link href="/dashboard/health" className="underline font-semibold hover:text-white transition-colors text-[11px] flex items-center gap-1">
-            System Health & Backups →
+          <Link href="/dashboard/health" className="underline font-semibold hover:text-white transition-colors text-[10px] sm:text-[11px] flex items-center gap-1">
+            System Health →
           </Link>
         </div>
 
         {/* Top Header */}
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/80 px-4 md:px-6 backdrop-blur-md">
-          <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-30 flex h-14 sm:h-16 items-center justify-between border-b bg-card/90 px-3 sm:px-4 md:px-6 backdrop-blur-md">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
               onClick={() => setMobileOpen(true)}
-              className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden touch-target-min shrink-0"
               aria-label="Open navigation drawer"
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div className="flex items-center gap-2">
-              <span className="text-xs uppercase font-semibold text-muted-foreground tracking-wider hidden sm:inline">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-xs uppercase font-semibold text-muted-foreground tracking-wider hidden md:inline shrink-0">
                 BillMeet /
               </span>
-              <h2 className="text-base md:text-lg font-bold text-foreground">
+              <h2 className="text-sm sm:text-base md:text-lg font-bold text-foreground truncate">
                 {activePageTitle}
               </h2>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <Link
               href="/dashboard/notifications"
               className={cn(
-                "relative flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-2xs transition-all",
+                "relative flex items-center gap-1 rounded-lg border px-2 sm:px-2.5 py-1.5 text-xs font-semibold shadow-2xs transition-all min-h-[38px]",
                 pathname === "/dashboard/notifications"
                   ? "bg-primary text-primary-foreground border-primary"
                   : "border-border bg-card hover:bg-accent text-foreground"
               )}
               title="Notifications Center"
             >
-              <Bell className="h-3.5 w-3.5" />
-              <span>Notifications</span>
+              <Bell className="h-4 w-4" />
+              <span className="hidden sm:inline">Alerts</span>
               {unreadNotifications > 0 && (
-                <span className="inline-flex items-center justify-center rounded-full bg-red-600 px-1.5 py-0.2 text-[10px] font-bold text-white min-w-[18px] h-[18px]">
+                <span className="inline-flex items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white min-w-[18px] h-[18px]">
                   {unreadNotifications > 99 ? "99+" : unreadNotifications}
                 </span>
               )}
             </Link>
             <Link
               href="/dashboard/billing"
-              className="flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all"
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all min-h-[38px]"
             >
-              <Receipt className="h-3.5 w-3.5" />
+              <Receipt className="h-4 w-4" />
               <span>Billing</span>
             </Link>
           </div>
         </header>
 
-        {/* Mobile Viewport Prompt Banner (visible only on small mobile viewports) */}
-        <div className="md:hidden bg-blue-50 border-b border-blue-100 px-3 py-1.5 text-xs flex items-center justify-between text-blue-900">
-          <span className="text-[11px] font-medium">Using a phone? Switch to the mobile experience</span>
-          <Link
-            href="/m/dashboard"
-            className="rounded bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm hover:bg-blue-700 shrink-0 ml-2"
-          >
-            Mobile POS →
-          </Link>
-        </div>
-
-        {/* Page Content */}
-        <main className="flex-1 p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto min-w-0 overflow-x-hidden">
+        {/* Page Content with bottom clearance for mobile nav */}
+        <main className="flex-1 p-2.5 sm:p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto min-w-0 overflow-x-hidden pb-24 lg:pb-8">
           {children}
         </main>
       </div>
+
+      {/* Mobile Native Bottom Navigation Bar */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-card/95 border-t border-border backdrop-blur-md safe-area-bottom shadow-lg">
+        <div className="grid grid-cols-5 h-14 items-center">
+          {/* 1. Dashboard */}
+          <Link
+            href="/dashboard"
+            className={cn(
+              "flex flex-col items-center justify-center h-full transition-colors",
+              pathname === "/dashboard"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <LayoutDashboard className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="text-[10px] leading-tight mt-0.5">Home</span>
+          </Link>
+
+          {/* 2. POS / Billing */}
+          <Link
+            href="/dashboard/billing"
+            className={cn(
+              "flex flex-col items-center justify-center h-full transition-colors",
+              pathname === "/dashboard/billing" || pathname === "/dashboard/pos"
+                ? "text-emerald-600 font-extrabold"
+                : "text-muted-foreground hover:text-emerald-600"
+            )}
+          >
+            <div className={cn(
+              "p-1 rounded-full",
+              pathname === "/dashboard/billing" || pathname === "/dashboard/pos" ? "bg-emerald-500/15" : ""
+            )}>
+              <Receipt className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-600" />
+            </div>
+            <span className="text-[10px] leading-tight font-bold text-emerald-600">POS</span>
+          </Link>
+
+          {/* 3. Inventory */}
+          <Link
+            href="/dashboard/inventory"
+            className={cn(
+              "flex flex-col items-center justify-center h-full transition-colors",
+              pathname === "/dashboard/inventory" || pathname?.startsWith("/dashboard/inventory")
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Boxes className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="text-[10px] leading-tight mt-0.5">Stock</span>
+          </Link>
+
+          {/* 4. Sales Reports */}
+          <Link
+            href="/dashboard/reports/sales"
+            className={cn(
+              "flex flex-col items-center justify-center h-full transition-colors",
+              pathname?.startsWith("/dashboard/reports")
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="text-[10px] leading-tight mt-0.5">Reports</span>
+          </Link>
+
+          {/* 5. All Menu */}
+          <button
+            type="button"
+            onClick={() => setMobileOpen(true)}
+            className="flex flex-col items-center justify-center h-full text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="text-[10px] leading-tight mt-0.5">Menu</span>
+          </button>
+        </div>
+      </nav>
 
       {/* Floating AI Copilot */}
       <CopilotDrawer />

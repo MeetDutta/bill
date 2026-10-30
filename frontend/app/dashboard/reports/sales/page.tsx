@@ -189,7 +189,55 @@ export default function SalesReportPage() {
           </p>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          {/* Mobile Sales Ledger Cards */}
+          <div className="sm:hidden divide-y">
+            {loading ? (
+              <div className="py-12 text-center text-xs text-muted-foreground">
+                Generating sales report...
+              </div>
+            ) : transactions.length === 0 ? (
+              <div className="py-12 text-center text-xs text-muted-foreground p-4">
+                No sales recorded in this timeframe.
+              </div>
+            ) : (
+              transactions.map((tx: any) => (
+                <div key={tx.id} className="p-3.5 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="font-mono font-bold text-xs text-foreground block">{tx.invoice_number}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {new Date(tx.date).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-muted uppercase">
+                        {tx.payment_method || "CASH"}
+                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-700">
+                        {tx.payment_status?.toUpperCase() || "PAID"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-foreground">{tx.customer || "Walk-in"}</span>
+                    <span className="font-extrabold text-sm text-foreground">₹{parseFloat(tx.total).toFixed(2)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t text-[11px] text-muted-foreground">
+                    <span>Subtotal: ₹{parseFloat(tx.subtotal).toFixed(2)}</span>
+                    {parseFloat(tx.discount) > 0 && (
+                      <span className="text-rose-500">-₹{parseFloat(tx.discount).toFixed(2)}</span>
+                    )}
+                    <span className="text-emerald-600">Tax: ₹{parseFloat(tx.tax).toFixed(2)}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Data Table */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 border-b">
                 <tr>

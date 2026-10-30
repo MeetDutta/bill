@@ -53,7 +53,7 @@ export default function RegisterPage() {
                 {error}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 xs:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <label className="text-sm font-medium">First Name</label>
                 <Input

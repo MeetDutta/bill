@@ -234,38 +234,76 @@ export default function CustomersPage() {
               No customers found
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b text-left text-sm font-medium text-muted-foreground">
-                    <th className="pb-3 pr-4">Name</th>
-                    <th className="pb-3 pr-4">Phone</th>
-                    <th className="pb-3 pr-4">Email</th>
-                    <th className="pb-3 pr-4">Purchases</th>
-                    <th className="pb-3 pr-4">Total Spend</th>
-                    <th className="pb-3">Segment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((customer) => (
-                    <tr key={customer.id} className="border-b">
-                      <td className="py-3 pr-4 font-medium"><Link className="inline-flex items-center gap-1 hover:text-primary" href={`/dashboard/customers/${customer.id}`}>{customer.full_name}<ArrowUpRight className="h-3 w-3" /></Link></td>
-                      <td className="py-3 pr-4">{customer.phone}</td>
-                      <td className="py-3 pr-4">{customer.email || "—"}</td>
-                      <td className="py-3 pr-4">{customer.total_purchases}</td>
-                      <td className="py-3 pr-4">
-                        ₹{Number(customer.total_spend || 0).toLocaleString()}
-                      </td>
-                      <td className="py-3">
-                        <span className="inline-flex rounded-full bg-primary/10 px-2 py-1 text-xs font-semibold capitalize text-primary">
-                          {customer.segment || "New"}
-                        </span>
-                      </td>
+            <>
+              {/* Mobile Customer Cards */}
+              <div className="sm:hidden space-y-2.5">
+                {filtered.map((customer) => (
+                  <div key={customer.id} className="rounded-lg border bg-card p-3 shadow-2xs space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <Link
+                          href={`/dashboard/customers/${customer.id}`}
+                          className="font-bold text-sm text-foreground hover:text-primary flex items-center gap-1 truncate"
+                        >
+                          <span>{customer.full_name}</span>
+                          <ArrowUpRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                        </Link>
+                        <p className="text-xs font-mono text-muted-foreground mt-0.5">{customer.phone}</p>
+                        {customer.email && (
+                          <p className="text-[11px] text-muted-foreground truncate">{customer.email}</p>
+                        )}
+                      </div>
+                      <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold capitalize text-primary shrink-0">
+                        {customer.segment || "New"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t text-xs">
+                      <span className="text-muted-foreground">
+                        Purchases: <strong className="text-foreground">{customer.total_purchases}</strong>
+                      </span>
+                      <span className="font-extrabold text-foreground">
+                        Spend: ₹{Number(customer.total_spend || 0).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop Data Table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b text-left text-sm font-medium text-muted-foreground">
+                      <th className="pb-3 pr-4">Name</th>
+                      <th className="pb-3 pr-4">Phone</th>
+                      <th className="pb-3 pr-4">Email</th>
+                      <th className="pb-3 pr-4">Purchases</th>
+                      <th className="pb-3 pr-4">Total Spend</th>
+                      <th className="pb-3">Segment</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filtered.map((customer) => (
+                      <tr key={customer.id} className="border-b">
+                        <td className="py-3 pr-4 font-medium"><Link className="inline-flex items-center gap-1 hover:text-primary" href={`/dashboard/customers/${customer.id}`}>{customer.full_name}<ArrowUpRight className="h-3 w-3" /></Link></td>
+                        <td className="py-3 pr-4">{customer.phone}</td>
+                        <td className="py-3 pr-4">{customer.email || "—"}</td>
+                        <td className="py-3 pr-4">{customer.total_purchases}</td>
+                        <td className="py-3 pr-4">
+                          ₹{Number(customer.total_spend || 0).toLocaleString()}
+                        </td>
+                        <td className="py-3">
+                          <span className="inline-flex rounded-full bg-primary/10 px-2 py-1 text-xs font-semibold capitalize text-primary">
+                            {customer.segment || "New"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
