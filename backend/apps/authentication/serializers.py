@@ -23,10 +23,24 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         from apps.organizations.models import Organization
+        from apps.stores.models import Store
+        from apps.billing.models import BusinessConfig
 
         password = validated_data.pop("password")
         first_name = validated_data.get("first_name", "User")
-        org = Organization.objects.create(name=f"{first_name}'s Organization")
+        org_name = f"{first_name}'s Store"
+        org = Organization.objects.create(name=org_name, legal_name=org_name)
+        Store.objects.create(
+            organization=org,
+            name=f"{org_name} Main Store",
+            code="STR-MAIN",
+            status="active",
+        )
+        BusinessConfig.objects.create(
+            organization=org,
+            business_type="RETAIL",
+            gst_enabled=True,
+        )
         user = User.objects.create_user(
             organization=org,
             role="org_admin",

@@ -277,6 +277,13 @@ class QuotationListView(APIView):
             store = Store.objects.filter(id=store_id, organization=org).first()
         if not store:
             store = Store.objects.filter(organization=org).first()
+        if not store and org:
+            store = Store.objects.create(
+                organization=org,
+                name=f"{org.name} Main Store",
+                code="STR-MAIN",
+                status="active",
+            )
 
         # Parse items and compute totals
         parsed_items = []

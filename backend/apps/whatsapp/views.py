@@ -23,6 +23,9 @@ class WhatsAppConfigView(generics.RetrieveUpdateAPIView):
         )
         return obj
 
+    def post(self, request, *args, **kwargs):
+        return self.partial_update(request, *args, **kwargs)
+
 
 class WhatsAppConnectionTestView(APIView):
     """Verify saved Meta credentials and phone-number resource without sending a message."""

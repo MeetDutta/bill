@@ -8,8 +8,8 @@ from apps.products.models import Product, InventoryMovement, PurchaseOrder, Purc
 class BusinessConfigSerializer(serializers.ModelSerializer):
     business_type_display = serializers.CharField(source="get_business_type_display", read_only=True)
     schema = serializers.SerializerMethodField()
-    gstin = serializers.CharField(source="organization.gst_number", read_only=True)
-    trade_name = serializers.CharField(source="organization.name", read_only=True)
+    gstin = serializers.CharField(required=False, allow_blank=True)
+    trade_name = serializers.CharField(required=False, allow_blank=True)
     tax_mode = serializers.CharField(source="default_tax_mode", required=False)
     allow_credit_sales = serializers.BooleanField(source="credit_sales_enabled", required=False)
     max_cashier_discount_percent = serializers.DecimalField(source="max_discount_cashier", max_digits=5, decimal_places=2, required=False)
@@ -46,6 +46,16 @@ class BusinessConfigSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "updated_at"]
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if instance.organization:
+            ret["gstin"] = instance.organization.gst_number or ""
+            ret["trade_name"] = instance.organization.name or ""
+        else:
+            ret["gstin"] = ""
+            ret["trade_name"] = ""
+        return ret
+
     def to_internal_value(self, data):
         if hasattr(data, "get"):
             val = data.get("business_type")
@@ -58,6 +68,34 @@ class BusinessConfigSerializer(serializers.ModelSerializer):
                     data = dict(data)
                 data["business_type"] = val.upper()
         return super().to_internal_value(data)
+
+    def update(self, instance, validated_data):
+        trade_name = validated_data.pop("trade_name", None)
+        gstin = validated_data.pop("gstin", None)
+        if trade_name is None and hasattr(self, "initial_data"):
+            trade_name = self.initial_data.get("trade_name")
+        if gstin is None and hasattr(self, "initial_data"):
+            gstin = self.initial_data.get("gstin")
+
+        if instance.organization:
+            org = instance.organization
+            org_fields = []
+            if trade_name is not None and str(trade_name).strip():
+                org.name = str(trade_name).strip()
+                org.legal_name = str(trade_name).strip()
+                org_fields.extend(["name", "legal_name"])
+            if gstin is not None:
+                org.gst_number = str(gstin).strip().upper()
+                org_fields.append("gst_number")
+            if org_fields:
+                org.save(update_fields=list(set(org_fields)))
+                from apps.stores.models import Store
+                p_store = Store.objects.filter(organization=org).first()
+                if p_store and trade_name:
+                    p_store.name = f"{str(trade_name).strip()} Main Store"
+                    p_store.save(update_fields=["name"])
+
+        return super().update(instance, validated_data)
 
     def get_schema(self, obj):
         bt = (obj.business_type or "RETAIL").lower()

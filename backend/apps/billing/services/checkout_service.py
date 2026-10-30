@@ -48,6 +48,18 @@ class CheckoutService:
             if existing:
                 return cls._format_checkout_response(existing)
 
+        # 1b. Ensure Store is guaranteed
+        from apps.stores.models import Store
+        if not store:
+            store = Store.objects.filter(organization=organization).first()
+            if not store:
+                store = Store.objects.create(
+                    organization=organization,
+                    name=getattr(organization, "name", "Main Store") or "Main Store",
+                    code="STR-MAIN",
+                    status="active",
+                )
+
         # 2. Load Business Configuration
         config, _ = BusinessConfig.objects.get_or_create(
             organization=organization,
