@@ -240,6 +240,7 @@ export const invoiceApi = {
     start_date?: string;
     end_date?: string;
     page?: number;
+    page_size?: number;
   }) => api.get<PaginatedResponse<Invoice>>("/invoices/", { params }),
   get: (id: string) => api.get<Invoice>(`/invoices/${id}/`),
   getPublic: (token: string) => api.get(`/invoices/view/${token}/`),

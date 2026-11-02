@@ -1,102 +1,101 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { analyticsApi, engagementApi, intelligenceAnalyticsApi } from "@/services/api";
+  analyticsApi,
+  authApi,
+  posApi,
+  quotationApi,
+  notificationApi,
+} from "@/services/api";
 import { useRealtimeSubscription, type RealtimeEventPayload } from "@/services/realtime";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDateTime } from "@/lib/utils";
 import type {
   DashboardData,
-  EngagementDashboard,
-  BusinessHealthData,
-  BusinessAlertItem,
+  User,
+  Quotation,
+  SalesReturn,
 } from "@/types";
 import {
   TrendingUp,
   Receipt,
-  Wallet,
-  Clock,
-  AlertTriangle,
-  ShieldAlert,
-  Info,
-  X,
-  Activity,
-  ArrowRight,
-  RefreshCw,
-  Radio,
+  RotateCcw,
+  Boxes,
   CreditCard,
   Banknote,
   QrCode,
   DollarSign,
-  PackageX,
+  AlertTriangle,
+  Clock,
+  RefreshCw,
+  Plus,
+  ArrowRight,
+  Store as StoreIcon,
+  Bell,
+  ChevronRight,
+  FileCheck,
   CheckCircle2,
-  Boxes,
-  Truck,
+  Calendar,
+  Layers,
+  Sparkles,
 } from "lucide-react";
 import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-} from "recharts";
-import { StaffSalesBreakdownTable } from "@/components/dashboard/StaffSalesBreakdownTable";
-
-type SummaryModalState =
-  | { type: "sales_overview" }
-  | { type: "payment_channel"; method: string }
-  | { type: "inventory_valuation" }
-  | { type: "gross_profit" }
-  | null;
+  DashboardPopupManager,
+  type DashboardPopup,
+} from "@/components/dashboard/DashboardPopupManager";
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [profile, setProfile] = useState<User | null>(null);
+  const [config, setConfig] = useState<any>(null);
+  const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [returnsList, setReturnsList] = useState<SalesReturn[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [, setEngagement] = useState<EngagementDashboard | null>(null);
-  const [healthData, setHealthData] = useState<BusinessHealthData | null>(null);
-  const [alerts, setAlerts] = useState<BusinessAlertItem[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [dashboardError, setDashboardError] = useState("");
-  const [liveEventsCount, setLiveEventsCount] = useState(0);
-  const [activeModal, setActiveModal] = useState<SummaryModalState>(null);
+  const [activeActivityTab, setActiveActivityTab] = useState<"all" | "invoices" | "quotes" | "returns">("all");
+
+  // Central Popup State
+  const [popup, setPopup] = useState<DashboardPopup>(null);
 
   const fetchDashboard = useCallback(async (silent = false) => {
     if (!silent) setIsRefreshing(true);
     try {
-      const [res, engagementRes, healthRes, alertsRes] = await Promise.allSettled([
-        analyticsApi.getDashboard(),
-        engagementApi.dashboard(),
-        intelligenceAnalyticsApi.getBusinessHealth(),
-        intelligenceAnalyticsApi.getAlerts(),
-      ]);
+      const [dashRes, profileRes, configRes, quotesRes, returnsRes, notifRes] =
+        await Promise.allSettled([
+          analyticsApi.getDashboard(),
+          authApi.getProfile(),
+          posApi.getConfig(),
+          quotationApi.list({ page: 1 }),
+          posApi.getReturnsReport(),
+          notificationApi.getSummary(),
+        ]);
 
-      if (res.status === "fulfilled" && res.value.data) {
-        setData(res.value.data);
-        setDashboardError("");
+      if (dashRes.status === "fulfilled" && dashRes.value.data) {
+        setData(dashRes.value.data);
         setLastUpdated(new Date());
-      } else {
-        setDashboardError("Dashboard totals could not be refreshed. Showing the last available data; use Refresh to try again.");
       }
-      if (engagementRes.status === "fulfilled" && engagementRes.value.data) setEngagement(engagementRes.value.data);
-      if (healthRes.status === "fulfilled" && healthRes.value.data) setHealthData(healthRes.value.data);
-      if (alertsRes.status === "fulfilled" && alertsRes.value.data) {
-        const raw = alertsRes.value.data;
-        setAlerts(raw.alerts || raw || []);
+      if (profileRes.status === "fulfilled" && profileRes.value.data) {
+        setProfile(profileRes.value.data);
+      }
+      if (configRes.status === "fulfilled" && configRes.value.data) {
+        setConfig(configRes.value.data);
+      }
+      if (quotesRes.status === "fulfilled" && quotesRes.value.data) {
+        const qList = quotesRes.value.data.results || (Array.isArray(quotesRes.value.data) ? quotesRes.value.data : []);
+        setQuotations(qList);
+      }
+      if (returnsRes.status === "fulfilled" && returnsRes.value.data) {
+        const rList = returnsRes.value.data?.results || returnsRes.value.data || [];
+        setReturnsList(Array.isArray(rList) ? rList : []);
+      }
+      if (notifRes.status === "fulfilled" && notifRes.value.data) {
+        setUnreadNotifications(notifRes.value.data.unread || 0);
       }
     } finally {
       setLoading(false);
@@ -106,7 +105,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchDashboard();
-    // Reconcile in case an SSE event was missed or the stream temporarily disconnects.
+    // 30s background poll fallback
     const interval = window.setInterval(() => fetchDashboard(true), 30000);
     return () => window.clearInterval(interval);
   }, [fetchDashboard]);
@@ -114,7 +113,6 @@ export default function DashboardPage() {
   // Real-time SSE Live Event Handling
   const handleRealtimeEvent = useCallback(
     (event: RealtimeEventPayload) => {
-      setLiveEventsCount((prev) => prev + 1);
       if (
         [
           "sale_completed",
@@ -132,1629 +130,656 @@ export default function DashboardPage() {
 
   const { isConnected } = useRealtimeSubscription(handleRealtimeEvent);
 
-  const handleDismissAlert = async (alertId: string) => {
-    try {
-      await intelligenceAnalyticsApi.dismissAlert(alertId);
-      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
-    } catch {
-      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
-    }
-  };
-
   // Authoritative metrics from backend
+  const todayNetSales = Number(data?.today_net_sales ?? data?.today_gross_sales ?? 0);
   const todayGrossSales = Number(data?.today_gross_sales || 0);
-  const todayNetSales = Number(data?.today_net_sales || 0);
+  const todayCount = Number(data?.today_transactions_count || 0);
   const todayOutstanding = Number(data?.today_outstanding || 0);
   const lowStockCount = Number(data?.low_stock_count || 0);
-  const todayTransactionsCount = Number(data?.today_transactions_count || 0);
-  const estimatedGrossProfit = Number(data?.estimated_gross_profit || 0);
-
-  const weekRevenue = Number(data?.week_revenue || 0);
-  const monthRevenue = Number(data?.month_revenue || 0);
-  const allTimeRevenue = Number(data?.all_time_revenue || Number(data?.total_revenue || 0));
-
-  const stockValue = Number(data?.stock_value || 0);
-  const totalProducts = Number(data?.total_products_count || 0);
-  const inStockCount = Number(data?.in_stock_count || 0);
-  const outOfStockCount = Number(data?.out_of_stock_count || 0);
-  const totalSuppliers = Number(data?.total_suppliers_count || 0);
-  const supplierDues = Number(data?.supplier_dues || 0);
-
-  const salesByCategory = data?.sales_by_category || [];
-  const salesTrend30 = data?.sales_trend_30 || [];
+  const pendingInvoicesCount = Number(data?.pending_invoices_count || 0);
   const paymentBreakdown = data?.payment_methods_breakdown || [];
-  const hourlySales = data?.hourly_sales || [];
   const liveSalesActivity = data?.live_sales_activity || [];
 
-  const hasRevenueData = Boolean(
-    data?.has_revenue_data && data?.revenue_trend && data.revenue_trend.some((d) => d.revenue > 0)
-  );
-  const hasCustomerData = Boolean(
-    data?.has_customer_data && data?.customer_growth && (data?.total_customers || 0) > 0
-  );
+  // Previous Day Comparison
+  const dayComparison = useMemo(() => {
+    const trend = data?.sales_trend_30 || [];
+    if (trend.length < 2) return null;
+    const yesterday = trend[trend.length - 2];
+    const yesterdayRev = Number(yesterday?.revenue || 0);
+    if (yesterdayRev <= 0) return null;
+    const diffPct = ((todayNetSales - yesterdayRev) / yesterdayRev) * 100;
+    return {
+      percent: Math.abs(Math.round(diffPct)),
+      isPositive: diffPct >= 0,
+      yesterdayRevenue: yesterdayRev,
+    };
+  }, [data?.sales_trend_30, todayNetSales]);
 
-  // Parse payment channel specifics
-  const cashItem = paymentBreakdown.find((p) => p.payment_method.toUpperCase() === "CASH");
-  const upiItem = paymentBreakdown.find((p) => p.payment_method.toUpperCase() === "UPI");
-  const cardItem = paymentBreakdown.find((p) =>
-    ["CARD", "DEBIT", "CREDIT_CARD"].includes(p.payment_method.toUpperCase())
-  );
-  const cashAmount = Number(cashItem?.total || 0);
-  const cashCount = Number(cashItem?.count || 0);
-  const upiAmount = Number(upiItem?.total || 0);
-  const upiCount = Number(upiItem?.count || 0);
-  const cardAmount = Number(cardItem?.total || 0);
-  const cardCount = Number(cardItem?.count || 0);
+  // Store identity
+  const storeName =
+    config?.trade_name ||
+    config?.name ||
+    profile?.organization_name ||
+    (profile?.organization && typeof profile.organization === "object" ? profile.organization.name : "BillMeet Store");
 
-  const getPaymentIcon = (method: string) => {
-    switch (method.toUpperCase()) {
-      case "CASH":
-        return <Banknote className="h-4 w-4 text-emerald-600" />;
-      case "UPI":
-        return <QrCode className="h-4 w-4 text-foreground" />;
-      case "CARD":
-      case "DEBIT":
-      case "CREDIT_CARD":
-        return <CreditCard className="h-4 w-4 text-slate-700" />;
-      case "CREDIT":
-      case "UDHAAR":
-        return <Wallet className="h-4 w-4 text-red-600" />;
-      default:
-        return <DollarSign className="h-4 w-4 text-muted-foreground" />;
-    }
-  };
+  // Staff identity
+  const staffName = profile
+    ? `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || profile.email
+    : "Administrator";
 
-  if (loading) {
+  const currentDateString = new Date().toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+
+  // Recent Activity merged stream
+  const recentActivities = useMemo(() => {
+    const items: Array<{
+      id: string;
+      kind: "invoice" | "quotation" | "return";
+      refNumber: string;
+      title: string;
+      timestamp: string;
+      amount: number;
+      status: string;
+      isPositive: boolean;
+      originalItem: any;
+    }> = [];
+
+    const activities = data?.live_sales_activity || [];
+
+    // Invoices from activities
+    activities.slice(0, 10).forEach((tx) => {
+      items.push({
+        id: tx.id,
+        kind: "invoice",
+        refNumber: tx.invoice_number,
+        title: tx.customer || "Walk-in Customer",
+        timestamp: tx.time,
+        amount: Number(tx.amount || 0),
+        status: (tx.payment_status || "PAID").toUpperCase(),
+        isPositive: true,
+        originalItem: tx,
+      });
+    });
+
+    // Quotations
+    quotations.slice(0, 5).forEach((q) => {
+      items.push({
+        id: q.id,
+        kind: "quotation",
+        refNumber: q.quotation_number,
+        title: q.customer_name || "Quoted Client",
+        timestamp: q.quotation_date || q.created_at,
+        amount: Number(q.total || 0),
+        status: (q.status || "DRAFT").toUpperCase(),
+        isPositive: false,
+        originalItem: q,
+      });
+    });
+
+    // Returns
+    returnsList.slice(0, 5).forEach((r) => {
+      items.push({
+        id: r.id,
+        kind: "return",
+        refNumber: r.return_number || "RET-000",
+        title: `Refund · ${r.refund_method || "CASH"}`,
+        timestamp: r.created_at,
+        amount: Number(r.total_refund_amount || 0),
+        status: "RETURNED",
+        isPositive: false,
+        originalItem: r,
+      });
+    });
+
+    // Sort by timestamp descending
+    items.sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime() || 0;
+      const timeB = new Date(b.timestamp).getTime() || 0;
+      return timeB - timeA;
+    });
+
+    return items;
+  }, [data?.live_sales_activity, quotations, returnsList]);
+
+  // Filtered Activity
+  const filteredActivities = useMemo(() => {
+    if (activeActivityTab === "all") return recentActivities.slice(0, 8);
+    if (activeActivityTab === "invoices") return recentActivities.filter((a) => a.kind === "invoice").slice(0, 8);
+    if (activeActivityTab === "quotes") return recentActivities.filter((a) => a.kind === "quotation").slice(0, 8);
+    if (activeActivityTab === "returns") return recentActivities.filter((a) => a.kind === "return").slice(0, 8);
+    return recentActivities.slice(0, 8);
+  }, [recentActivities, activeActivityTab]);
+
+  // Attention Counts
+  const pendingQuotesCount = quotations.filter((q) => ["draft", "sent"].includes((q.status || "").toLowerCase())).length;
+  const recentReturnsCount = returnsList.length;
+
+  if (loading && !data) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center min-h-[50vh]">
         <div className="flex flex-col items-center gap-2">
-          <div className="w-8 h-8 border-4 border-foreground border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-muted-foreground text-xs font-semibold">Loading dashboard metrics...</p>
+          <div className="w-8 h-8 border-3 border-foreground border-t-transparent rounded-full animate-spin" />
+          <p className="text-muted-foreground text-xs font-semibold">Loading dashboard...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-5 sm:space-y-6 min-w-0">
-      {/* Top Header: Title, Realtime Status Badge & Refresh Control */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b pb-4">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground truncate">
-            Business Dashboard
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-            Operational sales velocity, payment allocations, and inventory ledger
-          </p>
+    <div className="max-w-4xl mx-auto space-y-4 pb-8 min-w-0">
+      {/* =================================================================== */}
+      {/* SECTION A: DASHBOARD HEADER (COMPACT)                               */}
+      {/* =================================================================== */}
+      <header className="flex items-center justify-between gap-3 px-1 py-1 border-b pb-3">
+        {/* Left: Branding & Store Identity */}
+        <div className="min-w-0 flex items-center gap-2.5">
+          <div className="h-9 w-9 rounded-lg bg-foreground text-background flex items-center justify-center font-black text-sm shrink-0">
+            BM
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="font-black text-sm sm:text-base text-foreground truncate">
+                {storeName}
+              </span>
+              <span className="hidden sm:inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span className="hidden sm:inline text-[11px] text-muted-foreground">
+                {currentDateString}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="truncate">{staffName}</span>
+              <span className="text-muted-foreground/40">·</span>
+              <span className="capitalize font-semibold text-foreground/80">
+                {profile?.role?.replace("_", " ") || "Admin"}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Live SSE Status Pill */}
+        {/* Right: Realtime status, Notification & Refresh */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Live indicator dot */}
           <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
+            className={`hidden xs:flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
               isConnected
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
+                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
                 : "bg-muted border-border text-muted-foreground"
             }`}
+            title={isConnected ? "Real-time updates active" : "Real-time offline"}
           >
-            <span className="relative flex h-2 w-2">
-              {isConnected && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              )}
-              <span
-                className={`relative inline-flex rounded-full h-2 w-2 ${
-                  isConnected ? "bg-emerald-500" : "bg-slate-400"
-                }`}
-              ></span>
-            </span>
-            <span className="text-[11px] font-bold">{isConnected ? "Live updates" : "Refresh fallback"}</span>
-            {liveEventsCount > 0 && (
-              <Badge variant="secondary" className="h-4 px-1 text-[9px] font-mono">
-                {liveEventsCount}
-              </Badge>
-            )}
+            <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"}`} />
+            <span>{isConnected ? "Live" : "Poll"}</span>
           </div>
 
-          {lastUpdated && (
-            <span className="hidden md:inline text-[10px] text-muted-foreground whitespace-nowrap">
-              Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-            </span>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
+          {/* Refresh Action */}
+          <button
             onClick={() => fetchDashboard(false)}
             disabled={isRefreshing}
-            className="h-8 gap-1.5 text-xs font-bold"
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors touch-target-min flex items-center justify-center"
+            title="Refresh dashboard metrics"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-            <span className="hidden xs:inline">Refresh</span>
-          </Button>
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+          </button>
+
+          {/* Notifications */}
+          <Link
+            href="/dashboard/notifications"
+            className="relative p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors touch-target-min flex items-center justify-center"
+            title="Notifications"
+          >
+            <Bell className="h-4 w-4" />
+            {unreadNotifications > 0 && (
+              <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-600" />
+            )}
+          </Link>
+
+          {/* Profile / Settings */}
+          <Link
+            href="/dashboard/settings"
+            className="h-8 w-8 rounded-full border border-border bg-muted flex items-center justify-center text-xs font-bold text-foreground hover:border-foreground/40 transition-colors ml-0.5"
+            title="Store Settings & Profile"
+          >
+            {staffName.charAt(0).toUpperCase()}
+          </Link>
         </div>
-      </div>
+      </header>
 
-      {/* Quick Action Operations Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 pb-1">
-        <Link href="/dashboard/billing">
-          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 font-bold shadow-xs">
-            <Receipt className="h-4 w-4" /> + New POS Sale
-          </Button>
-        </Link>
-        <Link href="/dashboard/inventory">
-          <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
-            <Boxes className="h-4 w-4" /> Manage Inventory
-          </Button>
-        </Link>
-        <Link href="/dashboard/billing?view=history">
-          <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
-            <Receipt className="h-4 w-4" /> Invoices & Bills
-          </Button>
-        </Link>
-        <Link href="/dashboard/quotations">
-          <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
-            <Clock className="h-4 w-4" /> Quotations
-          </Button>
-        </Link>
-        <Link href="/dashboard/reports">
-          <Button size="sm" variant="outline" className="gap-1.5 font-semibold">
-            <TrendingUp className="h-4 w-4" /> Financial Reports
-          </Button>
-        </Link>
-      </div>
+      {/* =================================================================== */}
+      {/* SECTION B: PRIMARY BUSINESS METRIC (TODAY'S SALES)                 */}
+      {/* =================================================================== */}
+      <section>
+        <button
+          onClick={() => setPopup({ type: "sales_overview" })}
+          className="w-full text-left rounded-xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs hover:border-foreground/30 hover:shadow-sm transition-all group"
+        >
+          <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
+            <span className="font-bold tracking-wider uppercase text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
+              Today&apos;s Sales
+            </span>
+            <span className="text-[11px] font-semibold flex items-center gap-1 text-emerald-700 dark:text-emerald-400 group-hover:underline">
+              <span>View Audit Breakdown</span>
+              <ChevronRight className="h-3.5 w-3.5" />
+            </span>
+          </div>
 
-      {dashboardError && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300" role="status" aria-live="polite">
-          {dashboardError}
-        </div>
-      )}
+          <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
+            <div className="font-black text-3xl sm:text-4xl text-foreground font-mono tracking-tight">
+              {formatCurrency(todayNetSales)}
+            </div>
 
-      {/* Smart Business Alerts Banner */}
-      {alerts && alerts.filter((a) => !a.is_dismissed).length > 0 && (
-        <div className="space-y-2">
-          {alerts
-            .filter((a) => !a.is_dismissed)
-            .slice(0, 2)
-            .map((alert) => (
-              <div
-                key={alert.id}
-                className={`flex items-start justify-between rounded-xl border p-3 text-xs shadow-xs transition-all ${
-                  alert.severity === "CRITICAL"
-                    ? "bg-rose-500/10 border-rose-500/30 text-rose-800 dark:text-rose-300"
-                    : alert.severity === "WARNING"
-                    ? "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300"
-                    : "bg-muted/40 border-border text-foreground"
-                }`}
-              >
-                <div className="flex items-start gap-2.5 min-w-0">
-                  {alert.severity === "CRITICAL" ? (
-                    <ShieldAlert className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
-                  ) : alert.severity === "WARNING" ? (
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
-                  ) : (
-                    <Info className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
-                  )}
-                  <div className="min-w-0">
-                    <div className="font-bold text-xs truncate">{alert.title}</div>
-                    <div className="mt-0.5 text-muted-foreground text-[11px] line-clamp-2">{alert.description}</div>
-                    {alert.recommended_action && (
-                      <div className="mt-1 font-semibold text-[11px] text-foreground">
-                        Action: {alert.recommended_action}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleDismissAlert(alert.id)}
-                  className="text-muted-foreground hover:text-foreground p-1 shrink-0 ml-2"
-                  title="Dismiss alert"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-        </div>
-      )}
+            <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground mt-1 sm:mt-0">
+              <span className="text-foreground font-bold font-mono">
+                {todayCount} {todayCount === 1 ? "Bill" : "Bills"} Today
+              </span>
 
-      {/* ============================================================== */}
-      {/* SECTION 1: TODAY'S SALES & PAYMENT CHANNELS                    */}
-      {/* ============================================================== */}
-      <section className="space-y-2.5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Today&apos;s Sales & Payment Channels
-          </h2>
-          <span className="text-[10px] text-muted-foreground font-mono">
-            {todayTransactionsCount} bills recorded today
+              {dayComparison && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <span
+                    className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                      dayComparison.isPositive
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                        : "bg-red-500/10 text-red-700 dark:text-red-400"
+                    }`}
+                  >
+                    {dayComparison.isPositive ? "+" : "-"}
+                    {dayComparison.percent}% vs yesterday
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </button>
+      </section>
+
+      {/* =================================================================== */}
+      {/* SECTION C: QUICK ACTIONS (4 COMPACT ACTIONS)                        */}
+      {/* =================================================================== */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Link
+          href="/dashboard/billing"
+          className="flex items-center gap-2.5 p-3 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors touch-target-min"
+        >
+          <div className="h-8 w-8 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <Receipt className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-xs text-foreground truncate">New Sale</p>
+            <p className="text-[10px] text-muted-foreground truncate">POS Billing</p>
+          </div>
+        </Link>
+
+        <Link
+          href="/dashboard/quotations"
+          className="flex items-center gap-2.5 p-3 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors touch-target-min"
+        >
+          <div className="h-8 w-8 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <FileCheck className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-xs text-foreground truncate">Quotation</p>
+            <p className="text-[10px] text-muted-foreground truncate">Create quote</p>
+          </div>
+        </Link>
+
+        <Link
+          href="/dashboard/returns"
+          className="flex items-center gap-2.5 p-3 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors touch-target-min"
+        >
+          <div className="h-8 w-8 rounded-md bg-red-500/10 text-red-700 dark:text-red-400 flex items-center justify-center shrink-0">
+            <RotateCcw className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-xs text-foreground truncate">Return</p>
+            <p className="text-[10px] text-muted-foreground truncate">Process refund</p>
+          </div>
+        </Link>
+
+        <button
+          onClick={() => setPopup({ type: "quick_product" })}
+          className="flex items-center gap-2.5 p-3 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors touch-target-min text-left"
+        >
+          <div className="h-8 w-8 rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-400 flex items-center justify-center shrink-0">
+            <Plus className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-xs text-foreground truncate">Add Product</p>
+            <p className="text-[10px] text-muted-foreground truncate">Quick SKU</p>
+          </div>
+        </button>
+      </section>
+
+      {/* =================================================================== */}
+      {/* SECTION D: TODAY'S PAYMENT BREAKDOWN (MINILIST)                     */}
+      {/* =================================================================== */}
+      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground">
+            Payments Today
+          </span>
+          <span className="text-[11px] text-muted-foreground font-mono">
+            {paymentBreakdown.reduce((acc, p) => acc + p.count, 0)} collections
           </span>
         </div>
 
-        {/* 6-Card Responsive Grid: 1 col on 320px, 2 cols on 360px+, 3 cols on tablet, 6 cols on desktop */}
-        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-          {/* Card 1: Today's Net Sales */}
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setActiveModal({ type: "sales_overview" })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setActiveModal({ type: "sales_overview" });
-              }
-            }}
-            aria-label="View Today's Sales performance summary"
-            className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/30 rounded-xl cursor-pointer"
-          >
-            <Card className="h-full border-emerald-500/30 bg-emerald-500/5 shadow-xs transition-all hover:border-emerald-500/60 hover:shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Today&apos;s Sales</span>
-                <TrendingUp className="h-4 w-4 text-emerald-600 shrink-0" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
-                  {formatCurrency(todayNetSales)}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>Gross: {formatCurrency(todayGrossSales)}</span>
-                  <span className="font-bold text-emerald-600">Details →</span>
-                </p>
-              </CardContent>
-            </Card>
+        {paymentBreakdown.length === 0 ? (
+          <div className="py-4 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
+            No payments recorded yet today.
           </div>
-
-          {/* Card 2: Number of Transactions */}
-          <Link
-            href="/dashboard/billing?view=history&date=today"
-            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-            aria-label="View all invoices issued today"
-          >
-            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Bills Issued</span>
-                <Receipt className="h-4 w-4 text-foreground shrink-0" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                  {todayTransactionsCount}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>Completed checkouts</span>
-                  <span className="font-bold">View →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Card 3: Cash Sales */}
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setActiveModal({ type: "payment_channel", method: "CASH" })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setActiveModal({ type: "payment_channel", method: "CASH" });
-              }
-            }}
-            aria-label="View Cash sales summary"
-            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-          >
-            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Cash Sales</span>
-                <Banknote className="h-4 w-4 text-foreground shrink-0" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                  {formatCurrency(cashAmount)}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>{cashCount} cash payments</span>
-                  <span className="font-bold">Details →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Card 4: Online / UPI Sales */}
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setActiveModal({ type: "payment_channel", method: "UPI" })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setActiveModal({ type: "payment_channel", method: "UPI" });
-              }
-            }}
-            aria-label="View UPI and QR sales summary"
-            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-          >
-            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">UPI / QR Sales</span>
-                <QrCode className="h-4 w-4 text-foreground shrink-0" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                  {formatCurrency(upiAmount)}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>{upiCount} digital payments</span>
-                  <span className="font-bold">Details →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Card 5: Card Payments */}
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setActiveModal({ type: "payment_channel", method: "CARD" })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setActiveModal({ type: "payment_channel", method: "CARD" });
-              }
-            }}
-            aria-label="View Card payments summary"
-            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-          >
-            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Card Payments</span>
-                <CreditCard className="h-4 w-4 text-foreground shrink-0" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                  {formatCurrency(cardAmount)}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>{cardCount} card swipes</span>
-                  <span className="font-bold">Details →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Card 6: Customer Dues / Outstanding Credit */}
-          <Link
-            href="/dashboard/finance/receivables"
-            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-            aria-label="View outstanding customer dues"
-          >
-            <Card
-              className={`h-full shadow-xs transition-all hover:border-foreground/30 hover:shadow-md ${
-                todayOutstanding > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
-              }`}
-            >
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Customer Dues</span>
-                <Wallet
-                  className={`h-4 w-4 shrink-0 ${
-                    todayOutstanding > 0 ? "text-red-600" : "text-muted-foreground"
-                  }`}
-                />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div
-                  className={`text-lg sm:text-xl lg:text-xl font-black truncate ${
-                    todayOutstanding > 0 ? "text-red-600" : "text-foreground"
-                  }`}
-                >
-                  {formatCurrency(todayOutstanding)}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>Pending credit</span>
-                  <span className="font-bold">View →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
-      </section>
-
-      {/* ============================================================== */}
-      {/* SECTION 2: INVENTORY & WORKING CAPITAL                         */}
-      {/* ============================================================== */}
-      <section className="space-y-2.5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Inventory Valuation & Payables
-          </h2>
-          <Link
-            href="/dashboard/inventory"
-            className="text-[11px] font-semibold text-foreground hover:underline flex items-center gap-1"
-          >
-            Catalog ({totalProducts} SKUs) →
-          </Link>
-        </div>
-
-        {/* 6-Card Responsive Grid */}
-        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-          {/* Card 1: Stock Value */}
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setActiveModal({ type: "inventory_valuation" })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setActiveModal({ type: "inventory_valuation" });
-              }
-            }}
-            aria-label="View inventory valuation and catalog health summary"
-            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-          >
-            <Card className="h-full border-border bg-card shadow-xs hover:border-foreground/40 hover:shadow-md transition-all">
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Stock Value</span>
-                <Boxes className="h-4 w-4 text-foreground shrink-0" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="text-lg sm:text-xl lg:text-xl font-black text-foreground truncate">
-                  {formatCurrency(stockValue)}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>{totalProducts} active SKUs</span>
-                  <span className="font-bold">Summary →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Card 2: In Stock */}
-          <Link
-            href="/dashboard/inventory?filter=in_stock"
-            className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/20 rounded-xl cursor-pointer"
-            aria-label="Filter inventory to in stock products"
-          >
-            <Card className="h-full border-emerald-500/20 bg-emerald-500/5 shadow-xs hover:border-emerald-500/40 hover:shadow-md transition-all">
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">In Stock</span>
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
-                  {inStockCount}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>Available on shelves</span>
-                  <span className="font-bold text-emerald-600">Filter →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Card 3: Low Stock Alert */}
-          <Link
-            href="/dashboard/inventory?filter=low_stock"
-            className="block focus:outline-none focus:ring-2 focus:ring-red-500/20 rounded-xl cursor-pointer"
-            aria-label="Filter inventory to low stock alerts"
-          >
-            <Card
-              className={`h-full shadow-xs transition-all hover:border-foreground/30 hover:shadow-md ${
-                lowStockCount > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
-              }`}
-            >
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Low Stock</span>
-                <AlertTriangle
-                  className={`h-4 w-4 shrink-0 ${
-                    lowStockCount > 0 ? "text-red-600" : "text-muted-foreground"
-                  }`}
-                />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div
-                  className={`text-lg sm:text-xl lg:text-xl font-black truncate ${
-                    lowStockCount > 0 ? "text-red-600" : "text-foreground"
-                  }`}
-                >
-                  {lowStockCount}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>Below reorder min</span>
-                  <span className="font-bold text-red-600">View low stock →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Card 4: Out of Stock */}
-          <Link
-            href="/dashboard/inventory?filter=out_of_stock"
-            className="block focus:outline-none focus:ring-2 focus:ring-red-500/20 rounded-xl cursor-pointer"
-            aria-label="Filter inventory to out of stock depleted products"
-          >
-            <Card
-              className={`h-full shadow-xs transition-all hover:border-foreground/30 hover:shadow-md ${
-                outOfStockCount > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
-              }`}
-            >
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Out of Stock</span>
-                <PackageX
-                  className={`h-4 w-4 shrink-0 ${
-                    outOfStockCount > 0 ? "text-red-600" : "text-muted-foreground"
-                  }`}
-                />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div
-                  className={`text-lg sm:text-xl lg:text-xl font-black truncate ${
-                    outOfStockCount > 0 ? "text-red-600" : "text-foreground"
-                  }`}
-                >
-                  {outOfStockCount}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>Zero quantity SKUs</span>
-                  <span className="font-bold text-red-600">View depleted →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Card 5: Supplier Dues */}
-          <Link
-            href="/dashboard/finance/payables"
-            className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-            aria-label="View supplier dues and accounts payable"
-          >
-            <Card
-              className={`h-full shadow-xs transition-all hover:border-foreground/30 hover:shadow-md ${
-                supplierDues > 0 ? "border-red-500/30 bg-red-500/5" : "border-border bg-card"
-              }`}
-            >
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Supplier Dues</span>
-                <Truck
-                  className={`h-4 w-4 shrink-0 ${
-                    supplierDues > 0 ? "text-red-600" : "text-muted-foreground"
-                  }`}
-                />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div
-                  className={`text-lg sm:text-xl lg:text-xl font-black truncate ${
-                    supplierDues > 0 ? "text-red-600" : "text-foreground"
-                  }`}
-                >
-                  {formatCurrency(supplierDues)}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>{totalSuppliers} active vendors</span>
-                  <span className="font-bold">View dues →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Card 6: Est. Gross Profit */}
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setActiveModal({ type: "gross_profit" })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setActiveModal({ type: "gross_profit" });
-              }
-            }}
-            aria-label="View gross profit and margin analysis"
-            className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/20 rounded-xl cursor-pointer"
-          >
-            <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-emerald-500/40 hover:shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-                <span className="text-xs font-semibold text-muted-foreground truncate">Gross Profit</span>
-                <DollarSign className="h-4 w-4 text-emerald-600 shrink-0" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <div className="text-lg sm:text-xl lg:text-xl font-black text-emerald-600 truncate">
-                  {formatCurrency(estimatedGrossProfit)}
-                </div>
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center justify-between">
-                  <span>Revenue less item cost</span>
-                  <span className="font-bold text-emerald-600">Analyze →</span>
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* ============================================================== */}
-      {/* SECTION 3: REVENUE HORIZONS (WEEK, MONTH, LIFETIME)             */}
-      {/* ============================================================== */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
-        <Link
-          href="/dashboard/reports/sales?period=this_week"
-          className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-          aria-label="View sales reports for this week"
-        >
-          <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground">This Week</span>
-              <Activity className="h-4 w-4 text-foreground" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl font-black text-foreground">
-                {formatCurrency(weekRevenue)}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-between">
-                <span>Past 7 calendar days</span>
-                <span className="font-bold">View report →</span>
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link
-          href="/dashboard/reports/sales?period=this_month"
-          className="block focus:outline-none focus:ring-2 focus:ring-emerald-500/20 rounded-xl cursor-pointer"
-          aria-label="View sales reports for this month"
-        >
-          <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-emerald-500/40 hover:shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground">This Month</span>
-              <TrendingUp className="h-4 w-4 text-emerald-600" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl font-black text-emerald-600">
-                {formatCurrency(monthRevenue)}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-between">
-                <span>Month-to-date gross sales</span>
-                <span className="font-bold text-emerald-600">View report →</span>
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link
-          href="/dashboard/reports/sales?period=all"
-          className="block focus:outline-none focus:ring-2 focus:ring-foreground/20 rounded-xl cursor-pointer"
-          aria-label="View all-time sales analytics"
-        >
-          <Card className="h-full border-border bg-card shadow-xs transition-all hover:border-foreground/40 hover:shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between p-3 pb-1">
-              <span className="text-xs font-semibold text-muted-foreground">All-Time Revenue</span>
-              <Wallet className="h-4 w-4 text-foreground" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="text-lg sm:text-xl font-black text-foreground">
-                {formatCurrency(allTimeRevenue)}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-between">
-                <span>Lifetime verified sales</span>
-                <span className="font-bold">View analytics →</span>
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
-      </section>
-
-      {/* ============================================================== */}
-      {/* SECTION 4: 30-DAY SALES TREND & CATEGORY BREAKDOWN              */}
-      {/* ============================================================== */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-12">
-        {/* 30-Day Trend (7 Cols) */}
-        <Card className="lg:col-span-7 flex flex-col shadow-xs">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-bold flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-foreground" />
-                <span>30-Day Sales Trend</span>
-              </div>
-              <Badge variant="outline" className="text-[10px] font-semibold">
-                Past 30 Days
-              </Badge>
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Daily revenue trajectory and transaction volume
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 space-y-3">
-            {salesTrend30.length > 0 && salesTrend30.some((p) => p.revenue > 0) ? (
-              <div className="h-52 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={salesTrend30} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="trend30Gradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#0f172a" stopOpacity={0.25} />
-                        <stop offset="95%" stopColor="#0f172a" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis
-                      dataKey="formatted_date"
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 10 }}
-                      interval={3}
-                    />
-                    <YAxis
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 10 }}
-                      tickFormatter={(val) => `₹${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`}
-                    />
-                    <Tooltip
-                      formatter={(val: number) => [formatCurrency(val), "Sales"]}
-                      labelFormatter={(label) => `Date: ${label}`}
-                      contentStyle={{
-                        backgroundColor: "#ffffff",
-                        borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
-                        fontSize: "12px",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="revenue"
-                      stroke="#0f172a"
-                      strokeWidth={2}
-                      fillOpacity={1}
-                      fill="url(#trend30Gradient)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            ) : null}
-
-            {/* Daily History Mini Table */}
-            <div className="rounded-lg border overflow-hidden max-h-44 overflow-y-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-muted/50 border-b font-semibold text-muted-foreground text-[10px] uppercase">
-                  <tr>
-                    <th className="py-2 px-3">Date</th>
-                    <th className="py-2 px-3 text-center">Bills</th>
-                    <th className="py-2 px-3 text-right">Gross Revenue</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {salesTrend30.slice().reverse().slice(0, 10).map((row, idx) => (
-                    <tr
-                      key={idx}
-                      onClick={() => {
-                        window.location.href = `/dashboard/billing?view=history&date=${encodeURIComponent(row.date || row.formatted_date)}`;
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          window.location.href = `/dashboard/billing?view=history&date=${encodeURIComponent(row.date || row.formatted_date)}`;
-                        }
-                      }}
-                      tabIndex={0}
-                      role="button"
-                      aria-label={`View invoices for ${row.formatted_date}`}
-                      className="hover:bg-muted/30 cursor-pointer transition-colors focus:bg-muted/40 focus:outline-none"
-                    >
-                      <td className="py-1.5 px-3 font-medium flex items-center justify-between">
-                        <span>{row.formatted_date}</span>
-                        <span className="text-[10px] text-muted-foreground font-normal">→</span>
-                      </td>
-                      <td className="py-1.5 px-3 text-center font-mono">{row.transactions}</td>
-                      <td className="py-1.5 px-3 text-right font-mono font-bold text-foreground">
-                        {formatCurrency(row.revenue)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Category Breakdown (5 Cols) */}
-        <Card className="lg:col-span-5 flex flex-col shadow-xs">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-bold flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Boxes className="h-4 w-4 text-foreground" />
-                <span>Sales by Category</span>
-              </div>
-              <span className="text-[11px] text-muted-foreground font-normal">Past 30 Days</span>
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Product category revenue contribution and unit volume
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 space-y-2.5">
-            {salesByCategory.length > 0 ? (
-              salesByCategory.map((cat, idx) => (
-                <Link
-                  key={idx}
-                  href={`/dashboard/inventory?category=${encodeURIComponent(cat.category)}`}
-                  className="block rounded-lg border p-2 bg-muted/20 hover:bg-muted/40 hover:border-foreground/30 transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-foreground/20 text-xs space-y-1"
-                  aria-label={`View ${cat.category} inventory and products`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-foreground flex items-center gap-1.5">
-                      <span>{cat.category}</span>
-                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                    </span>
-                    <span className="font-mono font-bold">{formatCurrency(cat.total)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                    <span>{cat.items_sold} units sold</span>
-                    <span>{cat.percentage}% share</span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(100, Math.max(0, cat.percentage))}%` }}
-                    />
-                  </div>
-                </Link>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center h-44 text-center text-muted-foreground">
-                <Boxes className="h-8 w-8 mb-2 opacity-30 stroke-1" />
-                <p className="text-xs font-semibold">No category sales recorded</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Items assigned to categories will reflect their share here upon checkout.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ============================================================== */}
-      {/* SECTION 5: PAYMENT BREAKDOWN & HOURLY SALES VELOCITY            */}
-      {/* ============================================================== */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-12">
-        {/* Payment Breakdown Card (5 Cols) */}
-        <Card className="lg:col-span-5 flex flex-col shadow-xs">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-bold flex items-center gap-2">
-              <CreditCard className="h-4 w-4 text-foreground" />
-              Payment Method Breakdown
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Exact split allocations across Cash, UPI, Cards, and Customer Credit
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 space-y-2.5">
-            {paymentBreakdown.length > 0 ? (
-              paymentBreakdown.map((item) => (
-                <div
+        ) : (
+          <div className="divide-y divide-border/60">
+            {paymentBreakdown.map((item) => {
+              const method = item.payment_method.toUpperCase();
+              return (
+                <button
                   key={item.payment_method}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setActiveModal({ type: "payment_channel", method: item.payment_method })}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setActiveModal({ type: "payment_channel", method: item.payment_method });
-                    }
-                  }}
-                  aria-label={`View ${item.payment_method} payment summary`}
-                  className="space-y-1 rounded-lg border p-2.5 bg-muted/20 hover:bg-muted/40 hover:border-foreground/30 transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-foreground/20"
+                  onClick={() => setPopup({ type: "payment_method", method })}
+                  className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
                 >
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
-                      {getPaymentIcon(item.payment_method)}
-                      <span>{item.payment_method}</span>
-                      <span className="text-[10px] text-muted-foreground font-normal">
-                        ({item.count} {item.count === 1 ? "txn" : "txns"})
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-7 w-7 rounded bg-muted flex items-center justify-center shrink-0 text-foreground">
+                      {method === "CASH" ? (
+                        <Banknote className="h-3.5 w-3.5 text-emerald-600" />
+                      ) : method === "UPI" ? (
+                        <QrCode className="h-3.5 w-3.5 text-foreground" />
+                      ) : (
+                        <CreditCard className="h-3.5 w-3.5 text-slate-700" />
+                      )}
+                    </div>
+                    <div>
+                      <span className="font-bold text-foreground group-hover:underline">
+                        {method}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground ml-2">
+                        {item.count} {item.count === 1 ? "bill" : "bills"}
                       </span>
                     </div>
-                    <div className="text-right flex items-center gap-2">
-                      <span className="font-bold text-foreground">{formatCurrency(item.total)}</span>
-                      <span className="text-[10px] font-semibold text-muted-foreground">
-                        {item.percentage}%
-                      </span>
-                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                    </div>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-500 ${
-                        item.payment_method.toUpperCase() === "CASH"
-                          ? "bg-emerald-500"
-                          : item.payment_method.toUpperCase() === "UPI"
-                          ? "bg-slate-900 dark:bg-slate-100"
-                          : item.payment_method.toUpperCase().includes("CARD")
-                          ? "bg-slate-600"
-                          : item.payment_method.toUpperCase() === "CREDIT"
-                          ? "bg-red-500"
-                          : "bg-slate-400"
-                      }`}
-                      style={{ width: `${Math.min(100, Math.max(0, item.percentage))}%` }}
-                    />
+
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-foreground">
+                      {formatCurrency(item.total)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono w-10 text-right">
+                      {item.percentage}%
+                    </span>
+                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
                   </div>
-                </div>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center h-44 text-center text-muted-foreground">
-                <Receipt className="h-8 w-8 mb-2 opacity-30 stroke-1" />
-                <p className="text-xs font-semibold">No transactions recorded today</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  POS checkouts will automatically populate payment allocations.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Hourly Sales Velocity Chart (7 Cols) */}
-        <Card className="lg:col-span-7 flex flex-col shadow-xs">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-bold flex items-center gap-2">
-              <Clock className="h-4 w-4 text-foreground" />
-              Today&apos;s Hourly Sales Velocity
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Real-time hourly sales distribution from 00:00 to 23:00
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 pb-4">
-            {hourlySales.some((h) => h.sales > 0) ? (
-              <div className="h-56 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={hourlySales} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis
-                      dataKey="time_label"
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 10 }}
-                      interval={2}
-                    />
-                    <YAxis
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 10 }}
-                      tickFormatter={(val) =>
-                        `₹${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`
-                      }
-                    />
-                    <Tooltip
-                      formatter={(val: number) => [formatCurrency(val), "Sales"]}
-                      labelFormatter={(label) => `Hour: ${label}`}
-                      contentStyle={{
-                        backgroundColor: "#ffffff",
-                        borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
-                        fontSize: "12px",
-                      }}
-                    />
-                    <Bar dataKey="sales" fill="#16a34a" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-56 text-center text-muted-foreground">
-                <Clock className="h-8 w-8 mb-2 opacity-30 stroke-1" />
-                <p className="text-xs font-semibold">No hourly sales activity yet</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
-                  As transactions are committed throughout the day, velocity by hour will render here.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ============================================================== */}
-      {/* SECTION 6: STAFF PERFORMANCE & SALES ATTRIBUTION TABLE         */}
-      {/* ============================================================== */}
-      <StaffSalesBreakdownTable />
-
-      {/* ============================================================== */}
-      {/* SECTION 7: LIVE SALES STREAM (RECENT COMMITTED TRANSACTIONS)   */}
-      {/* ============================================================== */}
-      <Card className="shadow-xs">
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-sm font-bold flex items-center gap-2">
-              <Radio className="h-4 w-4 text-emerald-600 animate-pulse" />
-              Live Sales Stream
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Recent atomically committed sales with cashier, customer, and payment methods
-            </CardDescription>
+                </button>
+              );
+            })}
           </div>
-          <Link
-            href="/dashboard/transactions"
-            className="text-xs font-semibold text-foreground hover:underline flex items-center gap-1"
-          >
-            All Transactions <ArrowRight className="h-3 w-3" />
-          </Link>
-        </CardHeader>
-        <CardContent>
-          {liveSalesActivity.length > 0 ? (
-            <>
-              {/* Desktop / Tablet Table View */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b text-muted-foreground uppercase text-[10px]">
-                      <th className="text-left pb-2 font-semibold">Invoice #</th>
-                      <th className="text-left pb-2 font-semibold">Time</th>
-                      <th className="text-left pb-2 font-semibold">Customer</th>
-                      <th className="text-left pb-2 font-semibold">Cashier</th>
-                      <th className="text-left pb-2 font-semibold">Items</th>
-                      <th className="text-left pb-2 font-semibold">Payment Methods</th>
-                      <th className="text-right pb-2 font-semibold">Amount</th>
-                      <th className="text-right pb-2 font-semibold">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {liveSalesActivity.map((tx) => (
-                      <tr key={tx.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="py-2.5 font-mono font-bold text-foreground">
-                          {tx.invoice_number}
-                        </td>
-                        <td className="py-2.5 text-muted-foreground">{tx.time}</td>
-                        <td className="py-2.5 font-medium">{tx.customer}</td>
-                        <td className="py-2.5 text-muted-foreground">{tx.cashier}</td>
-                        <td className="py-2.5">{tx.items_count} items</td>
-                        <td className="py-2.5">
-                          <div className="flex flex-wrap gap-1">
-                            {tx.payment_methods.map((pm, i) => (
-                              <Badge
-                                key={i}
-                                variant="outline"
-                                className="text-[10px] px-1.5 py-0 uppercase font-medium"
-                              >
-                                {pm}
-                              </Badge>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="py-2.5 text-right font-black text-foreground">
-                          {formatCurrency(tx.amount)}
-                        </td>
-                        <td className="py-2.5 text-right">
-                          <Badge
-                            className={`text-[10px] font-bold ${
-                              tx.payment_status === "PAID"
-                                ? "bg-emerald-600 text-white"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                            }`}
-                          >
-                            {tx.payment_status}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+        )}
+      </section>
 
-              {/* Mobile Card View (Zero horizontal scrolling on 320px–430px) */}
-              <div className="block md:hidden space-y-2.5">
-                {liveSalesActivity.map((tx) => (
-                  <div
-                    key={tx.id}
-                    className="rounded-xl border border-border bg-muted/20 p-3 space-y-2 text-xs"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-foreground text-xs">
-                        {tx.invoice_number}
+      {/* =================================================================== */}
+      {/* SECTION E: RECENT ACTIVITY (MINILIST)                               */}
+      {/* =================================================================== */}
+      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <span className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground">
+            Recent Activity
+          </span>
+
+          {/* Activity Category Filters */}
+          <div className="flex items-center gap-1 text-[11px]">
+            <button
+              onClick={() => setActiveActivityTab("all")}
+              className={`px-2 py-0.5 rounded font-semibold transition-colors ${
+                activeActivityTab === "all"
+                  ? "bg-foreground text-background font-bold"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setActiveActivityTab("invoices")}
+              className={`px-2 py-0.5 rounded font-semibold transition-colors ${
+                activeActivityTab === "invoices"
+                  ? "bg-foreground text-background font-bold"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              Bills
+            </button>
+            <button
+              onClick={() => setActiveActivityTab("quotes")}
+              className={`px-2 py-0.5 rounded font-semibold transition-colors ${
+                activeActivityTab === "quotes"
+                  ? "bg-foreground text-background font-bold"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              Quotes
+            </button>
+            <button
+              onClick={() => setActiveActivityTab("returns")}
+              className={`px-2 py-0.5 rounded font-semibold transition-colors ${
+                activeActivityTab === "returns"
+                  ? "bg-foreground text-background font-bold"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              Returns
+            </button>
+          </div>
+        </div>
+
+        {filteredActivities.length === 0 ? (
+          <div className="py-6 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
+            No activity recorded in this category yet.
+          </div>
+        ) : (
+          <div className="divide-y divide-border/60">
+            {filteredActivities.map((act) => (
+              <button
+                key={`${act.kind}-${act.id}`}
+                onClick={() => {
+                  if (act.kind === "invoice") {
+                    setPopup({ type: "invoice_details", id: act.id, invoiceNumber: act.refNumber });
+                  } else if (act.kind === "quotation") {
+                    setPopup({ type: "quotation_details", id: act.id, quotationNumber: act.refNumber });
+                  } else if (act.kind === "return") {
+                    setPopup({ type: "return_details", id: act.id, returnNumber: act.refNumber });
+                  }
+                }}
+                className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
+              >
+                <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                  <div className="h-7 w-7 rounded bg-muted flex items-center justify-center shrink-0">
+                    {act.kind === "invoice" ? (
+                      <Receipt className="h-3.5 w-3.5 text-foreground" />
+                    ) : act.kind === "quotation" ? (
+                      <FileCheck className="h-3.5 w-3.5 text-blue-600" />
+                    ) : (
+                      <RotateCcw className="h-3.5 w-3.5 text-red-600" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-foreground group-hover:underline">
+                        #{act.refNumber}
                       </span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-muted-foreground">{tx.time}</span>
-                        <Badge
-                          className={`text-[9px] font-bold px-1.5 py-0 ${
-                            tx.payment_status === "PAID"
-                              ? "bg-emerald-600 text-white"
-                              : "bg-amber-100 text-amber-800"
-                          }`}
-                        >
-                          {tx.payment_status}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between text-muted-foreground text-[11px]">
-                      <span className="truncate">Cust: <strong className="text-foreground">{tx.customer}</strong></span>
-                      <span className="truncate">Staff: <strong className="text-foreground">{tx.cashier}</strong></span>
-                    </div>
-
-                    <div className="flex items-center justify-between border-t border-border pt-2">
-                      <div className="flex flex-wrap gap-1">
-                        {tx.payment_methods.map((pm, i) => (
-                          <Badge key={i} variant="outline" className="text-[9px] px-1 py-0 uppercase">
-                            {pm}
-                          </Badge>
-                        ))}
-                        <span className="text-[10px] text-muted-foreground self-center">
-                          ({tx.items_count} items)
-                        </span>
-                      </div>
-                      <span className="text-sm font-black text-foreground">
-                        {formatCurrency(tx.amount)}
+                      <span
+                        className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
+                          act.kind === "return"
+                            ? "bg-red-500/10 text-red-700 dark:text-red-400"
+                            : act.kind === "quotation"
+                            ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                            : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                        }`}
+                      >
+                        {act.status}
                       </span>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-              <Receipt className="h-8 w-8 mb-2 opacity-30 stroke-1" />
-              <p className="text-xs font-semibold">No recent transactions recorded</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                New sales committed at POS will appear here instantly.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ============================================================== */}
-      {/* SECTION 8: BUSINESS HEALTH INDEX & 14-DAY REVENUE CURVE        */}
-      {/* ============================================================== */}
-      {healthData && (
-        <Card className="border-border bg-card shadow-xs">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-sm font-bold">
-                  <Activity className="h-4 w-4 text-foreground" />
-                  Business Health Index
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Operational velocity, loyalty retention, and catalog performance
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-2xl font-black text-foreground">
-                    {healthData.overall_score}
-                  </span>
-                  <span className="text-xs text-muted-foreground font-semibold">/ 100</span>
-                </div>
-                <Link
-                  href="/dashboard/health"
-                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-1 border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 rounded-md transition-colors"
-                >
-                  <span>Full Health Audit</span>
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-5 pt-1">
-              <div className="rounded-lg border bg-background p-2.5">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Sales Growth</p>
-                <p className="mt-1 text-lg font-bold">{healthData.sales_growth || 0}%</p>
-                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-foreground" style={{ width: `${healthData.sales_growth || 0}%` }} />
-                </div>
-              </div>
-
-              <div className="rounded-lg border bg-background p-2.5">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Retention</p>
-                <p className="mt-1 text-lg font-bold">{healthData.customer_retention || 0}%</p>
-                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-emerald-600" style={{ width: `${healthData.customer_retention || 0}%` }} />
-                </div>
-              </div>
-
-              <div className="rounded-lg border bg-background p-2.5">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Loyalty</p>
-                <p className="mt-1 text-lg font-bold">{healthData.customer_loyalty || 0}%</p>
-                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-emerald-500" style={{ width: `${healthData.customer_loyalty || 0}%` }} />
-                </div>
-              </div>
-
-              <div className="rounded-lg border bg-background p-2.5">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Marketing</p>
-                <p className="mt-1 text-lg font-bold">{healthData.marketing || 0}%</p>
-                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-slate-700" style={{ width: `${healthData.marketing || 0}%` }} />
-                </div>
-              </div>
-
-              <div className="rounded-lg border bg-background p-2.5">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Products</p>
-                <p className="mt-1 text-lg font-bold">{healthData.product_performance || 0}%</p>
-                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-slate-900 dark:bg-slate-100" style={{ width: `${healthData.product_performance || 0}%` }} />
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Customer Growth & Retention Overview */}
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-12">
-        <Card className="md:col-span-4 flex flex-col shadow-xs">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-bold flex items-center gap-2">
-              <Activity className="h-4 w-4 text-emerald-600" />
-              Customer Base & Retention
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Client acquisition and retention health
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 space-y-3">
-            <div className="rounded-lg border p-3 bg-muted/20">
-              <span className="text-[10px] uppercase font-semibold text-muted-foreground">Total Registered Customers</span>
-              <div className="text-2xl font-black text-foreground mt-0.5">
-                {(data?.total_customers || 0).toLocaleString()}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Active directory across all store counters</p>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-lg border p-2.5 bg-background">
-                <span className="text-[10px] font-semibold text-muted-foreground">Retention Rate</span>
-                <p className="text-base font-bold text-emerald-600 mt-0.5">{healthData?.customer_retention || 0}%</p>
-                <span className="text-[9px] text-muted-foreground">Repeat buyers</span>
-              </div>
-              <div className="rounded-lg border p-2.5 bg-background">
-                <span className="text-[10px] font-semibold text-muted-foreground">Loyalty Score</span>
-                <p className="text-base font-bold text-foreground mt-0.5">{healthData?.customer_loyalty || 0}%</p>
-                <span className="text-[9px] text-muted-foreground">Engagement rank</span>
-              </div>
-            </div>
-            <Link href="/dashboard/customers" className="block pt-1">
-              <Button variant="outline" size="sm" className="w-full text-xs font-semibold justify-between">
-                <span>View Full Customer Directory</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-
-        <Card className="md:col-span-8 flex flex-col shadow-xs">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-bold">Customer Growth Curve</CardTitle>
-            <CardDescription className="text-xs">
-              Cumulative registered customers over the past 14 days
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 pb-4">
-            {hasCustomerData && data?.customer_growth ? (
-              <div className="h-56 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={data.customer_growth}
-                    margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                  >
-                    <defs>
-                      <linearGradient id="customerGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#0f172a" stopOpacity={0.2} />
-                        <stop offset="95%" stopColor="#0f172a" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis
-                      dataKey="formatted_date"
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 10 }}
-                    />
-                    <YAxis
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fill: "#64748b", fontSize: 10 }}
-                      allowDecimals={false}
-                    />
-                    <Tooltip
-                      formatter={(val: number, name: string) => [
-                        val,
-                        name === "total_customers" ? "Total Customers" : "New Customers",
-                      ]}
-                      labelFormatter={(label) => `Date: ${label}`}
-                      contentStyle={{
-                        backgroundColor: "#ffffff",
-                        borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
-                        fontSize: "12px",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="total_customers"
-                      stroke="#0f172a"
-                      strokeWidth={2}
-                      fillOpacity={1}
-                      fill="url(#customerGradient)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-56 text-center p-6 text-muted-foreground">
-                <TrendingUp className="h-8 w-8 mb-2 opacity-30 stroke-1" />
-                <p className="text-xs font-semibold text-foreground">
-                  No customer growth data yet.
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
-                  New customers registered at POS will populate this growth curve.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ============================================================== */}
-      {/* INTERACTIVE DASHBOARD SUMMARY MODALS                           */}
-      {/* ============================================================== */}
-      <Dialog open={activeModal !== null} onOpenChange={(open) => !open && setActiveModal(null)}>
-        <DialogContent className="max-w-md sm:max-w-lg p-6">
-          {activeModal?.type === "sales_overview" && (
-            <div className="space-y-4">
-              <DialogHeader>
-                <div className="flex items-center gap-2 text-emerald-600 mb-1">
-                  <TrendingUp className="h-5 w-5" />
-                  <span className="text-xs font-bold uppercase tracking-wider">Performance Audit</span>
-                </div>
-                <DialogTitle className="text-xl font-black">Today&apos;s Sales Performance</DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground">
-                  Operational sales velocity, ticket values, and revenue allocations for today.
-                </DialogDescription>
-              </DialogHeader>
-
-              {/* Primary Net Sales */}
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-center">
-                <span className="text-xs font-semibold text-muted-foreground">Net Sales Velocity</span>
-                <div className="text-3xl font-black text-emerald-600 mt-0.5">
-                  {formatCurrency(todayNetSales)}
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Gross Billings: <strong className="text-foreground">{formatCurrency(todayGrossSales)}</strong>
-                </p>
-              </div>
-
-              {/* 4 Metric Breakdown Grid */}
-              <div className="grid grid-cols-2 gap-2.5 text-xs">
-                <div className="rounded-lg border p-3 bg-muted/20">
-                  <span className="text-muted-foreground font-semibold text-[11px]">Bills Issued</span>
-                  <p className="text-lg font-black text-foreground mt-0.5">{todayTransactionsCount}</p>
-                  <span className="text-[10px] text-muted-foreground">Completed checkout receipts</span>
-                </div>
-                <div className="rounded-lg border p-3 bg-muted/20">
-                  <span className="text-muted-foreground font-semibold text-[11px]">Avg. Ticket Value</span>
-                  <p className="text-lg font-black text-foreground mt-0.5">
-                    {formatCurrency(todayTransactionsCount > 0 ? todayNetSales / todayTransactionsCount : 0)}
-                  </p>
-                  <span className="text-[10px] text-muted-foreground">Per completed checkout</span>
-                </div>
-                <div className="rounded-lg border p-3 bg-muted/20">
-                  <span className="text-muted-foreground font-semibold text-[11px]">Customer Dues</span>
-                  <p className={`text-lg font-black mt-0.5 ${todayOutstanding > 0 ? "text-red-600" : "text-foreground"}`}>
-                    {formatCurrency(todayOutstanding)}
-                  </p>
-                  <span className="text-[10px] text-muted-foreground">Credit receivables created</span>
-                </div>
-                <div className="rounded-lg border p-3 bg-muted/20">
-                  <span className="text-muted-foreground font-semibold text-[11px]">Cash Collections</span>
-                  <p className="text-lg font-black text-foreground mt-0.5">
-                    {formatCurrency(cashAmount)}
-                  </p>
-                  <span className="text-[10px] text-muted-foreground">{cashCount} cash payments</span>
-                </div>
-              </div>
-
-              {/* Quick Payment Channel Mini Bar */}
-              <div className="rounded-lg border p-3 bg-muted/10 space-y-2">
-                <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
-                  <span>Channel Breakdown</span>
-                  <span>UPI: {formatCurrency(upiAmount)} · Card: {formatCurrency(cardAmount)}</span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
-                  {todayNetSales > 0 ? (
-                    <>
-                      <div className="bg-emerald-500 h-full" style={{ width: `${(cashAmount / todayNetSales) * 100}%` }} title="Cash" />
-                      <div className="bg-slate-900 dark:bg-slate-100 h-full" style={{ width: `${(upiAmount / todayNetSales) * 100}%` }} title="UPI" />
-                      <div className="bg-slate-600 h-full" style={{ width: `${(cardAmount / todayNetSales) * 100}%` }} title="Card" />
-                    </>
-                  ) : (
-                    <div className="bg-muted h-full w-full" />
-                  )}
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-2 pt-2">
-                <Link href="/dashboard/billing?view=history&date=today" className="flex-1" onClick={() => setActiveModal(null)}>
-                  <Button className="w-full gap-1.5 font-bold">
-                    <Receipt className="h-4 w-4" /> View Today&apos;s Invoices
-                  </Button>
-                </Link>
-                <Link href="/dashboard/reports/sales?period=today" className="flex-1" onClick={() => setActiveModal(null)}>
-                  <Button variant="outline" className="w-full gap-1.5 font-bold">
-                    <TrendingUp className="h-4 w-4" /> Full Sales Analysis
-                  </Button>
-                </Link>
-              </div>
-            </div>
-          )}
-
-          {activeModal?.type === "payment_channel" && (() => {
-            const method = activeModal.method;
-            const item = paymentBreakdown.find((p) => p.payment_method.toUpperCase() === method.toUpperCase()) || {
-              payment_method: method,
-              total: method === "CASH" ? cashAmount : method === "UPI" ? upiAmount : cardAmount,
-              count: method === "CASH" ? cashCount : method === "UPI" ? upiCount : cardCount,
-              percentage: todayNetSales > 0 ? Number((((method === "CASH" ? cashAmount : method === "UPI" ? upiAmount : cardAmount) / todayNetSales) * 100).toFixed(1)) : 0,
-            };
-            return (
-              <div className="space-y-4">
-                <DialogHeader>
-                  <div className="flex items-center gap-2 text-foreground mb-1">
-                    {getPaymentIcon(method)}
-                    <span className="text-xs font-bold uppercase tracking-wider">{method} Payment Channel</span>
-                  </div>
-                  <DialogTitle className="text-xl font-black">{method} Channel Overview</DialogTitle>
-                  <DialogDescription className="text-xs text-muted-foreground">
-                    Reconciliation, volume, and customer checkout allocations for {method} transactions.
-                  </DialogDescription>
-                </DialogHeader>
-
-                <div className="rounded-xl border border-border bg-muted/20 p-4 text-center">
-                  <span className="text-xs font-semibold text-muted-foreground">Total {method} Collected</span>
-                  <div className="text-3xl font-black text-foreground mt-0.5">
-                    {formatCurrency(item.total)}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    Accounted across <strong className="text-foreground">{item.count}</strong> transactions
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5 text-xs">
-                  <div className="rounded-lg border p-3 bg-muted/20">
-                    <span className="text-muted-foreground font-semibold text-[11px]">Revenue Share</span>
-                    <p className="text-lg font-black text-foreground mt-0.5">{item.percentage}%</p>
-                    <span className="text-[10px] text-muted-foreground">Of today&apos;s gross sales</span>
-                  </div>
-                  <div className="rounded-lg border p-3 bg-muted/20">
-                    <span className="text-muted-foreground font-semibold text-[11px]">Avg. Ticket</span>
-                    <p className="text-lg font-black text-foreground mt-0.5">
-                      {formatCurrency(item.count > 0 ? item.total / item.count : 0)}
+                    <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                      {act.title} · {act.timestamp ? new Date(act.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Today"}
                     </p>
-                    <span className="text-[10px] text-muted-foreground">Average per transaction</span>
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-2 pt-2">
-                  <Link
-                    href={`/dashboard/billing?view=history&payment_method=${encodeURIComponent(method)}&date=today`}
-                    className="flex-1"
-                    onClick={() => setActiveModal(null)}
-                  >
-                    <Button className="w-full gap-1.5 font-bold">
-                      <Receipt className="h-4 w-4" /> Filter {method} Invoices
-                    </Button>
-                  </Link>
-                  <Link href="/dashboard/reports" className="flex-1" onClick={() => setActiveModal(null)}>
-                    <Button variant="outline" className="w-full gap-1.5 font-bold">
-                      Financial Reports
-                    </Button>
-                  </Link>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`font-mono font-bold ${act.kind === "return" ? "text-red-600" : "text-foreground"}`}>
+                    {act.kind === "return" ? "-" : ""}
+                    {formatCurrency(act.amount)}
+                  </span>
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
                 </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* =================================================================== */}
+      {/* SECTION F: ATTENTION REQUIRED (ACTIONABLE MINILIST)                 */}
+      {/* =================================================================== */}
+      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground">
+            Attention Required
+          </span>
+          <span className="text-[10px] text-muted-foreground">Operational alerts</span>
+        </div>
+
+        <div className="divide-y divide-border/60">
+          {/* 1. Low Stock Products */}
+          <button
+            onClick={() => setPopup({ type: "low_stock" })}
+            className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="h-7 w-7 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="h-3.5 w-3.5" />
               </div>
-            );
-          })()}
-
-          {activeModal?.type === "inventory_valuation" && (
-            <div className="space-y-4">
-              <DialogHeader>
-                <div className="flex items-center gap-2 text-foreground mb-1">
-                  <Boxes className="h-5 w-5" />
-                  <span className="text-xs font-bold uppercase tracking-wider">Asset Valuation</span>
-                </div>
-                <DialogTitle className="text-xl font-black">Inventory Capitalization</DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground">
-                  Current valuation and catalog stock status across your store shelves.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="rounded-xl border border-border bg-muted/20 p-4 text-center">
-                <span className="text-xs font-semibold text-muted-foreground">Total Stock Capitalization</span>
-                <div className="text-3xl font-black text-foreground mt-0.5">
-                  {formatCurrency(stockValue)}
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Calculated from active catalog purchase unit values
+              <div>
+                <span className="font-bold text-foreground group-hover:underline">
+                  Low-Stock SKUs
+                </span>
+                <p className="text-[11px] text-muted-foreground">
+                  Products operating at or below replenishment threshold
                 </p>
               </div>
-
-              <div className="grid grid-cols-2 gap-2.5 text-xs">
-                <div className="rounded-lg border p-3 bg-muted/20">
-                  <span className="text-muted-foreground font-semibold text-[11px]">Total SKUs</span>
-                  <p className="text-lg font-black text-foreground mt-0.5">{totalProducts}</p>
-                  <span className="text-[10px] text-muted-foreground">Catalog products</span>
-                </div>
-                <div className="rounded-lg border p-3 bg-emerald-500/10 border-emerald-500/20">
-                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold text-[11px]">In Stock</span>
-                  <p className="text-lg font-black text-emerald-600 mt-0.5">{inStockCount}</p>
-                  <span className="text-[10px] text-muted-foreground">Available on shelves</span>
-                </div>
-                <div className="rounded-lg border p-3 bg-amber-500/10 border-amber-500/20">
-                  <span className="text-amber-800 dark:text-amber-300 font-semibold text-[11px]">Low Stock</span>
-                  <p className="text-lg font-black text-amber-600 mt-0.5">{lowStockCount}</p>
-                  <span className="text-[10px] text-muted-foreground">Below reorder minimum</span>
-                </div>
-                <div className="rounded-lg border p-3 bg-rose-500/10 border-rose-500/20">
-                  <span className="text-rose-800 dark:text-rose-300 font-semibold text-[11px]">Depleted</span>
-                  <p className="text-lg font-black text-rose-600 mt-0.5">{outOfStockCount}</p>
-                  <span className="text-[10px] text-muted-foreground">Zero quantity SKUs</span>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-2 pt-2">
-                <Link href="/dashboard/inventory" className="flex-1" onClick={() => setActiveModal(null)}>
-                  <Button className="w-full gap-1.5 font-bold">
-                    <Boxes className="h-4 w-4" /> Manage Inventory Ledger
-                  </Button>
-                </Link>
-                <Link href="/dashboard/inventory?filter=low_stock" className="flex-1" onClick={() => setActiveModal(null)}>
-                  <Button variant="outline" className="w-full gap-1.5 font-bold">
-                    <AlertTriangle className="h-4 w-4 text-amber-600" /> Filter Low Stock
-                  </Button>
-                </Link>
-              </div>
             </div>
-          )}
 
-          {activeModal?.type === "gross_profit" && (
-            <div className="space-y-4">
-              <DialogHeader>
-                <div className="flex items-center gap-2 text-emerald-600 mb-1">
-                  <DollarSign className="h-5 w-5" />
-                  <span className="text-xs font-bold uppercase tracking-wider">Profitability Analysis</span>
-                </div>
-                <DialogTitle className="text-xl font-black">Gross Profit & Margin</DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground">
-                  Estimated operating margin based on net sales less recorded item purchase cost.
-                </DialogDescription>
-              </DialogHeader>
+            <div className="flex items-center gap-2">
+              <span
+                className={`font-mono font-bold px-2 py-0.5 rounded text-xs ${
+                  lowStockCount > 0
+                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {lowStockCount} items
+              </span>
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
+            </div>
+          </button>
 
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-center">
-                <span className="text-xs font-semibold text-muted-foreground">Estimated Gross Profit</span>
-                <div className="text-3xl font-black text-emerald-600 mt-0.5">
-                  {formatCurrency(estimatedGrossProfit)}
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Estimated Margin: <strong className="text-foreground">{todayNetSales > 0 ? ((estimatedGrossProfit / todayNetSales) * 100).toFixed(1) : "0.0"}%</strong>
+          {/* 2. Pending Payments / Customer Receivables */}
+          <button
+            onClick={() => setPopup({ type: "pending_payments" })}
+            className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="h-7 w-7 rounded bg-red-500/10 text-red-700 dark:text-red-400 flex items-center justify-center shrink-0">
+                <CreditCard className="h-3.5 w-3.5" />
+              </div>
+              <div>
+                <span className="font-bold text-foreground group-hover:underline">
+                  Customer Receivables
+                </span>
+                <p className="text-[11px] text-muted-foreground">
+                  Unpaid or partial customer invoices awaiting collection
                 </p>
               </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-2.5 text-xs">
-                <div className="rounded-lg border p-3 bg-muted/20">
-                  <span className="text-muted-foreground font-semibold text-[11px]">Today&apos;s Net Sales</span>
-                  <p className="text-lg font-black text-foreground mt-0.5">{formatCurrency(todayNetSales)}</p>
-                  <span className="text-[10px] text-muted-foreground">Gross sales less discounts</span>
-                </div>
-                <div className="rounded-lg border p-3 bg-muted/20">
-                  <span className="text-muted-foreground font-semibold text-[11px]">Est. Cost of Goods</span>
-                  <p className="text-lg font-black text-foreground mt-0.5">
-                    {formatCurrency(Math.max(0, todayNetSales - estimatedGrossProfit))}
-                  </p>
-                  <span className="text-[10px] text-muted-foreground">Inventory cost baseline</span>
-                </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={`font-mono font-bold px-2 py-0.5 rounded text-xs ${
+                  todayOutstanding > 0
+                    ? "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {todayOutstanding > 0 ? formatCurrency(todayOutstanding) : "₹0"}
+              </span>
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
+            </div>
+          </button>
+
+          {/* 3. Pending Quotations */}
+          <Link
+            href="/dashboard/quotations"
+            className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="h-7 w-7 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <FileCheck className="h-3.5 w-3.5" />
               </div>
-
-              <div className="flex flex-col sm:flex-row gap-2 pt-2">
-                <Link href="/dashboard/reports" className="flex-1" onClick={() => setActiveModal(null)}>
-                  <Button className="w-full gap-1.5 font-bold">
-                    <TrendingUp className="h-4 w-4" /> Full Financial Reports
-                  </Button>
-                </Link>
-                <Link href="/dashboard/purchases" className="flex-1" onClick={() => setActiveModal(null)}>
-                  <Button variant="outline" className="w-full gap-1.5 font-bold">
-                    <Truck className="h-4 w-4" /> Purchase Invoices
-                  </Button>
-                </Link>
+              <div>
+                <span className="font-bold text-foreground group-hover:underline">
+                  Open Quotations
+                </span>
+                <p className="text-[11px] text-muted-foreground">
+                  Draft & sent price estimates waiting for customer acceptance
+                </p>
               </div>
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-bold px-2 py-0.5 rounded text-xs bg-muted text-foreground">
+                {pendingQuotesCount} open
+              </span>
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
+            </div>
+          </Link>
+
+          {/* 4. Sales Returns */}
+          <button
+            onClick={() => setPopup({ type: "returns" })}
+            className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="h-7 w-7 rounded bg-muted text-foreground flex items-center justify-center shrink-0">
+                <RotateCcw className="h-3.5 w-3.5" />
+              </div>
+              <div>
+                <span className="font-bold text-foreground group-hover:underline">
+                  Sales Returns Today
+                </span>
+                <p className="text-[11px] text-muted-foreground">
+                  Reversed items and customer refund payouts
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-bold px-2 py-0.5 rounded text-xs bg-muted text-foreground">
+                {recentReturnsCount} records
+              </span>
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
+            </div>
+          </button>
+        </div>
+      </section>
+
+      {/* =================================================================== */}
+      {/* CENTRAL POPUP MANAGER                                               */}
+      {/* =================================================================== */}
+      <DashboardPopupManager
+        popup={popup}
+        onClose={() => setPopup(null)}
+        dashboardData={data}
+        config={config}
+        onRefreshDashboard={() => fetchDashboard(true)}
+      />
     </div>
   );
 }
