@@ -48,10 +48,22 @@ class CheckoutService:
             if existing:
                 return cls._format_checkout_response(existing)
 
+        # 1a. Ensure Organization is guaranteed
+        if not organization:
+            organization = getattr(store, "organization", None) or getattr(user, "organization", None)
+            if not organization:
+                from apps.organizations.models import Organization
+                organization = Organization.objects.first()
+                if not organization:
+                    organization = Organization.objects.create(name="BillMeet Store")
+
         # 1b. Ensure Store is guaranteed
         from apps.stores.models import Store
-        if not store:
-            store = Store.objects.filter(organization=organization).first()
+        if not store or getattr(store, "organization_id", None) != organization.id:
+            store = (
+                Store.objects.filter(organization=organization, status="active").first()
+                or Store.objects.filter(organization=organization).first()
+            )
             if not store:
                 store = Store.objects.create(
                     organization=organization,

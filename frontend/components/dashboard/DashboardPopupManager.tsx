@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   Dialog,
@@ -43,17 +43,22 @@ import {
   PackageX,
   X,
   RefreshCw,
+  BarChart3,
+  Flame,
+  ArrowUpRight,
+  ArrowDownRight,
 } from "lucide-react";
 import { printThermalReceipt, downloadInvoicePdf } from "@/lib/receiptPrinter";
 import type { DashboardData } from "@/types";
 
 export type DashboardPopup =
-  | { type: "sales_overview" }
+  | { type: "sales_overview"; initialTab?: "overview" | "profit" | "payments" | "comparison" | "hourly" }
   | { type: "payment_method"; method: string }
   | { type: "recent_bills" }
   | { type: "invoice_details"; id: string; invoiceNumber?: string }
   | { type: "quotation_details"; id: string; quotationNumber?: string }
   | { type: "return_details"; id: string; returnNumber?: string }
+  | { type: "date_details"; date: string; formattedDate: string; revenue: number; profit?: number; transactions: number }
   | { type: "low_stock" }
   | { type: "pending_payments" }
   | { type: "returns" }
@@ -79,6 +84,9 @@ export function DashboardPopupManager({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Tab state for Centralized Analytics Popup
+  const [analyticsTab, setAnalyticsTab] = useState<"overview" | "profit" | "payments" | "comparison" | "hourly">("overview");
+
   // Specific fetched data stores
   const [paymentLedger, setPaymentLedger] = useState<any[]>([]);
   const [invoiceDetail, setInvoiceDetail] = useState<any | null>(null);
@@ -103,6 +111,15 @@ export function DashboardPopupManager({
   });
   const [prodSubmitting, setProdSubmitting] = useState(false);
   const [prodSuccess, setProdSuccess] = useState(false);
+
+  // Sync initial tab when opening sales_overview
+  useEffect(() => {
+    if (popup && popup.type === "sales_overview" && popup.initialTab) {
+      setAnalyticsTab(popup.initialTab);
+    } else if (popup && popup.type === "sales_overview") {
+      setAnalyticsTab("overview");
+    }
+  }, [popup]);
 
   // Fetch lazy data when popup changes
   useEffect(() => {
@@ -280,95 +297,494 @@ export function DashboardPopupManager({
     }
   };
 
-  if (!popup) return null;
-
   // Authoritative calculations from dashboardData
-  const todayNetSales = Number(dashboardData?.today_net_sales || 0);
+  const todayNetSales = Number(dashboardData?.today_net_sales ?? dashboardData?.today_gross_sales ?? 0);
   const todayGrossSales = Number(dashboardData?.today_gross_sales || 0);
   const todayCount = Number(dashboardData?.today_transactions_count || 0);
   const todayOutstanding = Number(dashboardData?.today_outstanding || 0);
   const lowStockCount = Number(dashboardData?.low_stock_count || 0);
+  const estimatedProfit = Number(dashboardData?.estimated_gross_profit || 0);
+  const profitMarginPct = todayNetSales > 0 ? ((estimatedProfit / todayNetSales) * 100).toFixed(1) : "0.0";
   const paymentBreakdown = dashboardData?.payment_methods_breakdown || [];
+  const hourlySales = dashboardData?.hourly_sales || [];
+  const salesTrend30 = dashboardData?.sales_trend_30 || [];
+
+  // Comparison metrics calculation
+  const comparisons = useMemo(() => {
+    const trend = dashboardData?.sales_trend_30 || [];
+    if (trend.length < 14) return null;
+    // Current week: days 23..29
+    const currWeek = trend.slice(-7);
+    // Prior week: days 16..22
+    const priorWeek = trend.slice(-14, -7);
+
+    const currWeekRev = currWeek.reduce((s, d) => s + Number(d.revenue || 0), 0);
+    const priorWeekRev = priorWeek.reduce((s, d) => s + Number(d.revenue || 0), 0);
+    const currWeekBills = currWeek.reduce((s, d) => s + Number(d.transactions || 0), 0);
+    const priorWeekBills = priorWeek.reduce((s, d) => s + Number(d.transactions || 0), 0);
+    const currWeekProfit = currWeek.reduce((s, d) => s + Number(d.profit || 0), 0);
+    const priorWeekProfit = priorWeek.reduce((s, d) => s + Number(d.profit || 0), 0);
+
+    const weekRevDiff = currWeekRev - priorWeekRev;
+    const weekRevGrowth = priorWeekRev > 0 ? (weekRevDiff / priorWeekRev) * 100 : 0;
+
+    return {
+      currWeekRev,
+      priorWeekRev,
+      weekRevDiff,
+      weekRevGrowth: Math.round(weekRevGrowth),
+      currWeekBills,
+      priorWeekBills,
+      billsDiff: currWeekBills - priorWeekBills,
+      currWeekProfit,
+      priorWeekProfit,
+    };
+  }, [dashboardData?.sales_trend_30]);
+
+  // Hourly Peak analysis
+  const peakHour = useMemo(() => {
+    const hourly = dashboardData?.hourly_sales || [];
+    if (hourly.length === 0) return null;
+    let max = hourly[0];
+    for (const h of hourly) {
+      if (h.sales > max.sales) max = h;
+    }
+    const hourLabel = typeof max.hour === "number" ? `${String(max.hour).padStart(2, "0")}:00` : String(max.hour);
+    return {
+      hourLabel,
+      sales: Number(max.sales || 0),
+    };
+  }, [dashboardData?.hourly_sales]);
+
+  if (!popup) return null;
 
   return (
     <Dialog open={popup !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md sm:max-w-lg p-5 sm:p-6 max-h-[90dvh] overflow-y-auto">
+      <DialogContent className="max-w-md sm:max-w-xl p-5 sm:p-6 max-h-[92dvh] overflow-y-auto">
         {/* ================================================================= */}
-        {/* POPUP 1: SALES OVERVIEW                                           */}
+        {/* POPUP 1: CENTRALIZED SALES & ANALYTICS AUDIT (TABBED)             */}
         {/* ================================================================= */}
         {popup.type === "sales_overview" && (
           <div className="space-y-4">
             <DialogHeader>
-              <div className="flex items-center gap-2 text-emerald-600 mb-1">
-                <TrendingUp className="h-5 w-5" />
-                <span className="text-[11px] font-bold uppercase tracking-wider">
-                  Operational Sales Audit
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-600">
+                  <BarChart3 className="h-5 w-5" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider">
+                    Executive Analytics
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  Today & Historical Trends
                 </span>
               </div>
-              <DialogTitle className="text-xl font-black">Today&apos;s Sales Summary</DialogTitle>
+              <DialogTitle className="text-xl font-black">Sales & Financial Intelligence</DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Authoritative gross collections, ticket metrics, and payment channels recorded today.
+                Authoritative multi-dimensional breakdown of sales velocity, profit, and checkout trends.
+              </DialogDescription>
+            </DialogHeader>
+
+            {/* Sub-Tabs Navigation */}
+            <div className="flex items-center gap-1 border-b pb-2 overflow-x-auto text-xs font-bold scrollbar-none">
+              <button
+                type="button"
+                onClick={() => setAnalyticsTab("overview")}
+                className={`px-3 py-1.5 rounded-md transition-colors shrink-0 ${
+                  analyticsTab === "overview"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                Sales Overview
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnalyticsTab("profit")}
+                className={`px-3 py-1.5 rounded-md transition-colors shrink-0 ${
+                  analyticsTab === "profit"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                Gross Profit
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnalyticsTab("payments")}
+                className={`px-3 py-1.5 rounded-md transition-colors shrink-0 ${
+                  analyticsTab === "payments"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                Payment Channels
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnalyticsTab("comparison")}
+                className={`px-3 py-1.5 rounded-md transition-colors shrink-0 ${
+                  analyticsTab === "comparison"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                Comparisons
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnalyticsTab("hourly")}
+                className={`px-3 py-1.5 rounded-md transition-colors shrink-0 ${
+                  analyticsTab === "hourly"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                Peak Hours
+              </button>
+            </div>
+
+            {/* TAB 1: OVERVIEW */}
+            {analyticsTab === "overview" && (
+              <div className="space-y-3.5">
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-center">
+                  <span className="text-xs font-semibold text-muted-foreground">Today&apos;s Net Sales</span>
+                  <div className="text-3xl font-black text-emerald-600 mt-0.5">
+                    {formatCurrency(todayNetSales)}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Gross Billings: <strong className="text-foreground">{formatCurrency(todayGrossSales)}</strong> ·
+                    Discounts: <strong className="text-emerald-700">-{formatCurrency(Number(dashboardData?.today_discounts || 0))}</strong>
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 text-xs">
+                  <div className="rounded-lg border p-3 bg-muted/20">
+                    <span className="text-muted-foreground font-semibold text-[11px]">Completed Bills</span>
+                    <p className="text-lg font-black text-foreground mt-0.5">{todayCount}</p>
+                    <span className="text-[10px] text-muted-foreground">Customer checkouts today</span>
+                  </div>
+                  <div className="rounded-lg border p-3 bg-muted/20">
+                    <span className="text-muted-foreground font-semibold text-[11px]">Gross Profit</span>
+                    <p className="text-lg font-black text-emerald-600 mt-0.5">
+                      {formatCurrency(estimatedProfit)}
+                    </p>
+                    <span className="text-[10px] text-muted-foreground">{profitMarginPct}% operating margin</span>
+                  </div>
+                  <div className="rounded-lg border p-3 bg-muted/20">
+                    <span className="text-muted-foreground font-semibold text-[11px]">Customer Receivables</span>
+                    <p className={`text-lg font-black mt-0.5 ${todayOutstanding > 0 ? "text-red-600" : "text-foreground"}`}>
+                      {formatCurrency(todayOutstanding)}
+                    </p>
+                    <span className="text-[10px] text-muted-foreground">Unpaid credit balances</span>
+                  </div>
+                  <div className="rounded-lg border p-3 bg-muted/20">
+                    <span className="text-muted-foreground font-semibold text-[11px]">Returns Refunded</span>
+                    <p className="text-lg font-black text-foreground mt-0.5">
+                      {formatCurrency(Number(dashboardData?.today_returns || 0))}
+                    </p>
+                    <span className="text-[10px] text-muted-foreground">Reversed transactions</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <Link
+                    href="/dashboard/billing?view=history&date=today"
+                    className="flex-1"
+                    onClick={onClose}
+                  >
+                    <Button className="w-full gap-1.5 font-bold h-10 touch-target-min">
+                      <Receipt className="h-4 w-4" /> View Today&apos;s Invoices
+                    </Button>
+                  </Link>
+                  <Link
+                    href="/dashboard/reports/sales?period=today"
+                    className="flex-1"
+                    onClick={onClose}
+                  >
+                    <Button variant="outline" className="w-full gap-1.5 font-bold h-10 touch-target-min">
+                      <TrendingUp className="h-4 w-4" /> Sales Report
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: GROSS PROFIT */}
+            {analyticsTab === "profit" && (
+              <div className="space-y-3.5">
+                <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-4 text-center">
+                  <span className="text-xs font-semibold text-muted-foreground">COGS Gross Profit Today</span>
+                  <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400 mt-0.5">
+                    {formatCurrency(estimatedProfit)}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Operating Margin: <strong className="text-foreground">{profitMarginPct}%</strong>
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 text-xs">
+                  <div className="rounded-lg border p-3 bg-muted/20">
+                    <span className="text-muted-foreground font-semibold text-[11px]">Net Sales</span>
+                    <p className="text-lg font-black text-foreground mt-0.5">{formatCurrency(todayNetSales)}</p>
+                    <span className="text-[10px] text-muted-foreground">Bill revenue less discounts</span>
+                  </div>
+                  <div className="rounded-lg border p-3 bg-muted/20">
+                    <span className="text-muted-foreground font-semibold text-[11px]">Cost of Goods (COGS)</span>
+                    <p className="text-lg font-black text-foreground mt-0.5">
+                      {formatCurrency(Math.max(0, todayNetSales - estimatedProfit))}
+                    </p>
+                    <span className="text-[10px] text-muted-foreground">Recorded item purchase cost</span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border bg-muted/10 p-3 text-xs space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-foreground">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>Cost Accounting Verification</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Gross profit is calculated on exact product purchase unit costs (<code className="font-mono">unit_price - cost_price</code>). Items without recorded purchase costs default to baseline selling rates.
+                  </p>
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <Link href="/dashboard/purchases" className="flex-1" onClick={onClose}>
+                    <Button variant="outline" className="w-full font-bold h-10 touch-target-min">
+                      Purchase Invoices
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/inventory" className="flex-1" onClick={onClose}>
+                    <Button className="w-full font-bold h-10 touch-target-min bg-indigo-600 hover:bg-indigo-700">
+                      Manage Stock Ledger
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: PAYMENT CHANNELS */}
+            {analyticsTab === "payments" && (
+              <div className="space-y-3.5">
+                <div className="rounded-lg border bg-muted/20 p-3 text-xs flex items-center justify-between">
+                  <div>
+                    <span className="text-muted-foreground text-[10px] block uppercase font-bold">Total Reconciled Collections</span>
+                    <span className="font-mono font-black text-xl text-foreground">
+                      {formatCurrency(Number(dashboardData?.today_collected || 0))}
+                    </span>
+                  </div>
+                  <Badge variant="outline" className="font-mono text-[10px]">
+                    {paymentBreakdown.reduce((acc, p) => acc + p.count, 0)} payments
+                  </Badge>
+                </div>
+
+                <div className="space-y-2">
+                  {paymentBreakdown.map((item) => {
+                    const method = item.payment_method.toUpperCase();
+                    return (
+                      <div key={item.payment_method} className="p-3 rounded-lg border bg-card text-xs space-y-1.5">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-foreground">{method}</span>
+                          <span className="font-mono text-foreground">{formatCurrency(item.total)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span>{item.count} checkouts</span>
+                          <span className="font-mono font-semibold">{item.percentage}% share</span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={`h-full ${
+                              method === "CASH" ? "bg-emerald-500" : method === "UPI" ? "bg-slate-900 dark:bg-slate-100" : "bg-blue-600"
+                            }`}
+                            style={{ width: `${Math.min(100, item.percentage)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-1">
+                  <Link href="/dashboard/finance/payments" onClick={onClose}>
+                    <Button variant="outline" className="w-full font-bold h-10 touch-target-min">
+                      Open Complete Payment Ledger
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: SALES COMPARISON */}
+            {analyticsTab === "comparison" && (
+              <div className="space-y-3.5 text-xs">
+                {comparisons ? (
+                  <>
+                    <div className="rounded-xl border bg-card p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-foreground">Current 7 Days vs Prior 7 Days</span>
+                        <span
+                          className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold ${
+                            comparisons.weekRevGrowth >= 0
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                              : "bg-red-500/10 text-red-700 dark:text-red-400"
+                          }`}
+                        >
+                          {comparisons.weekRevGrowth >= 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
+                          {comparisons.weekRevGrowth >= 0 ? "+" : ""}
+                          {comparisons.weekRevGrowth}%
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div className="p-2.5 rounded-lg border bg-muted/20">
+                          <span className="text-[10px] text-muted-foreground uppercase font-semibold">Current Week Revenue</span>
+                          <p className="font-mono font-black text-base text-foreground mt-0.5">
+                            {formatCurrency(comparisons.currWeekRev)}
+                          </p>
+                          <span className="text-[10px] text-muted-foreground">{comparisons.currWeekBills} bills issued</span>
+                        </div>
+                        <div className="p-2.5 rounded-lg border bg-muted/20">
+                          <span className="text-[10px] text-muted-foreground uppercase font-semibold">Prior Week Baseline</span>
+                          <p className="font-mono font-black text-base text-muted-foreground mt-0.5">
+                            {formatCurrency(comparisons.priorWeekRev)}
+                          </p>
+                          <span className="text-[10px] text-muted-foreground">{comparisons.priorWeekBills} bills issued</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t text-[11px] text-muted-foreground">
+                        <span>Net Difference:</span>
+                        <span className={`font-mono font-bold ${comparisons.weekRevDiff >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                          {comparisons.weekRevDiff >= 0 ? "+" : ""}
+                          {formatCurrency(comparisons.weekRevDiff)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border bg-muted/10 p-3 text-xs flex items-center justify-between">
+                      <div>
+                        <span className="text-muted-foreground text-[10px] uppercase font-bold">Month-to-Date Volume</span>
+                        <p className="font-mono font-bold text-base text-foreground">
+                          {formatCurrency(Number(dashboardData?.month_revenue || 0))}
+                        </p>
+                      </div>
+                      <Link href="/dashboard/reports/sales?period=month" onClick={onClose}>
+                        <Button size="sm" variant="outline" className="h-8 text-xs font-bold">
+                          Month Report
+                        </Button>
+                      </Link>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-6 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
+                    Comparative analytics require at least 14 days of store transaction records.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 5: HOURLY PERFORMANCE */}
+            {analyticsTab === "hourly" && (
+              <div className="space-y-3.5 text-xs">
+                {peakHour && peakHour.sales > 0 && (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
+                      <Flame className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold block">
+                        Peak Checkout Velocity
+                      </span>
+                      <p className="font-bold text-foreground">
+                        {peakHour.hourLabel} was your peak sales window ({formatCurrency(peakHour.sales)})
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <span className="font-bold text-muted-foreground text-[11px] uppercase tracking-wider block">
+                    Today&apos;s 24-Hour Velocity
+                  </span>
+                  <div className="max-h-56 overflow-y-auto divide-y divide-border border rounded-lg bg-card">
+                    {(hourlySales || []).filter((h) => h.sales > 0).length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        No transactions registered yet today across hourly buckets.
+                      </div>
+                    ) : (
+                      hourlySales
+                        .filter((h) => h.sales > 0)
+                        .map((h, idx) => (
+                          <div key={idx} className="p-2.5 flex items-center justify-between hover:bg-muted/30">
+                            <span className="font-mono font-semibold text-foreground">
+                              {typeof h.hour === "number" ? `${String(h.hour).padStart(2, "0")}:00` : h.hour}
+                            </span>
+                            <span className="font-mono font-bold text-emerald-600">
+                              {formatCurrency(h.sales)}
+                            </span>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-1">
+                  <Button variant="outline" onClick={onClose} className="w-full font-bold h-10 touch-target-min">
+                    Close Audit
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================================================================= */}
+        {/* POPUP: DATE NODE DETAILS (CLICKED ON SALES GRAPH)                  */}
+        {/* ================================================================= */}
+        {popup.type === "date_details" && (
+          <div className="space-y-4">
+            <DialogHeader>
+              <div className="flex items-center gap-2 text-foreground mb-1">
+                <Calendar className="h-5 w-5 text-emerald-600" />
+                <span className="text-[11px] font-bold uppercase tracking-wider">Historical Audit</span>
+              </div>
+              <DialogTitle className="text-xl font-black">{popup.formattedDate}</DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Recorded sales volume and completed checkouts for {popup.date}.
               </DialogDescription>
             </DialogHeader>
 
             <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-center">
-              <span className="text-xs font-semibold text-muted-foreground">Today&apos;s Net Sales</span>
+              <span className="text-xs font-semibold text-muted-foreground">Day Total Revenue</span>
               <div className="text-3xl font-black text-emerald-600 mt-0.5">
-                {formatCurrency(todayNetSales)}
+                {formatCurrency(popup.revenue)}
               </div>
               <p className="text-[11px] text-muted-foreground mt-1">
-                Gross Billings: <strong className="text-foreground">{formatCurrency(todayGrossSales)}</strong>
+                Completed Bills: <strong className="text-foreground">{popup.transactions}</strong>
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 text-xs">
-              <div className="rounded-lg border p-3 bg-muted/20">
-                <span className="text-muted-foreground font-semibold text-[11px]">Completed Bills</span>
-                <p className="text-lg font-black text-foreground mt-0.5">{todayCount}</p>
-                <span className="text-[10px] text-muted-foreground">Checkout transactions</span>
+            {popup.profit !== undefined && popup.profit > 0 && (
+              <div className="rounded-lg border bg-muted/20 p-3 text-xs flex justify-between items-center">
+                <span className="text-muted-foreground font-semibold">Estimated Gross Profit</span>
+                <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                  {formatCurrency(popup.profit)}
+                </span>
               </div>
-              <div className="rounded-lg border p-3 bg-muted/20">
-                <span className="text-muted-foreground font-semibold text-[11px]">Avg. Ticket Value</span>
-                <p className="text-lg font-black text-foreground mt-0.5">
-                  {formatCurrency(todayCount > 0 ? todayNetSales / todayCount : 0)}
-                </p>
-                <span className="text-[10px] text-muted-foreground">Per completed customer bill</span>
-              </div>
-              <div className="rounded-lg border p-3 bg-muted/20">
-                <span className="text-muted-foreground font-semibold text-[11px]">Customer Receivables</span>
-                <p className={`text-lg font-black mt-0.5 ${todayOutstanding > 0 ? "text-red-600" : "text-foreground"}`}>
-                  {formatCurrency(todayOutstanding)}
-                </p>
-                <span className="text-[10px] text-muted-foreground">Unpaid credit balances</span>
-              </div>
-              <div className="rounded-lg border p-3 bg-muted/20">
-                <span className="text-muted-foreground font-semibold text-[11px]">Returns Today</span>
-                <p className="text-lg font-black text-foreground mt-0.5">
-                  {formatCurrency(Number(dashboardData?.today_returns || 0))}
-                </p>
-                <span className="text-[10px] text-muted-foreground">Refunded transactions</span>
-              </div>
-            </div>
+            )}
 
-            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <div className="flex gap-2 pt-2">
               <Link
-                href="/dashboard/billing?view=history&date=today"
+                href={`/dashboard/billing?view=history&date=${encodeURIComponent(popup.date)}`}
                 className="flex-1"
                 onClick={onClose}
               >
                 <Button className="w-full gap-1.5 font-bold h-10 touch-target-min">
-                  <Receipt className="h-4 w-4" /> View Today&apos;s Invoices
+                  <Receipt className="h-4 w-4" /> Filter Invoices on This Date
                 </Button>
               </Link>
-              <Link
-                href="/dashboard/reports/sales?period=today"
-                className="flex-1"
-                onClick={onClose}
-              >
-                <Button variant="outline" className="w-full gap-1.5 font-bold h-10 touch-target-min">
-                  <TrendingUp className="h-4 w-4" /> Sales Report
-                </Button>
-              </Link>
+              <Button variant="outline" onClick={onClose} className="h-10 px-4">
+                Close
+              </Button>
             </div>
           </div>
         )}
@@ -504,7 +920,6 @@ export function DashboardPopupManager({
               </div>
             ) : invoiceDetail ? (
               <div className="space-y-3.5">
-                {/* Invoice Meta Bar */}
                 <div className="rounded-lg border bg-muted/20 p-3 grid grid-cols-2 gap-2 text-xs">
                   <div>
                     <span className="text-muted-foreground text-[10px] block uppercase font-semibold">Customer</span>
@@ -526,7 +941,6 @@ export function DashboardPopupManager({
                   </div>
                 </div>
 
-                {/* Line Items Table */}
                 <div className="border rounded-lg overflow-hidden text-xs">
                   <div className="bg-muted/40 font-bold px-3 py-2 flex items-center justify-between text-muted-foreground text-[11px] border-b">
                     <span>ITEM</span>
@@ -547,7 +961,6 @@ export function DashboardPopupManager({
                   </div>
                 </div>
 
-                {/* Totals Summary */}
                 <div className="rounded-lg border bg-muted/10 p-3 space-y-1.5 text-xs">
                   <div className="flex justify-between text-muted-foreground">
                     <span>Subtotal</span>
@@ -571,7 +984,6 @@ export function DashboardPopupManager({
                   </div>
                 </div>
 
-                {/* Action Buttons */}
                 <div className="flex flex-col sm:flex-row gap-2 pt-2">
                   <Button
                     onClick={() => handlePrintReceipt(invoiceDetail)}
@@ -1126,4 +1538,3 @@ export function DashboardPopupManager({
     </Dialog>
   );
 }
-

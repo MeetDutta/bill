@@ -173,6 +173,22 @@ export default function MobileMorePage() {
           </div>
           <ChevronRight className="h-4 w-4 text-slate-400" />
         </Link>
+
+        <Link
+          href="/dashboard/settings"
+          className="flex items-center justify-between p-3.5 hover:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+              <Settings className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="font-bold text-slate-900 block">Business & POS Settings</span>
+              <span className="text-[10px] text-slate-400">Vertical, GST tax engine & store identity</span>
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-slate-400" />
+        </Link>
       </div>
 
       {/* Switch to Desktop & Logout Actions */}

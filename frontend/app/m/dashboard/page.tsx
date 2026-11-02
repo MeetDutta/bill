@@ -29,11 +29,14 @@ import {
   ChevronRight,
   FileCheck,
   Bell,
+  BarChart3,
 } from "lucide-react";
 import {
   DashboardPopupManager,
   type DashboardPopup,
 } from "@/components/dashboard/DashboardPopupManager";
+import { SalesAnalyticsGraph } from "@/components/dashboard/SalesAnalyticsGraph";
+import { PaymentDonutChart } from "@/components/dashboard/PaymentDonutChart";
 
 export default function MobileDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -123,7 +126,14 @@ export default function MobileDashboardPage() {
   const todayOutstanding = Number(data?.today_outstanding || 0);
   const lowStockCount = Number(data?.low_stock_count || 0);
   const paymentBreakdown = data?.payment_methods_breakdown || [];
-  const liveSalesActivity = data?.live_sales_activity || [];
+  const totalCollected = Number(data?.today_collected || 0);
+
+  // Financial KPIs
+  const allTimeRevenue = Number(data?.all_time_revenue ?? data?.total_revenue ?? 0);
+  const allTimeTransactions = Number(data?.all_time_transactions ?? data?.total_transactions ?? 0);
+  const estimatedProfit = Number(data?.estimated_gross_profit || 0);
+  const customerDues = Number(data?.customer_dues || todayOutstanding || 0);
+  const profitMarginPct = todayNetSales > 0 ? ((estimatedProfit / todayNetSales) * 100).toFixed(1) : "0.0";
 
   // Previous Day Comparison
   const dayComparison = useMemo(() => {
@@ -224,6 +234,7 @@ export default function MobileDashboardPage() {
   }, [recentActivities, activeActivityTab]);
 
   const pendingQuotesCount = quotations.filter((q) => ["draft", "sent"].includes((q.status || "").toLowerCase())).length;
+  const recentReturnsCount = returnsList.length;
 
   if (loading && !data) {
     return (
@@ -241,7 +252,7 @@ export default function MobileDashboardPage() {
   return (
     <div className="space-y-3 pt-1 pb-16 min-w-0">
       {/* =================================================================== */}
-      {/* MOBILE HEADER (COMPACT)                                             */}
+      {/* 1. MOBILE HEADER (COMPACT)                                          */}
       {/* =================================================================== */}
       <header className="flex items-center justify-between gap-2 border-b pb-2.5 px-0.5">
         <div className="min-w-0">
@@ -277,7 +288,7 @@ export default function MobileDashboardPage() {
       </header>
 
       {/* =================================================================== */}
-      {/* PRIMARY SALES METRIC                                                */}
+      {/* 2. PRIMARY SALES METRIC                                             */}
       {/* =================================================================== */}
       <button
         onClick={() => setPopup({ type: "sales_overview" })}
@@ -318,7 +329,91 @@ export default function MobileDashboardPage() {
       </button>
 
       {/* =================================================================== */}
-      {/* 4 QUICK ACTIONS                                                     */}
+      {/* 3. COMPACT FINANCIAL KPIS (2X2 GRID ON MOBILE)                      */}
+      {/* =================================================================== */}
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setPopup({ type: "sales_overview", initialTab: "overview" })}
+          className="p-2.5 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors text-left"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+            Total Sales
+          </span>
+          <p className="font-mono font-black text-sm text-foreground mt-0.5 truncate">
+            {formatCurrency(allTimeRevenue)}
+          </p>
+          <span className="text-[9px] text-muted-foreground truncate block">All-time</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPopup({ type: "sales_overview", initialTab: "overview" })}
+          className="p-2.5 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors text-left"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+            Total Bills
+          </span>
+          <p className="font-mono font-black text-sm text-foreground mt-0.5 truncate">
+            {allTimeTransactions}
+          </p>
+          <span className="text-[9px] text-muted-foreground truncate block">Completed</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPopup({ type: "sales_overview", initialTab: "profit" })}
+          className="p-2.5 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors text-left"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+            Gross Profit
+          </span>
+          <p className="font-mono font-black text-sm text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
+            {formatCurrency(estimatedProfit)}
+          </p>
+          <span className="text-[9px] text-muted-foreground truncate block">{profitMarginPct}% margin</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPopup({ type: "pending_payments" })}
+          className="p-2.5 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors text-left"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+            Receivables
+          </span>
+          <p className={`font-mono font-black text-sm mt-0.5 truncate ${customerDues > 0 ? "text-red-600" : "text-foreground"}`}>
+            {formatCurrency(customerDues)}
+          </p>
+          <span className="text-[9px] text-muted-foreground truncate block">
+            {customerDues > 0 ? "Pending dues" : "All cleared"}
+          </span>
+        </button>
+      </div>
+
+      {/* =================================================================== */}
+      {/* 4. SALES PERFORMANCE GRAPH                                          */}
+      {/* =================================================================== */}
+      <div>
+        <SalesAnalyticsGraph
+          salesTrend30={data?.sales_trend_30 || []}
+          hourlySales={data?.hourly_sales || []}
+          onSelectDate={(pt) => {
+            setPopup({
+              type: "date_details",
+              date: pt.date,
+              formattedDate: pt.formattedDate,
+              revenue: pt.revenue,
+              profit: pt.profit,
+              transactions: pt.transactions,
+            });
+          }}
+          onOpenAnalytics={() => setPopup({ type: "sales_overview" })}
+        />
+      </div>
+
+      {/* =================================================================== */}
+      {/* 5. 4 QUICK ACTIONS                                                  */}
       {/* =================================================================== */}
       <div className="grid grid-cols-2 gap-2">
         <Link
@@ -375,15 +470,20 @@ export default function MobileDashboardPage() {
       </div>
 
       {/* =================================================================== */}
-      {/* PAYMENTS TODAY MINILIST                                             */}
+      {/* 6. PAYMENTS TODAY MINILIST & DISTRIBUTION                           */}
       {/* =================================================================== */}
       <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground">
-            Payments Today
-          </span>
+        <div className="flex items-center justify-between text-xs border-b pb-1.5">
+          <div>
+            <span className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground block">
+              Payments Today
+            </span>
+            <span className="text-[10px] text-muted-foreground font-mono">
+              Collected: <strong className="text-foreground">{formatCurrency(totalCollected)}</strong>
+            </span>
+          </div>
           <span className="text-[10px] text-muted-foreground font-mono">
-            {paymentBreakdown.reduce((acc, p) => acc + p.count, 0)} collections
+            {paymentBreakdown.reduce((acc, p) => acc + p.count, 0)} payments
           </span>
         </div>
 
@@ -392,42 +492,52 @@ export default function MobileDashboardPage() {
             No payments recorded yet today.
           </div>
         ) : (
-          <div className="divide-y divide-border/60">
-            {paymentBreakdown.map((item) => {
-              const method = item.payment_method.toUpperCase();
-              return (
-                <button
-                  key={item.payment_method}
-                  onClick={() => setPopup({ type: "payment_method", method })}
-                  className="w-full py-2 flex items-center justify-between hover:bg-muted/30 px-1 rounded transition-colors text-xs text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="h-6 w-6 rounded bg-muted flex items-center justify-center shrink-0 text-foreground">
-                      {method === "CASH" ? (
-                        <Banknote className="h-3 w-3 text-emerald-600" />
-                      ) : method === "UPI" ? (
-                        <QrCode className="h-3 w-3 text-foreground" />
-                      ) : (
-                        <CreditCard className="h-3 w-3 text-slate-700" />
-                      )}
+          <div className="space-y-3">
+            <div className="divide-y divide-border/60">
+              {paymentBreakdown.map((item) => {
+                const method = item.payment_method.toUpperCase();
+                return (
+                  <button
+                    key={item.payment_method}
+                    onClick={() => setPopup({ type: "payment_method", method })}
+                    className="w-full py-2 flex items-center justify-between hover:bg-muted/30 px-1 rounded transition-colors text-xs text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="h-6 w-6 rounded bg-muted flex items-center justify-center shrink-0 text-foreground">
+                        {method === "CASH" ? (
+                          <Banknote className="h-3 w-3 text-emerald-600" />
+                        ) : method === "UPI" ? (
+                          <QrCode className="h-3 w-3 text-foreground" />
+                        ) : (
+                          <CreditCard className="h-3 w-3 text-slate-700" />
+                        )}
+                      </div>
+                      <span className="font-bold text-foreground">{method}</span>
+                      <span className="text-[10px] text-muted-foreground">({item.count})</span>
                     </div>
-                    <span className="font-bold text-foreground">{method}</span>
-                    <span className="text-[10px] text-muted-foreground">({item.count})</span>
-                  </div>
 
-                  <div className="flex items-center gap-1.5 font-mono">
-                    <span className="font-bold text-foreground">{formatCurrency(item.total)}</span>
-                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                  </div>
-                </button>
-              );
-            })}
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <span className="font-bold text-foreground">{formatCurrency(item.total)}</span>
+                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pt-2 border-t flex justify-center">
+              <PaymentDonutChart
+                paymentMethods={paymentBreakdown}
+                totalCollected={totalCollected}
+                onSelectMethod={(m) => setPopup({ type: "payment_method", method: m })}
+              />
+            </div>
           </div>
         )}
       </div>
 
       {/* =================================================================== */}
-      {/* RECENT ACTIVITY MINILIST                                            */}
+      {/* 7. RECENT ACTIVITY MINILIST                                         */}
       {/* =================================================================== */}
       <div className="rounded-xl border border-border bg-card p-3 space-y-2">
         <div className="flex items-center justify-between text-xs">
@@ -508,7 +618,7 @@ export default function MobileDashboardPage() {
       </div>
 
       {/* =================================================================== */}
-      {/* ATTENTION REQUIRED MINILIST                                         */}
+      {/* 8. ATTENTION REQUIRED MINILIST                                      */}
       {/* =================================================================== */}
       <div className="rounded-xl border border-border bg-card p-3 space-y-2">
         <span className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground block">
@@ -579,7 +689,7 @@ export default function MobileDashboardPage() {
       </div>
 
       {/* =================================================================== */}
-      {/* POPUP MANAGER                                                       */}
+      {/* CENTRAL POPUP MANAGER                                               */}
       {/* =================================================================== */}
       <DashboardPopupManager
         popup={popup}

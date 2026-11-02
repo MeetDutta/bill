@@ -118,7 +118,13 @@ export const loyaltyApi = {
 // WhatsApp
 export const whatsappApi = {
   getConfig: () => api.get("/whatsapp/config/"),
-  updateConfig: (data: unknown) => api.patch("/whatsapp/config/", data),
+  updateConfig: (data: unknown) =>
+    api.patch("/whatsapp/config/", data).catch((err) => {
+      if (err?.response?.status === 405) {
+        return api.post("/whatsapp/config/", data);
+      }
+      throw err;
+    }),
   testConnection: () => api.post<{ connected: boolean; checked_at: string; message: string; phone_number?: string; verified_name?: string }>("/whatsapp/test-connection/"),
   getMessages: () => api.get("/whatsapp/messages/"),
   getTemplates: () => api.get("/whatsapp/templates/"),
@@ -188,7 +194,13 @@ export const customerPortalApi = {
 // Universal POS & Billing Engine
 export const posApi = {
   getConfig: () => api.get("/pos/config/"),
-  updateConfig: (data: unknown) => api.post("/pos/config/", data),
+  updateConfig: (data: unknown) =>
+    api.patch("/pos/config/", data).catch((err) => {
+      if (err?.response?.status === 405) {
+        return api.post("/pos/config/", data);
+      }
+      throw err;
+    }),
   getBusinessTypes: () => api.get("/pos/business-types/"),
   searchProducts: (params?: { search?: string; category?: string; low_stock?: boolean; page?: number; page_size?: number }) =>
     api.get("/pos/products/", { params }),
@@ -457,7 +469,12 @@ export const tallyExportApi = {
   getConfig: () => api.get<TallyLedgerConfigData>("/pos/reports/sales/tally-config/"),
 
   updateConfig: (data: Partial<TallyLedgerConfigData>) =>
-    api.post<{ status: string; message: string }>("/pos/reports/sales/tally-config/", data),
+    api.patch<{ status: string; message: string }>("/pos/reports/sales/tally-config/", data).catch((err) => {
+      if (err?.response?.status === 405) {
+        return api.post<{ status: string; message: string }>("/pos/reports/sales/tally-config/", data);
+      }
+      throw err;
+    }),
 
   getHistory: () => api.get<{ history: TallyExportHistoryItem[] }>("/pos/reports/sales/tally-history/"),
 };

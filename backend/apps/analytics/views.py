@@ -404,7 +404,7 @@ def compute_analytics(org):
             "percentage": pct,
         })
 
-    # 9. 30-Day Sales Trend (Line & Table data)
+    # 9. 30-Day Sales & Profit Trend (Line & Table data)
     tx_in_30_range = Transaction.objects.filter(
         organization=org,
         transaction_date__date__gte=start_date_30,
@@ -415,16 +415,35 @@ def compute_analytics(org):
         day_count=Count("id"),
     )
     tx_30_by_date = {t["transaction_date__date"]: t for t in tx_in_30_range}
+
+    # Authentic COGS profit per day using product cost_price
+    items_in_30 = TransactionItem.objects.filter(
+        transaction__organization=org,
+        transaction__transaction_date__date__gte=start_date_30,
+        transaction__transaction_date__date__lte=today,
+        transaction__status="completed",
+        product__cost_price__isnull=False,
+        product__cost_price__gt=Decimal("0.00"),
+    ).values("transaction__transaction_date__date").annotate(
+        day_profit=Sum(
+            models.F("quantity") * (models.F("unit_price") - models.F("product__cost_price")),
+            output_field=models.DecimalField(max_digits=12, decimal_places=2)
+        )
+    )
+    profit_30_by_date = {p["transaction__transaction_date__date"]: float(p["day_profit"] or 0) for p in items_in_30}
+
     sales_trend_30 = []
     for i in range(30):
         d = start_date_30 + timedelta(days=i)
         day_data = tx_30_by_date.get(d)
         rev = float(day_data["day_revenue"]) if day_data and day_data["day_revenue"] else 0.0
         cnt = int(day_data["day_count"]) if day_data and day_data["day_count"] else 0
+        profit_amt = profit_30_by_date.get(d, 0.0)
         sales_trend_30.append({
             "date": d.isoformat(),
             "formatted_date": d.strftime("%d %b"),
             "revenue": rev,
+            "profit": profit_amt,
             "transactions": cnt,
         })
 

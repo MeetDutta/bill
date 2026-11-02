@@ -41,11 +41,15 @@ import {
   Calendar,
   Layers,
   Sparkles,
+  BarChart3,
+  Wallet,
 } from "lucide-react";
 import {
   DashboardPopupManager,
   type DashboardPopup,
 } from "@/components/dashboard/DashboardPopupManager";
+import { SalesAnalyticsGraph } from "@/components/dashboard/SalesAnalyticsGraph";
+import { PaymentDonutChart } from "@/components/dashboard/PaymentDonutChart";
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -132,13 +136,18 @@ export default function DashboardPage() {
 
   // Authoritative metrics from backend
   const todayNetSales = Number(data?.today_net_sales ?? data?.today_gross_sales ?? 0);
-  const todayGrossSales = Number(data?.today_gross_sales || 0);
   const todayCount = Number(data?.today_transactions_count || 0);
   const todayOutstanding = Number(data?.today_outstanding || 0);
   const lowStockCount = Number(data?.low_stock_count || 0);
-  const pendingInvoicesCount = Number(data?.pending_invoices_count || 0);
   const paymentBreakdown = data?.payment_methods_breakdown || [];
-  const liveSalesActivity = data?.live_sales_activity || [];
+  const totalCollected = Number(data?.today_collected || 0);
+
+  // Financial KPIs
+  const allTimeRevenue = Number(data?.all_time_revenue ?? data?.total_revenue ?? 0);
+  const allTimeTransactions = Number(data?.all_time_transactions ?? data?.total_transactions ?? 0);
+  const estimatedProfit = Number(data?.estimated_gross_profit || 0);
+  const customerDues = Number(data?.customer_dues || todayOutstanding || 0);
+  const profitMarginPct = todayNetSales > 0 ? ((estimatedProfit / todayNetSales) * 100).toFixed(1) : "0.0";
 
   // Previous Day Comparison
   const dayComparison = useMemo(() => {
@@ -272,7 +281,7 @@ export default function DashboardPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-4 pb-8 min-w-0">
       {/* =================================================================== */}
-      {/* SECTION A: DASHBOARD HEADER (COMPACT)                               */}
+      {/* 1. STORE HEADER (COMPACT)                                           */}
       {/* =================================================================== */}
       <header className="flex items-center justify-between gap-3 px-1 py-1 border-b pb-3">
         {/* Left: Branding & Store Identity */}
@@ -349,7 +358,7 @@ export default function DashboardPage() {
       </header>
 
       {/* =================================================================== */}
-      {/* SECTION B: PRIMARY BUSINESS METRIC (TODAY'S SALES)                 */}
+      {/* 2. TODAY'S SALES HERO                                               */}
       {/* =================================================================== */}
       <section>
         <button
@@ -361,7 +370,7 @@ export default function DashboardPage() {
               Today&apos;s Sales
             </span>
             <span className="text-[11px] font-semibold flex items-center gap-1 text-emerald-700 dark:text-emerald-400 group-hover:underline">
-              <span>View Audit Breakdown</span>
+              <span>View Executive Analytics</span>
               <ChevronRight className="h-3.5 w-3.5" />
             </span>
           </div>
@@ -397,7 +406,101 @@ export default function DashboardPage() {
       </section>
 
       {/* =================================================================== */}
-      {/* SECTION C: QUICK ACTIONS (4 COMPACT ACTIONS)                        */}
+      {/* 3. COMPACT FINANCIAL KPIS (4 COMPACT SUMMARY CARDS)                 */}
+      {/* =================================================================== */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {/* KPI 1: Total Sales */}
+        <button
+          type="button"
+          onClick={() => setPopup({ type: "sales_overview", initialTab: "overview" })}
+          className="p-3 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors text-left"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+            Total Sales
+          </span>
+          <p className="font-mono font-black text-base sm:text-lg text-foreground mt-0.5 truncate">
+            {formatCurrency(allTimeRevenue)}
+          </p>
+          <span className="text-[10px] text-muted-foreground truncate block">
+            All-time revenue
+          </span>
+        </button>
+
+        {/* KPI 2: Total Bills */}
+        <button
+          type="button"
+          onClick={() => setPopup({ type: "sales_overview", initialTab: "overview" })}
+          className="p-3 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors text-left"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+            Total Bills
+          </span>
+          <p className="font-mono font-black text-base sm:text-lg text-foreground mt-0.5 truncate">
+            {allTimeTransactions}
+          </p>
+          <span className="text-[10px] text-muted-foreground truncate block">
+            Completed checkouts
+          </span>
+        </button>
+
+        {/* KPI 3: Gross Profit */}
+        <button
+          type="button"
+          onClick={() => setPopup({ type: "sales_overview", initialTab: "profit" })}
+          className="p-3 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors text-left"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+            Gross Profit
+          </span>
+          <p className="font-mono font-black text-base sm:text-lg text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
+            {formatCurrency(estimatedProfit)}
+          </p>
+          <span className="text-[10px] text-muted-foreground truncate block">
+            {profitMarginPct}% operating margin
+          </span>
+        </button>
+
+        {/* KPI 4: Outstanding Receivables */}
+        <button
+          type="button"
+          onClick={() => setPopup({ type: "pending_payments" })}
+          className="p-3 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors text-left"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+            Receivables
+          </span>
+          <p className={`font-mono font-black text-base sm:text-lg mt-0.5 truncate ${customerDues > 0 ? "text-red-600" : "text-foreground"}`}>
+            {formatCurrency(customerDues)}
+          </p>
+          <span className="text-[10px] text-muted-foreground truncate block">
+            {customerDues > 0 ? "Awaiting customer payment" : "Zero balance due"}
+          </span>
+        </button>
+      </section>
+
+      {/* =================================================================== */}
+      {/* 4. SALES PERFORMANCE & GROSS PROFIT GRAPH                           */}
+      {/* =================================================================== */}
+      <section>
+        <SalesAnalyticsGraph
+          salesTrend30={data?.sales_trend_30 || []}
+          hourlySales={data?.hourly_sales || []}
+          onSelectDate={(pt) => {
+            setPopup({
+              type: "date_details",
+              date: pt.date,
+              formattedDate: pt.formattedDate,
+              revenue: pt.revenue,
+              profit: pt.profit,
+              transactions: pt.transactions,
+            });
+          }}
+          onOpenAnalytics={() => setPopup({ type: "sales_overview" })}
+        />
+      </section>
+
+      {/* =================================================================== */}
+      {/* 5. QUICK ACTIONS (4 COMPACT ACTIONS)                                */}
       {/* =================================================================== */}
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Link
@@ -454,70 +557,87 @@ export default function DashboardPage() {
       </section>
 
       {/* =================================================================== */}
-      {/* SECTION D: TODAY'S PAYMENT BREAKDOWN (MINILIST)                     */}
+      {/* 6. PAYMENTS TODAY MINILIST & DISTRIBUTION                           */}
       {/* =================================================================== */}
       <section className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground">
-            Payments Today
-          </span>
+        <div className="flex items-center justify-between text-xs border-b pb-2">
+          <div>
+            <span className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground block">
+              Payments Today
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              Total Collected: <strong className="font-mono text-foreground font-bold">{formatCurrency(totalCollected)}</strong>
+            </span>
+          </div>
           <span className="text-[11px] text-muted-foreground font-mono">
             {paymentBreakdown.reduce((acc, p) => acc + p.count, 0)} collections
           </span>
         </div>
 
         {paymentBreakdown.length === 0 ? (
-          <div className="py-4 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
+          <div className="py-6 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
             No payments recorded yet today.
           </div>
         ) : (
-          <div className="divide-y divide-border/60">
-            {paymentBreakdown.map((item) => {
-              const method = item.payment_method.toUpperCase();
-              return (
-                <button
-                  key={item.payment_method}
-                  onClick={() => setPopup({ type: "payment_method", method })}
-                  className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="h-7 w-7 rounded bg-muted flex items-center justify-center shrink-0 text-foreground">
-                      {method === "CASH" ? (
-                        <Banknote className="h-3.5 w-3.5 text-emerald-600" />
-                      ) : method === "UPI" ? (
-                        <QrCode className="h-3.5 w-3.5 text-foreground" />
-                      ) : (
-                        <CreditCard className="h-3.5 w-3.5 text-slate-700" />
-                      )}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+            {/* Left: Compact List of Payment Channels */}
+            <div className="md:col-span-8 divide-y divide-border/60">
+              {paymentBreakdown.map((item) => {
+                const method = item.payment_method.toUpperCase();
+                return (
+                  <button
+                    key={item.payment_method}
+                    onClick={() => setPopup({ type: "payment_method", method })}
+                    className="w-full py-2 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-7 w-7 rounded bg-muted flex items-center justify-center shrink-0 text-foreground">
+                        {method === "CASH" ? (
+                          <Banknote className="h-3.5 w-3.5 text-emerald-600" />
+                        ) : method === "UPI" ? (
+                          <QrCode className="h-3.5 w-3.5 text-foreground" />
+                        ) : (
+                          <CreditCard className="h-3.5 w-3.5 text-slate-700" />
+                        )}
+                      </div>
+                      <div>
+                        <span className="font-bold text-foreground group-hover:underline">
+                          {method}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground ml-2">
+                          {item.count} {item.count === 1 ? "bill" : "bills"}
+                        </span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="font-bold text-foreground group-hover:underline">
-                        {method}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground ml-2">
-                        {item.count} {item.count === 1 ? "bill" : "bills"}
-                      </span>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-foreground">
-                      {formatCurrency(item.total)}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground font-mono w-10 text-right">
-                      {item.percentage}%
-                    </span>
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
-                  </div>
-                </button>
-              );
-            })}
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-foreground">
+                        {formatCurrency(item.total)}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-mono w-10 text-right">
+                        {item.percentage}%
+                      </span>
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Right: Payment Distribution Donut Chart */}
+            <div className="md:col-span-4 flex items-center justify-center border-t md:border-t-0 md:border-l pt-3 md:pt-0 pl-0 md:pl-2">
+              <PaymentDonutChart
+                paymentMethods={paymentBreakdown}
+                totalCollected={totalCollected}
+                onSelectMethod={(m) => setPopup({ type: "payment_method", method: m })}
+              />
+            </div>
           </div>
         )}
       </section>
 
       {/* =================================================================== */}
-      {/* SECTION E: RECENT ACTIVITY (MINILIST)                               */}
+      {/* 7. RECENT ACTIVITY (MINILIST)                                       */}
       {/* =================================================================== */}
       <section className="rounded-xl border border-border bg-card p-4 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -637,7 +757,7 @@ export default function DashboardPage() {
       </section>
 
       {/* =================================================================== */}
-      {/* SECTION F: ATTENTION REQUIRED (ACTIONABLE MINILIST)                 */}
+      {/* 8. ATTENTION REQUIRED (ACTIONABLE MINILIST)                         */}
       {/* =================================================================== */}
       <section className="rounded-xl border border-border bg-card p-4 space-y-3">
         <div className="flex items-center justify-between text-xs">
@@ -648,7 +768,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="divide-y divide-border/60">
-          {/* 1. Low Stock Products */}
+          {/* Low Stock Products */}
           <button
             onClick={() => setPopup({ type: "low_stock" })}
             className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
@@ -681,7 +801,7 @@ export default function DashboardPage() {
             </div>
           </button>
 
-          {/* 2. Pending Payments / Customer Receivables */}
+          {/* Customer Receivables */}
           <button
             onClick={() => setPopup({ type: "pending_payments" })}
             className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
@@ -703,18 +823,18 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2">
               <span
                 className={`font-mono font-bold px-2 py-0.5 rounded text-xs ${
-                  todayOutstanding > 0
+                  customerDues > 0
                     ? "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20"
                     : "text-muted-foreground"
                 }`}
               >
-                {todayOutstanding > 0 ? formatCurrency(todayOutstanding) : "₹0"}
+                {customerDues > 0 ? formatCurrency(customerDues) : "₹0"}
               </span>
               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground" />
             </div>
           </button>
 
-          {/* 3. Pending Quotations */}
+          {/* Pending Quotations */}
           <Link
             href="/dashboard/quotations"
             className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"
@@ -741,7 +861,7 @@ export default function DashboardPage() {
             </div>
           </Link>
 
-          {/* 4. Sales Returns */}
+          {/* Sales Returns */}
           <button
             onClick={() => setPopup({ type: "returns" })}
             className="w-full py-2.5 flex items-center justify-between hover:bg-muted/30 px-1 rounded-md transition-colors text-xs text-left group"

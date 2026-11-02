@@ -91,7 +91,14 @@ class BusinessConfigSerializer(serializers.ModelSerializer):
                 org.save(update_fields=list(set(org_fields)))
                 from apps.stores.models import Store
                 p_store = Store.objects.filter(organization=org).first()
-                if p_store and trade_name:
+                if not p_store:
+                    Store.objects.create(
+                        organization=org,
+                        name=f"{str(trade_name or org.name).strip()} Main Store",
+                        code="STR-MAIN",
+                        status="active",
+                    )
+                elif trade_name and str(trade_name).strip():
                     p_store.name = f"{str(trade_name).strip()} Main Store"
                     p_store.save(update_fields=["name"])
 

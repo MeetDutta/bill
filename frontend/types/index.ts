@@ -203,7 +203,7 @@ export interface DashboardData {
   supplier_dues?: number;
   customer_dues?: number;
   sales_by_category?: { category: string; total: number; items_sold: number; percentage: number }[];
-  sales_trend_30?: { date: string; formatted_date: string; revenue: number; transactions: number }[];
+  sales_trend_30?: { date: string; formatted_date: string; revenue: number; profit?: number; transactions: number }[];
 }
 
 export interface PaginatedResponse<T> {

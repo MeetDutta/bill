@@ -164,18 +164,34 @@ def resolve_request_store(request):
     if not store_id and hasattr(request, "GET"):
         store_id = request.GET.get("store_id")
 
+    if store_id and str(store_id).strip().lower() in ("", "null", "undefined", "none"):
+        store_id = None
+
     if store_id:
-        s = Store.objects.filter(organization=org, id=store_id).first()
+        store_id_str = str(store_id).strip()
+        s = None
+        if len(store_id_str) == 36 and "-" in store_id_str:
+            s = Store.objects.filter(organization=org, id=store_id_str).first()
+        if not s:
+            s = Store.objects.filter(organization=org, code=store_id_str).first()
         if not s:
             raise ValidationError(f"Store '{store_id}' not found.")
         return s
+
+    if hasattr(request.user, "managed_stores"):
+        s = request.user.managed_stores.filter(organization=org, status="active").first()
+        if s:
+            return s
 
     if hasattr(request.user, "stores"):
         s = request.user.stores.first()
         if s:
             return s
 
-    store = Store.objects.filter(organization=org).first()
+    store = (
+        Store.objects.filter(organization=org, status="active").first()
+        or Store.objects.filter(organization=org).first()
+    )
     if not store:
         store = Store.objects.create(
             organization=org,
@@ -288,7 +304,14 @@ class POSCheckoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        org = request.user.organization
+        store = resolve_request_store(request)
+        org = (store.organization if store else None) or request.user.organization
+        if not org:
+            from apps.organizations.models import Organization
+            org = Organization.objects.first() or Organization.objects.create(name="BillMeet Store")
+            request.user.organization = org
+            request.user.save(update_fields=["organization"])
+
         idempotency_key = (
             request.headers.get("Idempotency-Key")
             or request.headers.get("X-Idempotency-Key")
@@ -296,7 +319,6 @@ class POSCheckoutView(APIView):
         )
 
         try:
-            store = resolve_request_store(request)
             result = CheckoutService.process_checkout(
                 organization=org,
                 store=store,
@@ -1080,6 +1102,12 @@ class POSTallyConfigView(APIView):
                 setattr(cfg, f, data[f])
         cfg.save()
         return Response({"status": "success", "message": "Tally ledger configuration updated."})
+
+    def put(self, request):
+        return self.post(request)
+
+    def patch(self, request):
+        return self.post(request)
 
 
 class POSTallyHistoryView(APIView):
