@@ -57,6 +57,14 @@ export function useRealtimeSubscription(
   const connect = useCallback(async () => {
     if (typeof window === "undefined") return;
 
+    if (
+      window.location.pathname === "/login" ||
+      window.location.pathname === "/register"
+    ) {
+      setIsConnected(false);
+      return;
+    }
+
     const token = localStorage.getItem("access_token");
     if (!token) {
       setIsConnected(false);
@@ -72,6 +80,10 @@ export function useRealtimeSubscription(
     const ticket = await realtimeApi.getStreamTicket();
     if (!ticket) {
       setIsConnected(false);
+      // If token was removed during failed request (e.g. 401 Unauthorized), halt retries
+      if (!localStorage.getItem("access_token")) {
+        return;
+      }
       setConnectionError("Failed to obtain real-time stream ticket. Retrying in 5s...");
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);

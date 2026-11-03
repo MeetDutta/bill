@@ -1,6 +1,8 @@
+from django.conf import settings
 from django.contrib.auth import authenticate
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.models import User
@@ -9,9 +11,14 @@ from apps.users.serializers import UserSerializer
 from .serializers import ChangePasswordSerializer, LoginSerializer, RegisterSerializer
 
 
+class LoginRateThrottle(AnonRateThrottle):
+    scope = "login"
+
+
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [LoginRateThrottle] if not settings.DEBUG else []
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
@@ -53,6 +60,7 @@ class LoginView(generics.GenericAPIView):
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [LoginRateThrottle] if not settings.DEBUG else []
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

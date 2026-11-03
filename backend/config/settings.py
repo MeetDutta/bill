@@ -290,13 +290,18 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ),
-    "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
-    ],
+    "DEFAULT_THROTTLE_CLASSES": (
+        [
+            "rest_framework.throttling.AnonRateThrottle",
+            "rest_framework.throttling.UserRateThrottle",
+        ]
+        if not DEBUG
+        else []
+    ),
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",
-        "user": "1000/hour",
+        "anon": "1000/hour" if not DEBUG else "100000/hour",
+        "user": "10000/hour" if not DEBUG else "100000/hour",
+        "login": "60/minute" if not DEBUG else "100000/minute",
     },
 }
 
