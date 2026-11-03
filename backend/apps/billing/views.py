@@ -238,6 +238,7 @@ class POSProductQuickCreateView(APIView):
                 unit=data.get("unit", "pcs"),
                 current_stock=opening_stock,
                 min_stock=data.get("min_stock", Decimal("0.00")),
+                baseline_stock=data.get("baseline_stock") or (data.get("min_stock", Decimal("0.00")) * Decimal("4.00") if data.get("min_stock") else None),
                 track_inventory=True,
                 product_attributes=data.get("product_attributes", {}),
             )
@@ -256,6 +257,12 @@ class POSProductQuickCreateView(APIView):
                     reference_type="manual",
                     notes="Quick Product Create Opening Stock",
                 )
+
+        try:
+            from apps.notifications.services import NotificationService
+            NotificationService.evaluate_product_low_stock(product)
+        except Exception:
+            pass
 
         try:
             from apps.billing.services.realtime_service import RealtimeService

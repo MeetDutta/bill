@@ -199,6 +199,7 @@ class POSProductQuickCreateSerializer(serializers.Serializer):
     unit = serializers.CharField(max_length=20, required=False, default="pcs")
     opening_stock = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=Decimal("0.00"))
     min_stock = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=Decimal("0.00"))
+    baseline_stock = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     product_attributes = serializers.JSONField(required=False, default=dict)
 
 

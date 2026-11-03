@@ -53,6 +53,11 @@ class ProductListView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         product = serializer.save(organization=self.request.user.organization)
         try:
+            from apps.notifications.services import NotificationService
+            NotificationService.evaluate_product_low_stock(product)
+        except Exception:
+            pass
+        try:
             from apps.billing.services.realtime_service import RealtimeService
             RealtimeService.publish_event(
                 organization=product.organization,
