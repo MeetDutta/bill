@@ -72,6 +72,14 @@ import {
 } from "@/components/ui/dialog";
 import { cn, parseApiError } from "@/lib/utils";
 import { IsolatedReceiptModal } from "@/components/pos/IsolatedReceiptModal";
+import {
+  printA4TaxInvoice,
+  printThermalReceipt,
+  downloadInvoicePdf,
+  resolvePlaceOfSupply,
+  PrintReceiptData,
+} from "@/lib/receiptPrinter";
+import { indianNumberToWords } from "@/lib/numberToWords";
 
 const POS_CATALOG_EVENT_FILTER = [
   "product_created",
@@ -960,40 +968,98 @@ export default function UnifiedBillingWorkspace({
   };
 
   const handlePrintInvoice = (inv: Invoice) => {
-    if (inv.web_url) {
-      const printWin = window.open(inv.web_url, "_blank");
-      if (printWin) {
-        printWin.focus();
-        setTimeout(() => printWin.print(), 1000);
-      }
+    const isThermal = config?.default_invoice_format?.startsWith("thermal");
+    const isGst = inv.invoice_type !== "non_gst" && Boolean(config?.gstin);
+    const sellerState = config?.state || "Maharashtra";
+    const cust = inv.transaction_details?.customer || {};
+    const customerState = cust.state || "";
+
+    const items: any[] = (inv.transaction_details?.items || []).map((it: any) => ({
+      name: it.name || it.product_name || "Item",
+      product_name: it.name || it.product_name || "Item",
+      description: it.description || "",
+      sku: it.sku || "",
+      hsn_code: it.hsn_code || "39011090",
+      quantity: Number(it.quantity || 1),
+      unit: it.unit || "pcs",
+      unit_price: Number(it.unit_price || 0),
+      discount: Number(it.discount || 0),
+      tax_rate: Number(it.tax_rate || 0),
+      taxable_amount: Number(
+        it.taxable_amount ||
+          Number(it.unit_price || 0) * Number(it.quantity || 1) - Number(it.discount || 0)
+      ),
+      cgst_amount: Number(it.cgst_amount || 0),
+      sgst_amount: Number(it.sgst_amount || 0),
+      igst_amount: Number(it.igst_amount || 0),
+      tax: Number(it.tax || 0),
+      total: Number(it.total || 0),
+    }));
+
+    const printPayload: PrintReceiptData = {
+      invoice_id: inv.id,
+      invoice_number: inv.invoice_number,
+      invoice_type: inv.invoice_type || (isGst ? "gst" : "non_gst"),
+      transaction_date: inv.created_at,
+      created_at: inv.created_at,
+      due_date: inv.transaction_details?.due_date || inv.created_at,
+      payment_terms: "Due on Receipt",
+      place_of_supply: resolvePlaceOfSupply(customerState || sellerState, cust.gstin || config?.gstin),
+      reverse_charge: "No",
+      custom_notes: inv.custom_notes || "Looking forward for your business.",
+      terms_and_conditions:
+        inv.terms_and_conditions || config?.invoice_terms_and_conditions || "Payment : 100% Advance",
+      seller: {
+        name: inv.organization_name || config?.trade_name || config?.legal_name || "BillMeet Store",
+        legal_name: config?.legal_name || inv.organization_name || "BillMeet Technologies Private Limited",
+        trade_name: config?.trade_name || inv.organization_name || "BILLMEET RETAIL",
+        gstin: config?.gstin || "",
+        address: config?.address || "",
+        city: config?.city || "",
+        state: sellerState,
+        pincode: config?.pincode || config?.postal_code || "",
+        phone: config?.phone || "",
+        email: config?.email || "",
+        logo_url: config?.logo_url || config?.logo || "",
+        invoice_footer: config?.invoice_footer,
+        invoice_terms: config?.invoice_terms_and_conditions,
+        bank_name: config?.bank_name,
+        bank_account_name: config?.bank_account_name,
+        bank_account_number: config?.bank_account_number,
+        bank_ifsc_code: config?.bank_ifsc_code,
+        bank_branch: config?.bank_branch,
+        bank_upi_id: config?.bank_upi_id,
+        authorized_signatory_name: config?.authorized_signatory_name,
+        signature_url: config?.signature_image || undefined,
+      },
+      customer: {
+        name: inv.customer_name || "Walk-in Customer",
+        full_name: inv.customer_name || "Walk-in Customer",
+        phone: inv.customer_phone || "",
+        gstin: cust.gstin || "",
+        address: cust.address_line1 || cust.address || "",
+        city: cust.city || "",
+        state: customerState,
+        pincode: cust.postal_code || cust.pincode || "",
+      },
+      items,
+      subtotal: inv.subtotal,
+      discount: inv.discount,
+      tax: inv.tax,
+      total: inv.total,
+      payment_status: inv.payment_status || "paid",
+      payment_method: inv.payment_method || "cash",
+    };
+
+    if (isThermal) {
+      printThermalReceipt(printPayload);
     } else {
-      window.open(`/api/v1/invoices/${inv.id}/pdf/?raw=true`, "_blank");
+      printA4TaxInvoice(printPayload);
     }
   };
 
   const handleDownloadInvoicePdf = async (inv: Invoice) => {
-    if (isStaff) {
-      window.open(`/api/v1/invoices/${inv.id}/pdf/?download=true`, "_blank");
-      return;
-    }
-    if (inv.pdf_url) {
-      window.open(inv.pdf_url, "_blank");
-      return;
-    }
-    setPdfGenerating(true);
-    try {
-      const res = await invoiceApi.generatePdf(inv.id);
-      if (res.data?.pdf_url) {
-        window.open(res.data.pdf_url, "_blank");
-        fetchHistoryInvoices(true);
-      } else if (inv.web_url) {
-        window.open(inv.web_url, "_blank");
-      }
-    } catch {
-      window.open(`/api/v1/invoices/${inv.id}/pdf/?download=true`, "_blank");
-    } finally {
-      setPdfGenerating(false);
-    }
+    downloadInvoicePdf(inv.id, inv.invoice_number, "a4");
   };
 
   const handleShareWhatsApp = (inv: Invoice) => {
@@ -2374,114 +2440,239 @@ export default function UnifiedBillingWorkspace({
                 </div>
               ) : (
                 <>
-                  {/* Customer & Store Meta */}
-                  <div className="grid grid-cols-2 gap-3 rounded-xl bg-muted/40 p-3">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-1.5 text-muted-foreground font-semibold uppercase text-[10px]">
-                        <User className="h-3.5 w-3.5" />
-                        <span>Billed To</span>
-                      </div>
-                      <div className="font-semibold text-foreground text-sm">
-                        {selectedInvoice.customer_name || "Walk-in Customer"}
-                      </div>
-                      {selectedInvoice.customer_phone && (
-                        <div className="text-muted-foreground font-mono">{selectedInvoice.customer_phone}</div>
-                      )}
+                  {/* Professional GST Tax Invoice Preview (Zoom Renewables Reference) */}
+                  <div className="border border-black bg-white text-black p-3.5 shadow-sm font-sans text-xs select-none rounded-sm">
+                    {/* Organization Heading Centered */}
+                    <div className="text-center font-bold text-sm text-black mb-1 tracking-tight">
+                      {config?.legal_name || selectedInvoice.organization_name || "BillMeet Technologies Private Limited"}
                     </div>
 
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-1.5 text-muted-foreground font-semibold uppercase text-[10px]">
-                        <Receipt className="h-3.5 w-3.5" />
-                        <span>Payment & Channel</span>
-                      </div>
-                      <div className="font-semibold text-foreground text-sm">
-                        {selectedInvoice.payment_method?.toUpperCase() || "CASH"}
-                      </div>
-                      <div>
-                        <span
-                          className={cn(
-                            "rounded px-1.5 py-0.2 text-[10px] font-bold",
-                            selectedInvoice.payment_status?.toLowerCase() === "paid"
-                              ? "bg-emerald-500/10 text-emerald-600"
-                              : "bg-amber-500/10 text-amber-600"
+                    {/* Header: Logo & Address Left | TAX INVOICE Right */}
+                    <div className="flex justify-between items-center border-b border-black pb-2 px-1">
+                      <div className="flex items-center gap-2.5">
+                        {config?.logo_url && (
+                          <img
+                            src={config.logo_url}
+                            alt="Logo"
+                            className="max-h-10 max-w-[90px] object-contain"
+                          />
+                        )}
+                        <div className="text-[9px] leading-tight text-black">
+                          {config?.address && <div>{config.address}</div>}
+                          <div>
+                            {[config?.city, config?.pincode ? `- ${config.pincode}` : "", config?.state || "Maharashtra"]
+                              .filter(Boolean)
+                              .join(" ")}
+                          </div>
+                          {config?.gstin && (
+                            <div className="font-semibold mt-0.5">
+                              GSTIN: <span className="font-mono">{config.gstin}</span>
+                            </div>
                           )}
-                        >
-                          {selectedInvoice.payment_status?.toUpperCase() || "PAID"}
-                        </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <div className="text-xl font-extrabold tracking-wider text-black">
+                          {selectedInvoice.invoice_type !== "non_gst" && config?.gstin ? "TAX INVOICE" : "INVOICE"}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Line Items Table */}
-                  <div>
-                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
-                      Line Items
-                    </h4>
-                    <div className="rounded-lg border overflow-hidden">
-                      <table className="w-full text-left">
-                        <thead className="bg-muted/50 border-b text-[10px] font-bold uppercase text-muted-foreground">
-                          <tr>
-                            <th className="py-2 px-3">Item</th>
-                            <th className="py-2 px-2 text-center">Qty</th>
-                            <th className="py-2 px-3 text-right">Price</th>
-                            <th className="py-2 px-3 text-right">Tax</th>
-                            <th className="py-2 px-3 text-right">Total</th>
+                    {/* Invoice Information: 2 Columns */}
+                    <div className="grid grid-cols-2 border-b border-black text-[9.5px]">
+                      <div className="p-1.5 border-r border-black space-y-0.5">
+                        <div className="flex"><span className="w-20 text-black">#</span><span>: <strong className="font-mono">{selectedInvoice.invoice_number}</strong></span></div>
+                        <div className="flex"><span className="w-20 text-black">Invoice Date</span><span>: {new Date(selectedInvoice.transaction_date || selectedInvoice.created_at || Date.now()).toLocaleDateString("en-GB")}</span></div>
+                        <div className="flex"><span className="w-20 text-black">Terms</span><span>: Due on Receipt</span></div>
+                        <div className="flex"><span className="w-20 text-black">Due Date</span><span>: {new Date(selectedInvoice.transaction_date || selectedInvoice.created_at || Date.now()).toLocaleDateString("en-GB")}</span></div>
+                      </div>
+                      <div className="p-1.5 space-y-0.5">
+                        <div className="flex">
+                          <span className="w-28 text-black">Place Of Supply</span>
+                          <span>: <strong>{resolvePlaceOfSupply(config?.state, config?.gstin)}</strong></span>
+                        </div>
+                        <div className="flex"><span className="w-28 text-black">Reverse Charge</span><span>: No</span></div>
+                      </div>
+                    </div>
+
+                    {/* Bill To / Ship To: 2 Columns */}
+                    <div className="grid grid-cols-2 border-b border-black text-[9.5px]">
+                      <div className="p-1.5 border-r border-black leading-snug">
+                        <div className="font-bold text-[10px] uppercase text-black mb-0.5">Bill To</div>
+                        <div className="font-bold text-black">{selectedInvoice.customer_name || "Walk-in Customer"}</div>
+                        {selectedInvoice.customer_phone && <div className="text-slate-600">Contact: {selectedInvoice.customer_phone}</div>}
+                        <div>India</div>
+                      </div>
+                      <div className="p-1.5 leading-snug">
+                        <div className="font-bold text-[10px] uppercase text-black mb-0.5">Ship To</div>
+                        <div className="font-bold text-black">{selectedInvoice.customer_name || "Walk-in Customer"}</div>
+                        {selectedInvoice.customer_phone && <div className="text-slate-600">Contact: {selectedInvoice.customer_phone}</div>}
+                        <div>India</div>
+                      </div>
+                    </div>
+
+                    {/* Structured Items Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-[9px] border-collapse border-b border-black">
+                        <thead>
+                          <tr className="bg-slate-50 text-black">
+                            <th rowSpan={2} className="border border-black p-1 text-center w-6">#</th>
+                            <th rowSpan={2} className="border border-black p-1">Item & Description</th>
+                            <th rowSpan={2} className="border border-black p-1 text-center w-14">HSN/SAC</th>
+                            <th rowSpan={2} className="border border-black p-1 text-center w-10">Qty</th>
+                            <th rowSpan={2} className="border border-black p-1 text-right w-12">Rate</th>
+                            <th colSpan={2} className="border border-black p-0.5 text-center">CGST</th>
+                            <th colSpan={2} className="border border-black p-0.5 text-center">SGST</th>
+                            <th rowSpan={2} className="border border-black p-1 text-right w-14">Amount</th>
+                          </tr>
+                          <tr className="bg-slate-50 text-black text-[8px]">
+                            <th className="border border-black p-0.5 text-center w-6">%</th>
+                            <th className="border border-black p-0.5 text-right w-10">Amt</th>
+                            <th className="border border-black p-0.5 text-center w-6">%</th>
+                            <th className="border border-black p-0.5 text-right w-10">Amt</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-border text-xs">
+                        <tbody>
                           {selectedInvoice.transaction_details?.items &&
                           selectedInvoice.transaction_details.items.length > 0 ? (
-                            selectedInvoice.transaction_details.items.map((it: any, idx: number) => (
-                              <tr key={idx} className="hover:bg-muted/20">
-                                <td className="py-2 px-3">
-                                  <div className="font-medium text-foreground">{it.name}</div>
-                                  {it.hsn_code && (
-                                    <div className="text-[10px] text-muted-foreground font-mono">
-                                      HSN: {it.hsn_code}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="py-2 px-2 text-center font-mono">{it.quantity}</td>
-                                <td className="py-2 px-3 text-right font-mono">₹{Number(it.unit_price).toFixed(2)}</td>
-                                <td className="py-2 px-3 text-right font-mono text-muted-foreground">
-                                  ₹{Number(it.tax || 0).toFixed(2)}
-                                </td>
-                                <td className="py-2 px-3 text-right font-mono font-bold text-foreground">
-                                  ₹{Number(it.total).toFixed(2)}
-                                </td>
-                              </tr>
-                            ))
+                            selectedInvoice.transaction_details.items.map((it: any, idx: number) => {
+                              const taxRate = Number(it.tax_rate || config?.default_tax_rate || 18);
+                              const halfRate = taxRate / 2;
+                              const qty = Number(it.quantity || 1);
+                              const rate = Number(it.unit_price || 0);
+                              const lineTaxable = qty * rate;
+                              const halfTaxAmt = (lineTaxable * halfRate) / 100;
+
+                              return (
+                                <tr key={idx} className="border-t border-black">
+                                  <td className="border border-black p-1 text-center font-mono">{idx + 1}</td>
+                                  <td className="border border-black p-1">
+                                    <div className="font-bold text-black">{it.name}</div>
+                                  </td>
+                                  <td className="border border-black p-1 text-center font-mono">{it.hsn_code || "39011090"}</td>
+                                  <td className="border border-black p-1 text-center font-mono">
+                                    {qty}<br/><span className="text-[7.5px] uppercase">{it.unit || "PCS"}</span>
+                                  </td>
+                                  <td className="border border-black p-1 text-right font-mono">{rate.toFixed(2)}</td>
+                                  <td className="border border-black p-0.5 text-center font-mono">{halfRate}%</td>
+                                  <td className="border border-black p-0.5 text-right font-mono">{halfTaxAmt.toFixed(2)}</td>
+                                  <td className="border border-black p-0.5 text-center font-mono">{halfRate}%</td>
+                                  <td className="border border-black p-0.5 text-right font-mono">{halfTaxAmt.toFixed(2)}</td>
+                                  <td className="border border-black p-1 text-right font-mono font-bold">
+                                    {lineTaxable.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              );
+                            })
                           ) : (
                             <tr>
-                              <td colSpan={5} className="py-4 text-center text-muted-foreground">
-                                Item details included in summary total.
+                              <td colSpan={10} className="p-3 text-center text-slate-500 border border-black">
+                                Complete items summary represented in total.
                               </td>
                             </tr>
                           )}
                         </tbody>
                       </table>
                     </div>
-                  </div>
 
-                  {/* Financial Breakdown */}
-                  <div className="space-y-1.5 border-t pt-2.5">
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Subtotal</span>
-                      <span className="font-mono">₹{Number(selectedInvoice.subtotal || 0).toFixed(2)}</span>
-                    </div>
-                    {Number(selectedInvoice.discount || 0) > 0 && (
-                      <div className="flex justify-between text-emerald-600">
-                        <span>Discount</span>
-                        <span className="font-mono">- ₹{Number(selectedInvoice.discount).toFixed(2)}</span>
+                    {/* Bottom Summary: Left Notes & Bank | Right Financials & Signature */}
+                    <div className="grid grid-cols-12 text-[9px]">
+                      <div className="col-span-7 p-2 border-r border-black space-y-1.5">
+                        <div>
+                          Items in Total <strong>{selectedInvoice.transaction_details?.items?.reduce((s: number, it: any) => s + Number(it.quantity || 1), 0) || 1}</strong>
+                        </div>
+                        <div>
+                          <div className="text-[8.5px] text-slate-700">Total In Words</div>
+                          <div className="font-bold italic text-black text-[9.5px]">
+                            {indianNumberToWords(selectedInvoice.total)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[8.5px] text-slate-700">Notes</div>
+                          <div className="text-black">{selectedInvoice.custom_notes || "Looking forward for your business."}</div>
+                        </div>
+                        <div>
+                          <div className="text-[8.5px] text-slate-700">Terms & Conditions</div>
+                          <div className="text-black">{selectedInvoice.terms_and_conditions || config?.invoice_terms_and_conditions || "Payment : 100% Advance"}</div>
+                        </div>
+                        {(config?.bank_name || config?.bank_account_number) && (
+                          <div className="pt-1 border-t border-dotted border-black/40 text-[8.5px] space-y-0.5">
+                            <div className="font-bold text-black">Bank Details:</div>
+                            {config?.bank_account_name && (
+                              <div>Bank Account Name : {config.bank_account_name}</div>
+                            )}
+                            {config?.bank_account_number && (
+                              <div>Bank Account Number: <span className="font-mono">{config.bank_account_number}</span></div>
+                            )}
+                            {config?.bank_ifsc_code && (
+                              <div>IFS Code: <span className="font-mono font-semibold">{config.bank_ifsc_code}</span></div>
+                            )}
+                            {config?.bank_name && (
+                              <div>Bank Name : {config.bank_name}</div>
+                            )}
+                            {config?.bank_branch && (
+                              <div>Branch Address: {config.bank_branch}</div>
+                            )}
+                            {config?.bank_upi_id && (
+                              <div>UPI ID: <span className="font-mono">{config.bank_upi_id}</span></div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    )}
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Taxes (GST)</span>
-                      <span className="font-mono">₹{Number(selectedInvoice.tax || 0).toFixed(2)}</span>
+
+                      <div className="col-span-5 flex flex-col justify-between">
+                        <table className="w-full text-[9px] border-collapse">
+                          <tbody>
+                            <tr className="border-b border-black">
+                              <td className="p-1 px-2 text-black">Sub Total</td>
+                              <td className="p-1 px-2 text-right font-mono">
+                                {Number(selectedInvoice.subtotal || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                            <tr className="border-b border-black">
+                              <td className="p-1 px-2 text-black">CGST</td>
+                              <td className="p-1 px-2 text-right font-mono">
+                                {(Number(selectedInvoice.tax || 0) / 2).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                            <tr className="border-b border-black">
+                              <td className="p-1 px-2 text-black">SGST</td>
+                              <td className="p-1 px-2 text-right font-mono">
+                                {(Number(selectedInvoice.tax || 0) / 2).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                            {Number(selectedInvoice.discount || 0) > 0 && (
+                              <tr className="border-b border-black text-red-600">
+                                <td className="p-1 px-2">Discount</td>
+                                <td className="p-1 px-2 text-right font-mono">
+                                  -₹{Number(selectedInvoice.discount).toFixed(2)}
+                                </td>
+                              </tr>
+                            )}
+                            <tr className="border-b border-black font-bold">
+                              <td className="p-1.5 px-2 text-black text-[10px]">Total</td>
+                              <td className="p-1.5 px-2 text-right font-mono text-xs font-extrabold text-black">
+                                ₹{Number(selectedInvoice.total || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+
+                        <div className="p-2 text-center flex flex-col justify-between h-20">
+                          <div className="font-bold text-[9px] text-black">
+                            {config?.legal_name || selectedInvoice.organization_name || "BillMeet Technologies Private Limited"}
+                          </div>
+                          <div className="font-semibold text-[8.5px] text-black border-t border-dashed border-black/40 pt-0.5">
+                            Authorized Signature
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex justify-between text-base font-bold text-foreground border-t pt-2 mt-1">
-                      <span>Grand Total</span>
-                      <span className="font-mono text-primary">₹{Number(selectedInvoice.total || 0).toFixed(2)}</span>
+
+                    {/* Page Number Bottom Right */}
+                    <div className="text-right text-[8px] text-slate-500 pt-1 pr-1">
+                      1
                     </div>
                   </div>
                 </>

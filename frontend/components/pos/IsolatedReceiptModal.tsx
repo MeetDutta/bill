@@ -17,8 +17,10 @@ import {
   printA4TaxInvoice,
   streamInvoicePdf,
   downloadInvoicePdf,
+  resolvePlaceOfSupply,
   PrintReceiptData,
 } from "@/lib/receiptPrinter";
+import { indianNumberToWords } from "@/lib/numberToWords";
 import { formatCurrency } from "@/lib/utils";
 
 interface IsolatedReceiptModalProps {
@@ -56,23 +58,48 @@ export function IsolatedReceiptModal({
   const paymentStatus = (saleData.payment_status || "paid").toUpperCase();
   const paymentMethod = (saleData.payment_method || "cash").toUpperCase();
 
+  const isGst = Boolean(
+    (saleData.seller?.gstin || config?.gstin) &&
+    (saleData.invoice?.invoice_type || saleData.invoice_type) !== "non_gst"
+  );
+  const sellerState = saleData.seller?.state || config?.state || "Maharashtra";
+  const customerState = saleData.customer?.state || "";
+  const placeOfSupply = resolvePlaceOfSupply(customerState || sellerState, saleData.customer?.gstin || config?.gstin);
+
   const printPayload: PrintReceiptData = {
     invoice_id: invoiceId,
     invoice_number: invoiceNumber,
+    invoice_type: isGst ? "gst" : "non_gst",
     transaction_date: saleData.transaction_date,
     created_at: saleData.created_at,
+    due_date: saleData.due_date,
+    payment_terms: saleData.payment_terms || "Due on Receipt",
+    place_of_supply: placeOfSupply,
+    reverse_charge: "No",
+    custom_notes: saleData.custom_notes || saleData.invoice?.custom_notes || "Looking forward for your business.",
+    terms_and_conditions: saleData.terms_and_conditions || saleData.invoice?.terms_and_conditions || config?.invoice_terms_and_conditions || "Payment : 100% Advance",
     seller: {
       name: saleData.seller?.name || config?.legal_name || "BillMeet Store",
-      legal_name: saleData.seller?.legal_name || config?.legal_name || "",
+      legal_name: saleData.seller?.legal_name || config?.legal_name || config?.trade_name || config?.name || "BillMeet Technologies Private Limited",
       trade_name: saleData.seller?.trade_name || config?.trade_name || config?.name || "BILLMEET RETAIL",
       gstin: saleData.seller?.gstin || config?.gstin || "",
       address: saleData.seller?.address || config?.address || "",
-      city: saleData.seller?.city || "",
-      state: saleData.seller?.state || "",
+      city: saleData.seller?.city || config?.city || "",
+      state: sellerState,
+      pincode: saleData.seller?.pincode || config?.pincode || config?.postal_code || "",
       phone: saleData.seller?.phone || config?.phone || "",
       email: saleData.seller?.email || config?.email || "",
+      logo_url: config?.logo_url || config?.logo || "",
       invoice_footer: saleData.seller?.invoice_footer || config?.invoice_footer,
       invoice_terms: saleData.seller?.invoice_terms || config?.invoice_terms_and_conditions,
+      bank_name: config?.bank_name,
+      bank_account_name: config?.bank_account_name,
+      bank_account_number: config?.bank_account_number,
+      bank_ifsc_code: config?.bank_ifsc_code,
+      bank_branch: config?.bank_branch,
+      bank_upi_id: config?.bank_upi_id,
+      authorized_signatory_name: config?.authorized_signatory_name,
+      signature_url: config?.signature_image || undefined,
     },
     customer: saleData.customer ? {
       name: customerName,
@@ -80,6 +107,9 @@ export function IsolatedReceiptModal({
       phone: customerPhone,
       gstin: saleData.customer?.gstin || "",
       address: saleData.customer?.address || "",
+      city: saleData.customer?.city || "",
+      state: saleData.customer?.state || "",
+      pincode: saleData.customer?.postal_code || saleData.customer?.pincode || "",
       is_walk_in: saleData.customer?.is_walk_in ?? (!saleData.customer?.phone),
     } : null,
     cashier_name: saleData.cashier || "Staff",
@@ -293,78 +323,246 @@ export function IsolatedReceiptModal({
               </div>
             </div>
           ) : (
-            /* A4 GST Invoice Preview */
-            <div className="space-y-3 font-sans text-xs">
-              <div className="flex justify-between items-start border-b pb-2">
-                <div>
-                  <h4 className="font-extrabold text-sm uppercase text-slate-900">{printPayload.seller?.legal_name}</h4>
-                  <p className="text-[11px] text-slate-600">{printPayload.seller?.address}</p>
-                  <p className="text-[11px] font-bold">GSTIN: {printPayload.seller?.gstin || "Unregistered"}</p>
+            /* Professional A4 GST Invoice Preview (Matching Zoom Renewables Reference Standard) */
+            <div className="border border-black bg-white text-black p-3.5 shadow-sm font-sans text-xs select-none">
+              {/* Organization Heading Centered */}
+              <div className="text-center font-bold text-sm text-black mb-1 tracking-tight">
+                {printPayload.seller?.legal_name || "BillMeet Technologies Private Limited"}
+              </div>
+
+              {/* Header: Logo & Address Left | TAX INVOICE Right */}
+              <div className="flex justify-between items-center border-b border-black pb-2 px-1">
+                <div className="flex items-center gap-2.5">
+                  {printPayload.seller?.logo_url && (
+                    <img
+                      src={printPayload.seller.logo_url}
+                      alt="Logo"
+                      className="max-h-10 max-w-[90px] object-contain"
+                    />
+                  )}
+                  <div className="text-[9px] leading-tight text-black">
+                    {printPayload.seller?.address && <div>{printPayload.seller.address}</div>}
+                    <div>
+                      {[printPayload.seller?.city, printPayload.seller?.pincode ? `- ${printPayload.seller.pincode}` : "", printPayload.seller?.state]
+                        .filter(Boolean)
+                        .join(" ")}
+                    </div>
+                    {printPayload.seller?.gstin && (
+                      <div className="font-semibold mt-0.5">
+                        GSTIN: <span className="font-mono">{printPayload.seller.gstin}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
+
                 <div className="text-right">
-                  <span className="inline-block px-2 py-0.5 rounded bg-slate-900 text-white font-bold text-[10px]">
-                    TAX INVOICE
-                  </span>
-                  <p className="font-mono font-bold mt-1">#{invoiceNumber}</p>
-                  <p className="text-[10px] text-slate-500">{new Date().toLocaleDateString("en-IN")}</p>
+                  <div className="text-xl font-extrabold tracking-wider text-black">
+                    {isGst ? "TAX INVOICE" : "INVOICE"}
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 p-2 rounded bg-slate-50 border text-[11px]">
-                <div>
-                  <span className="text-slate-500 font-bold block text-[10px]">BILLED TO:</span>
-                  <div className="font-bold">{customerName}</div>
-                  <div className="text-slate-600">{customerPhone}</div>
+              {/* Invoice Information: 2 Columns */}
+              <div className="grid grid-cols-2 border-b border-black text-[9.5px]">
+                <div className="p-1.5 border-r border-black space-y-0.5">
+                  <div className="flex"><span className="w-20 text-black">#</span><span>: <strong className="font-mono">{invoiceNumber}</strong></span></div>
+                  <div className="flex"><span className="w-20 text-black">Invoice Date</span><span>: {new Date(saleData.transaction_date || saleData.created_at || Date.now()).toLocaleDateString("en-GB")}</span></div>
+                  <div className="flex"><span className="w-20 text-black">Terms</span><span>: {printPayload.payment_terms || "Due on Receipt"}</span></div>
+                  <div className="flex"><span className="w-20 text-black">Due Date</span><span>: {new Date(saleData.due_date || saleData.transaction_date || Date.now()).toLocaleDateString("en-GB")}</span></div>
                 </div>
-                <div className="text-right">
-                  <span className="text-slate-500 font-bold block text-[10px]">PAYMENT:</span>
-                  <div className="font-bold text-emerald-700">{paymentStatus}</div>
-                  <div className="text-slate-600">{paymentMethod}</div>
+                <div className="p-1.5 space-y-0.5">
+                  <div className="flex"><span className="w-28 text-black">Place Of Supply</span><span>: <strong>{printPayload.place_of_supply}</strong></span></div>
+                  <div className="flex"><span className="w-28 text-black">Reverse Charge</span><span>: No</span></div>
                 </div>
               </div>
 
-              <table className="w-full text-left text-xs border">
-                <thead className="bg-slate-100 font-bold text-[10px] uppercase border-b">
-                  <tr>
-                    <th className="p-1.5">Description</th>
-                    <th className="p-1.5 text-center">HSN</th>
-                    <th className="p-1.5 text-center">Qty</th>
-                    <th className="p-1.5 text-right">Rate</th>
-                    <th className="p-1.5 text-right">Taxable</th>
-                    <th className="p-1.5 text-center">GST</th>
-                    <th className="p-1.5 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y font-mono text-[11px]">
-                  {printPayload.items.map((it, idx) => (
-                    <tr key={idx}>
-                      <td className="p-1.5 font-sans font-medium">{it.name}</td>
-                      <td className="p-1.5 text-center">{it.hsn_code || "-"}</td>
-                      <td className="p-1.5 text-center">{it.quantity} {it.unit}</td>
-                      <td className="p-1.5 text-right">₹{Number(it.unit_price).toFixed(2)}</td>
-                      <td className="p-1.5 text-right">₹{Number(it.taxable_amount).toFixed(2)}</td>
-                      <td className="p-1.5 text-center">{it.tax_rate}%</td>
-                      <td className="p-1.5 text-right font-bold">₹{Number(it.total).toFixed(2)}</td>
+              {/* Bill To / Ship To: 2 Columns */}
+              <div className="grid grid-cols-2 border-b border-black text-[9.5px]">
+                <div className="p-1.5 border-r border-black leading-snug">
+                  <div className="font-bold text-[10px] uppercase text-black mb-0.5">Bill To</div>
+                  <div className="font-bold text-black">{customerName}</div>
+                  {printPayload.customer?.address && <div>{printPayload.customer.address}</div>}
+                  <div>{[printPayload.customer?.city, printPayload.customer?.pincode, printPayload.customer?.state].filter(Boolean).join(", ")}</div>
+                  <div>India</div>
+                  {printPayload.customer?.gstin ? (
+                    <div className="mt-0.5 font-semibold">GSTIN: <span className="font-mono">{printPayload.customer.gstin}</span></div>
+                  ) : customerPhone ? (
+                    <div className="mt-0.5">Contact: {customerPhone}</div>
+                  ) : null}
+                </div>
+                <div className="p-1.5 leading-snug">
+                  <div className="font-bold text-[10px] uppercase text-black mb-0.5">Ship To</div>
+                  <div className="font-bold text-black">{customerName}</div>
+                  {printPayload.customer?.address && <div>{printPayload.customer.address}</div>}
+                  <div>{[printPayload.customer?.city, printPayload.customer?.pincode, printPayload.customer?.state].filter(Boolean).join(", ")}</div>
+                  <div>India</div>
+                </div>
+              </div>
+
+              {/* Structured Items Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[9px] border-collapse border-b border-black">
+                  <thead>
+                    <tr className="bg-slate-50 text-black">
+                      <th rowSpan={2} className="border border-black p-1 text-center w-6">#</th>
+                      <th rowSpan={2} className="border border-black p-1">Item & Description</th>
+                      <th rowSpan={2} className="border border-black p-1 text-center w-14">HSN/SAC</th>
+                      <th rowSpan={2} className="border border-black p-1 text-center w-10">Qty</th>
+                      <th rowSpan={2} className="border border-black p-1 text-right w-12">Rate</th>
+                      <th colSpan={2} className="border border-black p-0.5 text-center">CGST</th>
+                      <th colSpan={2} className="border border-black p-0.5 text-center">SGST</th>
+                      <th rowSpan={2} className="border border-black p-1 text-right w-14">Amount</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                    <tr className="bg-slate-50 text-black text-[8px]">
+                      <th className="border border-black p-0.5 text-center w-6">%</th>
+                      <th className="border border-black p-0.5 text-right w-10">Amt</th>
+                      <th className="border border-black p-0.5 text-center w-6">%</th>
+                      <th className="border border-black p-0.5 text-right w-10">Amt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {printPayload.items.map((it, idx) => {
+                      const halfTaxRate = (Number(it.tax_rate) || 0) / 2;
+                      const taxable = Number(it.taxable_amount) || (Number(it.unit_price) * Number(it.quantity) - Number(it.discount || 0));
+                      const cgstAmt = it.cgst_amount !== undefined ? Number(it.cgst_amount) : (taxable * halfTaxRate) / 100;
+                      const sgstAmt = it.sgst_amount !== undefined ? Number(it.sgst_amount) : (taxable * halfTaxRate) / 100;
 
-              <div className="flex justify-end pt-1">
-                <div className="w-48 space-y-1 text-right text-[11px] font-mono">
-                  <div className="flex justify-between">
-                    <span>Taxable:</span>
-                    <span>{formatCurrency(subtotal)}</span>
+                      return (
+                        <tr key={idx} className="border-t border-black">
+                          <td className="border border-black p-1 text-center font-mono">{idx + 1}</td>
+                          <td className="border border-black p-1">
+                            <div className="font-bold text-black">{it.name}</div>
+                            {it.description && it.description !== it.name && (
+                              <div className="text-[8px] text-slate-600">{it.description}</div>
+                            )}
+                          </td>
+                          <td className="border border-black p-1 text-center font-mono">{it.hsn_code || "39011090"}</td>
+                          <td className="border border-black p-1 text-center font-mono">
+                            {it.quantity}<br/><span className="text-[7.5px] uppercase">{it.unit || "PCS"}</span>
+                          </td>
+                          <td className="border border-black p-1 text-right font-mono">{Number(it.unit_price).toFixed(2)}</td>
+                          <td className="border border-black p-0.5 text-center font-mono">{halfTaxRate}%</td>
+                          <td className="border border-black p-0.5 text-right font-mono">{cgstAmt.toFixed(2)}</td>
+                          <td className="border border-black p-0.5 text-center font-mono">{halfTaxRate}%</td>
+                          <td className="border border-black p-0.5 text-right font-mono">{sgstAmt.toFixed(2)}</td>
+                          <td className="border border-black p-1 text-right font-mono font-bold">
+                            {taxable.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Bottom Summary: Left Notes & Bank | Right Financials & Signature */}
+              <div className="grid grid-cols-12 text-[9px]">
+                <div className="col-span-7 p-2 border-r border-black space-y-1.5">
+                  <div>
+                    Items in Total <strong>{printPayload.items.reduce((s, it) => s + Number(it.quantity || 1), 0)}</strong>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Total GST:</span>
-                    <span>{formatCurrency(tax)}</span>
+                  <div>
+                    <div className="text-[8.5px] text-slate-700">Total In Words</div>
+                    <div className="font-bold italic text-black text-[9.5px]">
+                      {indianNumberToWords(total)}
+                    </div>
                   </div>
-                  <div className="flex justify-between font-bold text-sm border-t pt-1 font-sans">
-                    <span>Grand Total:</span>
-                    <span>{formatCurrency(total)}</span>
+                  <div>
+                    <div className="text-[8.5px] text-slate-700">Notes</div>
+                    <div className="text-black">{printPayload.custom_notes}</div>
+                  </div>
+                  <div>
+                    <div className="text-[8.5px] text-slate-700">Terms & Conditions</div>
+                    <div className="text-black">{printPayload.terms_and_conditions}</div>
+                  </div>
+                  {(printPayload.seller?.bank_name || printPayload.seller?.bank_account_number) && (
+                    <div className="pt-1 border-t border-dotted border-black/40 text-[8.5px] space-y-0.5">
+                      <div className="font-bold text-black">Bank Details:</div>
+                      {printPayload.seller?.bank_account_name && (
+                        <div>Bank Account Name : {printPayload.seller.bank_account_name}</div>
+                      )}
+                      {printPayload.seller?.bank_account_number && (
+                        <div>Bank Account Number: <span className="font-mono">{printPayload.seller.bank_account_number}</span></div>
+                      )}
+                      {printPayload.seller?.bank_ifsc_code && (
+                        <div>IFS Code: <span className="font-mono font-semibold">{printPayload.seller.bank_ifsc_code}</span></div>
+                      )}
+                      {printPayload.seller?.bank_name && (
+                        <div>Bank Name : {printPayload.seller.bank_name}</div>
+                      )}
+                      {printPayload.seller?.bank_branch && (
+                        <div>Branch Address: {printPayload.seller.bank_branch}</div>
+                      )}
+                      {printPayload.seller?.bank_upi_id && (
+                        <div>UPI ID: <span className="font-mono">{printPayload.seller.bank_upi_id}</span></div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="col-span-5 flex flex-col justify-between">
+                  <table className="w-full text-[9px] border-collapse">
+                    <tbody>
+                      <tr className="border-b border-black">
+                        <td className="p-1 px-2 text-black">Sub Total</td>
+                        <td className="p-1 px-2 text-right font-mono">
+                          {subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-black">
+                        <td className="p-1 px-2 text-black">CGST</td>
+                        <td className="p-1 px-2 text-right font-mono">
+                          {(tax / 2).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-black">
+                        <td className="p-1 px-2 text-black">SGST</td>
+                        <td className="p-1 px-2 text-right font-mono">
+                          {(tax / 2).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                      {roundOff !== 0 && (
+                        <tr className="border-b border-black">
+                          <td className="p-1 px-2 text-black">Balance Amount</td>
+                          <td className="p-1 px-2 text-right font-mono">
+                            {roundOff < 0 ? `(-) ${Math.abs(roundOff).toFixed(2)}` : roundOff.toFixed(2)}
+                          </td>
+                        </tr>
+                      )}
+                      <tr className="border-b border-black font-bold">
+                        <td className="p-1.5 px-2 text-black text-[10px]">Total</td>
+                        <td className="p-1.5 px-2 text-right font-mono text-xs font-extrabold text-black">
+                          ₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  <div className="p-2 text-center flex flex-col justify-between h-24">
+                    <div className="font-bold text-[9px] text-black">
+                      {printPayload.seller?.legal_name || "BillMeet Store"}
+                    </div>
+                    <div className="flex-1 flex items-center justify-center">
+                      {printPayload.seller?.signature_url ? (
+                        <img
+                          src={printPayload.seller.signature_url}
+                          alt="Signature"
+                          className="max-h-8 max-w-[100px] object-contain"
+                        />
+                      ) : (
+                        <div className="h-6" />
+                      )}
+                    </div>
+                    <div className="font-semibold text-[8.5px] text-black border-t border-dashed border-black/40 pt-0.5">
+                      Authorized Signature
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Page Number Bottom Right */}
+              <div className="text-right text-[8px] text-slate-500 pt-1 pr-1">
+                1
               </div>
             </div>
           )}

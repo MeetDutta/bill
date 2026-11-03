@@ -484,6 +484,25 @@ export interface BusinessConfig {
   auto_print_bill: boolean;
   auto_send_digital_bill: boolean;
   low_stock_threshold: string | number;
+  name?: string;
+  legal_name?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  postal_code?: string;
+  phone?: string;
+  email?: string;
+  logo_url?: string;
+  logo?: string;
+  bank_name?: string;
+  bank_account_name?: string;
+  bank_account_number?: string;
+  bank_ifsc_code?: string;
+  bank_branch?: string;
+  bank_upi_id?: string;
+  authorized_signatory_name?: string;
+  signature_image?: string | null;
   updated_at: string;
 }
 
@@ -803,6 +822,7 @@ export interface Invoice {
   created_at: string;
   customer_name?: string;
   customer_phone?: string;
+  organization_name?: string;
   store_name?: string;
   transaction_date?: string;
   subtotal: string | number;
@@ -815,6 +835,7 @@ export interface Invoice {
   origin_quotation_number?: string;
   terms_and_conditions?: string;
   custom_notes?: string;
+  seller_details?: any;
   transaction?: any;
   transaction_details?: any;
 }

@@ -17,6 +17,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     payment_method = serializers.CharField(source="transaction.payment_method", read_only=True)
     origin_quotation_id = serializers.SerializerMethodField()
     origin_quotation_number = serializers.SerializerMethodField()
+    seller_details = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -26,13 +27,34 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "organization", "created_at", "terms_and_conditions", "custom_notes",
             "transaction_details", "organization_name", "store_name", "customer_name", "customer_phone",
             "subtotal", "discount", "tax", "total", "payment_status", "payment_method",
-            "origin_quotation_id", "origin_quotation_number",
+            "origin_quotation_id", "origin_quotation_number", "seller_details",
         ]
         read_only_fields = ["id", "secure_token", "created_at", "organization"]
 
     def get_transaction_details(self, obj):
         from apps.transactions.serializers import TransactionSerializer
         return TransactionSerializer(obj.transaction).data
+
+    def get_seller_details(self, obj):
+        from apps.billing.models import BusinessConfig
+        config = BusinessConfig.objects.filter(organization=obj.organization).first()
+        org = obj.organization
+        return {
+            "legal_name": getattr(org, "legal_name", "") or getattr(org, "name", ""),
+            "trade_name": getattr(config, "trade_name", "") or getattr(org, "name", ""),
+            "gstin": getattr(org, "gst_number", "") or getattr(config, "gstin", ""),
+            "address": getattr(org, "address_line1", ""),
+            "city": getattr(org, "city", ""),
+            "state": getattr(org, "state", ""),
+            "pincode": getattr(org, "postal_code", ""),
+            "bank_name": getattr(config, "bank_name", "") if config else "",
+            "bank_account_name": getattr(config, "bank_account_name", "") if config else "",
+            "bank_account_number": getattr(config, "bank_account_number", "") if config else "",
+            "bank_ifsc_code": getattr(config, "bank_ifsc_code", "") if config else "",
+            "bank_branch": getattr(config, "bank_branch", "") if config else "",
+            "bank_upi_id": getattr(config, "bank_upi_id", "") if config else "",
+            "authorized_signatory_name": getattr(config, "authorized_signatory_name", "") if config else "",
+        }
 
     def get_origin_quotation_id(self, obj):
         if hasattr(obj, "origin_quotation") and obj.origin_quotation:
@@ -97,6 +119,8 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
         }
 
     def get_business(self, obj):
+        from apps.billing.models import BusinessConfig
+        config = BusinessConfig.objects.filter(organization=obj.organization).first()
         org = obj.organization
         return {
             "name": org.name,
@@ -106,6 +130,12 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
             "country": org.country,
             "currency": getattr(org, "currency", "INR") or "INR",
             "gst_number": getattr(org, "gst_number", "") or "",
+            "bank_name": getattr(config, "bank_name", "") if config else "",
+            "bank_account_name": getattr(config, "bank_account_name", "") if config else "",
+            "bank_account_number": getattr(config, "bank_account_number", "") if config else "",
+            "bank_ifsc_code": getattr(config, "bank_ifsc_code", "") if config else "",
+            "bank_branch": getattr(config, "bank_branch", "") if config else "",
+            "bank_upi_id": getattr(config, "bank_upi_id", "") if config else "",
         }
 
     def get_store(self, obj):

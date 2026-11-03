@@ -218,3 +218,4 @@ class TestCheckoutGuarantees:
             }
             res = client.post("/api/v1/pos/checkout/", checkout_payload, format="json")
             assert res.status_code == status.HTTP_201_CREATED, f"Failed for store_id={empty_val}: {res.data}"
+

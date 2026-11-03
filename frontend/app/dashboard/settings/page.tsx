@@ -326,7 +326,99 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* SECTION 4: POS Controls & Udhaar / Credit */}
+            {/* SECTION 4: Bank Details & Tax Invoice Settings (A4 GST Invoice) */}
+            <div className="border-t pt-3">
+              <h4 className="font-bold text-sm text-foreground flex items-center gap-1.5 mb-2">
+                <Landmark className="h-4 w-4 text-indigo-600" />
+                Bank Details & Tax Invoice Settings (A4 GST Invoice)
+              </h4>
+              <p className="text-[11px] text-muted-foreground mb-3">
+                These bank details and terms are printed on formal A4 Tax Invoices matching the reference standard.
+              </p>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <label className="font-semibold block mb-1">Bank Name</label>
+                  <Input
+                    placeholder="e.g. ICICI Bank"
+                    value={posData.bank_name || ""}
+                    onChange={(e) => setPosData({ ...posData, bank_name: e.target.value })}
+                    className="text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Bank Account Name</label>
+                  <Input
+                    placeholder="e.g. Zoom Renewables Private Limited"
+                    value={posData.bank_account_name || ""}
+                    onChange={(e) => setPosData({ ...posData, bank_account_name: e.target.value })}
+                    className="text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Bank Account Number</label>
+                  <Input
+                    placeholder="e.g. 178705500909"
+                    value={posData.bank_account_number || ""}
+                    onChange={(e) => setPosData({ ...posData, bank_account_number: e.target.value })}
+                    className="text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">IFSC Code</label>
+                  <Input
+                    placeholder="e.g. ICIC0001787"
+                    value={posData.bank_ifsc_code || ""}
+                    onChange={(e) => setPosData({ ...posData, bank_ifsc_code: e.target.value.toUpperCase() })}
+                    className="text-xs font-mono uppercase"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">Branch Address</label>
+                  <Input
+                    placeholder="e.g. Chhatrapati Nagar, Nagpur"
+                    value={posData.bank_branch || ""}
+                    onChange={(e) => setPosData({ ...posData, bank_branch: e.target.value })}
+                    className="text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold block mb-1">UPI ID (VPA)</label>
+                  <Input
+                    placeholder="e.g. merchant@icici"
+                    value={posData.bank_upi_id || ""}
+                    onChange={(e) => setPosData({ ...posData, bank_upi_id: e.target.value })}
+                    className="text-xs font-mono"
+                  />
+                </div>
+
+                <div className="md:col-span-1">
+                  <label className="font-semibold block mb-1">Authorized Signatory Name / Title</label>
+                  <Input
+                    placeholder="e.g. Authorized Signatory"
+                    value={posData.authorized_signatory_name || ""}
+                    onChange={(e) => setPosData({ ...posData, authorized_signatory_name: e.target.value })}
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="font-semibold block mb-1">Invoice Terms & Conditions</label>
+                  <Input
+                    placeholder="e.g. Payment : 100% Advance"
+                    value={posData.invoice_terms_and_conditions || ""}
+                    onChange={(e) => setPosData({ ...posData, invoice_terms_and_conditions: e.target.value })}
+                    className="text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 5: POS Controls & Udhaar / Credit */}
             <div className="border-t pt-3">
               <h4 className="font-bold text-sm text-foreground flex items-center gap-1.5 mb-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-600" />
