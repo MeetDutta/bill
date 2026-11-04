@@ -782,6 +782,9 @@ class QuotationConvertView(APIView):
                 )
 
             # 7. Create Invoice Record
+            from apps.billing.branding_utils import build_branding_snapshot
+            b_cfg = BusinessConfig.objects.filter(organization=org).first()
+            branding_snap = build_branding_snapshot(b_cfg, org, store)
             secure_token = secrets.token_urlsafe(24)
             invoice = Invoice.objects.create(
                 organization=org,
@@ -793,6 +796,7 @@ class QuotationConvertView(APIView):
                 custom_notes=quotation.notes,
                 secure_token=secure_token,
                 web_url=f"/bills/{secure_token}",
+                branding_snapshot=branding_snap,
             )
 
             # 8. Link quotation and mark converted

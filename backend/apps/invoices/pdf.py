@@ -65,8 +65,9 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
     Renders an authoritative Indian GST Tax Invoice in formal A4 portrait layout
     matching the professional reference invoice standard.
     """
-    # Load Business Configuration for bank details, terms, and signature
+    # Load Business Configuration and branding snapshot
     from apps.billing.models import BusinessConfig
+    from apps.billing.branding_utils import build_branding_snapshot
     config = None
     if org:
         config = BusinessConfig.objects.filter(organization=org).first()
@@ -75,6 +76,29 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
             organization=org,
             defaults={"business_type": "retail"},
         )
+
+    snap = getattr(invoice, "branding_snapshot", None)
+    if not snap or not isinstance(snap, dict) or not snap.get("business_name"):
+        snap = build_branding_snapshot(config, org, store)
+
+    elements = snap.get("invoice_elements") or {}
+    show_logo = elements.get("show_logo", True)
+    show_addr = elements.get("show_address", True)
+    show_gst = elements.get("show_gstin", True)
+    show_tagline = elements.get("show_tagline", False)
+    show_contact = elements.get("show_contact_details", True)
+    show_phone = elements.get("show_phone", True)
+    show_email = elements.get("show_email", True)
+    show_website = elements.get("show_website", False)
+    show_bill_to = elements.get("show_bill_to", True)
+    show_ship_to = elements.get("show_ship_to", True)
+    show_words = elements.get("show_amount_in_words", True)
+    show_notes = elements.get("show_notes", True)
+    show_terms = elements.get("show_terms", True)
+    show_bank = elements.get("show_bank_details", True)
+    show_sig = elements.get("show_authorized_signature", True)
+    show_page_num = elements.get("show_page_number", True)
+    logo_pos = snap.get("logo_position", "left")
 
     # Margin is 10mm so usable width is exactly 190mm (210 - 20)
     page_margin = 10 * mm
@@ -108,10 +132,11 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
         w = d.pagesize[0] - 2 * page_margin
         h = d.pagesize[1] - 2 * page_margin
         canvas.rect(page_margin, page_margin, w, h)
-        # Page Number bottom-right outside outer border
-        canvas.setFont("Helvetica", 7.5)
-        canvas.setFillColor(colors.black)
-        canvas.drawRightString(d.pagesize[0] - page_margin - 2 * mm, page_margin - 4 * mm, str(canvas.getPageNumber()))
+        # Page Number bottom-right outside outer border (if enabled)
+        if show_page_num:
+            canvas.setFont("Helvetica", 7.5)
+            canvas.setFillColor(colors.black)
+            canvas.drawRightString(d.pagesize[0] - page_margin - 2 * mm, page_margin - 4 * mm, str(canvas.getPageNumber()))
         canvas.restoreState()
 
     page_template = PageTemplate(id="invoice_page", frames=main_frame, onPage=draw_page_frame)
@@ -266,42 +291,100 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
         textColor=colors.black,
     )
 
+    tagline_style = ParagraphStyle(
+        "TaglineStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Oblique",
+        fontSize=8,
+        leading=10,
+        textColor=colors.black,
+    )
+
     story = []
 
     # ---------------------------------------------------------
     # 1. HEADER SECTION: Business Identity (Left) & Document Title (Right)
     # ---------------------------------------------------------
-    seller_name = safe_str(getattr(org, "name", "") or getattr(config, "trade_name", "") or "BillMeet Technologies")
-    seller_legal = safe_str(getattr(org, "legal_name", "") or seller_name)
-    seller_addr = safe_str(getattr(store, "address_line1", "") or getattr(org, "address_line1", ""))
-    seller_city = safe_str(getattr(store, "city", "") or getattr(org, "city", ""))
-    seller_state = safe_str(getattr(store, "state", "") or getattr(org, "state", "Maharashtra"))
-    seller_pin = safe_str(getattr(store, "postal_code", "") or getattr(org, "postal_code", ""))
-    seller_gstin = safe_str(getattr(org, "gst_number", "") or getattr(config, "gstin", "") or "")
+    seller_name = safe_str(snap.get("business_name") or getattr(org, "name", "") or getattr(config, "trade_name", "") or "BillMeet Store")
+    seller_legal = safe_str(snap.get("legal_name") or seller_name)
+    tagline_text = safe_str(snap.get("tagline") or "")
+    seller_addr = safe_str(snap.get("address_line1") or getattr(store, "address_line1", "") or getattr(org, "address_line1", ""))
+    seller_addr2 = safe_str(snap.get("address_line2") or getattr(store, "address_line2", "") or getattr(org, "address_line2", ""))
+    seller_city = safe_str(snap.get("city") or getattr(store, "city", "") or getattr(org, "city", ""))
+    seller_district = safe_str(snap.get("district") or "")
+    seller_state = safe_str(snap.get("state") or getattr(store, "state", "") or getattr(org, "state", "Maharashtra"))
+    seller_pin = safe_str(snap.get("pincode") or getattr(store, "postal_code", "") or getattr(org, "postal_code", ""))
+    seller_gstin = safe_str(snap.get("gstin") or getattr(org, "gst_number", "") or getattr(config, "gstin", "") or "")
+    seller_phone = safe_str(snap.get("phone") or getattr(store, "phone", "") or getattr(org, "phone", "") or "")
+    seller_alt_phone = safe_str(snap.get("alternate_phone") or "")
+    seller_email = safe_str(snap.get("email") or getattr(org, "email", "") or "")
+    seller_website = safe_str(snap.get("website") or "")
 
-    addr_line = ", ".join(p for p in [seller_addr, f"{seller_city} - {seller_pin}" if seller_pin else seller_city, seller_state] if p)
+    addr_parts = []
+    if show_addr:
+        if seller_addr:
+            addr_parts.append(seller_addr)
+        if seller_addr2:
+            addr_parts.append(seller_addr2)
+        city_pin = f"{seller_city} - {seller_pin}" if seller_pin else seller_city
+        if city_pin:
+            addr_parts.append(city_pin)
+        if seller_district and seller_district != seller_city:
+            addr_parts.append(seller_district)
+        if seller_state:
+            addr_parts.append(seller_state)
+    addr_line = ", ".join(p for p in addr_parts if p)
+
+    contact_parts = []
+    if show_contact:
+        if show_phone and seller_phone:
+            contact_parts.append(f"Phone: {seller_phone}")
+        if show_phone and seller_alt_phone:
+            contact_parts.append(f"Alt: {seller_alt_phone}")
+        if show_email and seller_email:
+            contact_parts.append(f"Email: {seller_email}")
+        if show_website and seller_website:
+            contact_parts.append(f"Web: {seller_website}")
+    contact_line = " | ".join(contact_parts)
 
     # Check for uploaded logo
     logo_flowable = None
-    if org and org.logo and hasattr(org.logo, "path") and os.path.exists(org.logo.path):
-        try:
-            from PIL import Image as PILImage
-            with PILImage.open(org.logo.path) as p_img:
-                w, h = p_img.size
-                max_w, max_h = 36 * mm, 14 * mm
-                scale = min(max_w / w, max_h / h)
-                logo_flowable = RLImage(org.logo.path, width=w * scale, height=h * scale)
-        except Exception:
-            logo_flowable = None
+    if show_logo:
+        logo_path = None
+        if org and org.logo and hasattr(org.logo, "path") and os.path.exists(org.logo.path):
+            logo_path = org.logo.path
+        elif snap and snap.get("logo_url"):
+            l_url = snap.get("logo_url")
+            cand = os.path.join(settings.MEDIA_ROOT, l_url.replace(settings.MEDIA_URL, "").lstrip("/"))
+            if os.path.exists(cand):
+                logo_path = cand
+
+        if logo_path:
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(logo_path) as p_img:
+                    w, h = p_img.size
+                    max_w, max_h = 36 * mm, 14 * mm
+                    scale = min(max_w / w, max_h / h)
+                    logo_flowable = RLImage(logo_path, width=w * scale, height=h * scale)
+            except Exception:
+                logo_flowable = None
 
     company_lines = []
     company_lines.append(Paragraph(f"<b>{seller_legal}</b>", title_company))
+    if show_tagline and tagline_text:
+        company_lines.append(Paragraph(f"<i>{tagline_text}</i>", tagline_style))
     if addr_line:
         company_lines.append(Paragraph(addr_line, company_meta))
-    if seller_gstin:
+    if show_gst and seller_gstin:
         company_lines.append(Paragraph(f"GSTIN: <b>{seller_gstin}</b>", company_meta))
+    if contact_line:
+        company_lines.append(Paragraph(contact_line, company_meta))
 
-    if logo_flowable:
+    is_gst = bool(seller_gstin and getattr(invoice, "invoice_type", "gst") != "non_gst")
+    doc_heading = (snap.get("gst_invoice_title") or "TAX INVOICE") if is_gst else (snap.get("regular_invoice_title") or "INVOICE")
+
+    if logo_flowable and logo_pos == "left":
         header_left_table = Table(
             [[logo_flowable, company_lines]],
             colWidths=[38 * mm, 82 * mm],
@@ -315,17 +398,40 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
             ])
         )
-        header_left_content = header_left_table
+        header_table = Table(
+            [[header_left_table, Paragraph(doc_heading, doc_heading_style)]],
+            colWidths=[120 * mm, 70 * mm],
+        )
+    elif logo_flowable and logo_pos == "right":
+        header_right_table = Table(
+            [[Paragraph(doc_heading, doc_heading_style), logo_flowable]],
+            colWidths=[42 * mm, 28 * mm],
+        )
+        header_right_table.setStyle(
+            TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ])
+        )
+        header_table = Table(
+            [[company_lines, header_right_table]],
+            colWidths=[120 * mm, 70 * mm],
+        )
+    elif logo_flowable and logo_pos == "center":
+        header_table = Table(
+            [[company_lines, logo_flowable, Paragraph(doc_heading, doc_heading_style)]],
+            colWidths=[85 * mm, 35 * mm, 70 * mm],
+        )
     else:
-        header_left_content = company_lines
+        # Graceful no-logo layout
+        header_table = Table(
+            [[company_lines, Paragraph(doc_heading, doc_heading_style)]],
+            colWidths=[125 * mm, 65 * mm],
+        )
 
-    is_gst = bool(seller_gstin and getattr(invoice, "invoice_type", "gst") != "non_gst")
-    doc_heading = "TAX INVOICE" if is_gst else "INVOICE"
-
-    header_table = Table(
-        [[header_left_content, Paragraph(doc_heading, doc_heading_style)]],
-        colWidths=[120 * mm, 70 * mm],
-    )
     header_table.setStyle(
         TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
@@ -452,22 +558,56 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
     if cust_gstin:
         ship_to_content.append(Paragraph(f"GSTIN <b>{cust_gstin}</b>", party_text))
 
-    bill_ship_table = Table(
-        [[bill_to_content, ship_to_content]],
-        colWidths=[95 * mm, 95 * mm],
-    )
-    bill_ship_table.setStyle(
-        TableStyle([
-            ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
-            ("INNERGRID", (0, 0), (-1, -1), 0.8, colors.black),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 5),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ])
-    )
-    story.append(bill_ship_table)
+    bill_ship_table = None
+    if show_bill_to and show_ship_to:
+        bill_ship_table = Table(
+            [[bill_to_content, ship_to_content]],
+            colWidths=[95 * mm, 95 * mm],
+        )
+        bill_ship_table.setStyle(
+            TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
+                ("INNERGRID", (0, 0), (-1, -1), 0.8, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ])
+        )
+    elif show_bill_to:
+        bill_ship_table = Table(
+            [[bill_to_content]],
+            colWidths=[190 * mm],
+        )
+        bill_ship_table.setStyle(
+            TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ])
+        )
+    elif show_ship_to:
+        bill_ship_table = Table(
+            [[ship_to_content]],
+            colWidths=[190 * mm],
+        )
+        bill_ship_table.setStyle(
+            TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ])
+        )
+
+    if bill_ship_table:
+        story.append(bill_ship_table)
 
     # ---------------------------------------------------------
     # 4. STRUCTURED ITEM DESCRIPTION TABLE (GST GRID)
@@ -715,45 +855,49 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
     left_elements.append(Spacer(1, 1.5 * mm))
 
     # Amount in words
-    amt_words = indian_number_to_words(total_val)
-    left_elements.append(Paragraph("Total In Words", meta_label))
-    left_elements.append(Paragraph(f"<i><b>{amt_words}</b></i>", words_style))
-    left_elements.append(Spacer(1, 2.5 * mm))
+    if show_words:
+        amt_words = indian_number_to_words(total_val)
+        left_elements.append(Paragraph("Total In Words", meta_label))
+        left_elements.append(Paragraph(f"<i><b>{amt_words}</b></i>", words_style))
+        left_elements.append(Spacer(1, 2.5 * mm))
 
     # Notes
-    custom_notes_text = invoice.custom_notes or (tx.notes if tx else "") or "Looking forward for your business."
-    left_elements.append(Paragraph("<b>Notes</b>", note_title))
-    left_elements.append(Paragraph(safe_str(custom_notes_text), note_body))
-    left_elements.append(Spacer(1, 2 * mm))
+    if show_notes:
+        custom_notes_text = invoice.custom_notes or snap.get("default_invoice_notes") or (tx.notes if tx else "") or "Looking forward for your business."
+        left_elements.append(Paragraph("<b>Notes</b>", note_title))
+        left_elements.append(Paragraph(safe_str(custom_notes_text), note_body))
+        left_elements.append(Spacer(1, 2 * mm))
 
     # Terms & Conditions
-    terms_text = invoice.terms_and_conditions or getattr(config, "terms_and_conditions", "") or "Payment : 100% Advance"
-    left_elements.append(Paragraph("<b>Terms &amp; Conditions</b>", note_title))
-    left_elements.append(Paragraph(safe_str(terms_text), note_body))
+    if show_terms:
+        terms_text = invoice.terms_and_conditions or snap.get("terms_and_conditions") or getattr(config, "terms_and_conditions", "") or "Payment : 100% Advance"
+        left_elements.append(Paragraph("<b>Terms &amp; Conditions</b>", note_title))
+        left_elements.append(Paragraph(safe_str(terms_text), note_body))
 
     # Bank Details
-    bank_name = getattr(config, "bank_name", "") or ""
-    bank_ac_name = getattr(config, "bank_account_name", "") or seller_legal
-    bank_ac_no = getattr(config, "bank_account_number", "") or ""
-    bank_ifsc = getattr(config, "bank_ifsc_code", "") or ""
-    bank_branch = getattr(config, "bank_branch", "") or ""
-    bank_upi = getattr(config, "bank_upi_id", "") or ""
+    if show_bank:
+        bank_name = snap.get("bank_name") or getattr(config, "bank_name", "") or ""
+        bank_ac_name = snap.get("bank_account_name") or getattr(config, "bank_account_name", "") or seller_legal
+        bank_ac_no = snap.get("bank_account_number") or getattr(config, "bank_account_number", "") or ""
+        bank_ifsc = snap.get("bank_ifsc_code") or getattr(config, "bank_ifsc_code", "") or ""
+        bank_branch = snap.get("bank_branch") or getattr(config, "bank_branch", "") or ""
+        bank_upi = snap.get("bank_upi_id") or getattr(config, "bank_upi_id", "") or ""
 
-    if bank_ac_no or bank_name or bank_ifsc or bank_upi:
-        left_elements.append(Spacer(1, 2 * mm))
-        left_elements.append(Paragraph("<b>Bank Details:</b>", note_title))
-        if bank_ac_name:
-            left_elements.append(Paragraph(f"Bank Account Name : {safe_str(bank_ac_name)}", note_body))
-        if bank_ac_no:
-            left_elements.append(Paragraph(f"Bank Account Number: {safe_str(bank_ac_no)}", note_body))
-        if bank_ifsc:
-            left_elements.append(Paragraph(f"IFS Code: {safe_str(bank_ifsc)}", note_body))
-        if bank_name:
-            left_elements.append(Paragraph(f"Bank Name : {safe_str(bank_name)}", note_body))
-        if bank_branch:
-            left_elements.append(Paragraph(f"Branch Address: {safe_str(bank_branch)}", note_body))
-        if bank_upi:
-            left_elements.append(Paragraph(f"UPI ID: {safe_str(bank_upi)}", note_body))
+        if bank_ac_no or bank_name or bank_ifsc or bank_upi:
+            left_elements.append(Spacer(1, 2 * mm))
+            left_elements.append(Paragraph("<b>Bank Details:</b>", note_title))
+            if bank_ac_name:
+                left_elements.append(Paragraph(f"Bank Account Name : {safe_str(bank_ac_name)}", note_body))
+            if bank_ac_no:
+                left_elements.append(Paragraph(f"Bank Account Number: {safe_str(bank_ac_no)}", note_body))
+            if bank_ifsc:
+                left_elements.append(Paragraph(f"IFS Code: {safe_str(bank_ifsc)}", note_body))
+            if bank_name:
+                left_elements.append(Paragraph(f"Bank Name : {safe_str(bank_name)}", note_body))
+            if bank_branch:
+                left_elements.append(Paragraph(f"Branch Address: {safe_str(bank_branch)}", note_body))
+            if bank_upi:
+                left_elements.append(Paragraph(f"UPI ID: {safe_str(bank_upi)}", note_body))
 
     # Right Column: Totals Calculation Table + Signature Block
     totals_rows = [
@@ -827,33 +971,45 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
     right_totals_table.setStyle(TableStyle(totals_table_style))
 
     # Signature Block
-    sig_content = [
-        Spacer(1, 1.5 * mm),
-        HRFlowable(width="100%", thickness=0.8, color=colors.black, spaceBefore=1, spaceAfter=4),
-        Paragraph(f"<b>{seller_legal}</b>", ParagraphStyle("SigCo", parent=styles["Normal"], fontName=def_font, fontSize=8, leading=10, alignment=1)),
-    ]
+    sig_content = []
+    if show_sig:
+        signatory_title = safe_str(snap.get("authorized_signatory_name") or getattr(config, "authorized_signatory_name", "") or "Authorized Signatory")
+        sig_content = [
+            Spacer(1, 1.5 * mm),
+            HRFlowable(width="100%", thickness=0.8, color=colors.black, spaceBefore=1, spaceAfter=4),
+            Paragraph(f"<b>For {seller_legal}</b>", ParagraphStyle("SigCo", parent=styles["Normal"], fontName=def_font, fontSize=8, leading=10, alignment=1)),
+        ]
 
-    # Signature Image if available
-    sig_image_flowable = None
-    if config and config.signature_image and hasattr(config.signature_image, "path") and os.path.exists(config.signature_image.path):
-        try:
-            from PIL import Image as PILImage
-            with PILImage.open(config.signature_image.path) as s_img:
-                sw, sh = s_img.size
-                max_sw, max_sh = 35 * mm, 12 * mm
-                scale = min(max_sw / sw, max_sh / sh)
-                sig_image_flowable = RLImage(config.signature_image.path, width=sw * scale, height=sh * scale)
-        except Exception:
-            sig_image_flowable = None
+        # Signature Image if available
+        sig_image_flowable = None
+        sig_path = None
+        if config and config.signature_image and hasattr(config.signature_image, "path") and os.path.exists(config.signature_image.path):
+            sig_path = config.signature_image.path
+        elif snap and snap.get("signature_url"):
+            s_url = snap.get("signature_url")
+            cand = os.path.join(settings.MEDIA_ROOT, s_url.replace(settings.MEDIA_URL, "").lstrip("/"))
+            if os.path.exists(cand):
+                sig_path = cand
 
-    if sig_image_flowable:
-        sig_content.append(Spacer(1, 1 * mm))
-        sig_content.append(sig_image_flowable)
-        sig_content.append(Spacer(1, 1 * mm))
-    else:
-        sig_content.append(Spacer(1, 12 * mm))
+        if sig_path:
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(sig_path) as s_img:
+                    sw, sh = s_img.size
+                    max_sw, max_sh = 35 * mm, 12 * mm
+                    scale = min(max_sw / sw, max_sh / sh)
+                    sig_image_flowable = RLImage(sig_path, width=sw * scale, height=sh * scale)
+            except Exception:
+                sig_image_flowable = None
 
-    sig_content.append(Paragraph("Authorized Signature", ParagraphStyle("SigLbl", parent=styles["Normal"], fontName=def_font, fontSize=7.5, leading=9, alignment=1)))
+        if sig_image_flowable:
+            sig_content.append(Spacer(1, 1 * mm))
+            sig_content.append(sig_image_flowable)
+            sig_content.append(Spacer(1, 1 * mm))
+        else:
+            sig_content.append(Spacer(1, 12 * mm))
+
+        sig_content.append(Paragraph(signatory_title, ParagraphStyle("SigLbl", parent=styles["Normal"], fontName=def_font, fontSize=7.5, leading=9, alignment=1)))
 
     right_elements = [
         right_totals_table,

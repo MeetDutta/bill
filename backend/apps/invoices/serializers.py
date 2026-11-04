@@ -36,25 +36,16 @@ class InvoiceSerializer(serializers.ModelSerializer):
         return TransactionSerializer(obj.transaction).data
 
     def get_seller_details(self, obj):
+        snap = getattr(obj, "branding_snapshot", None)
+        if snap and isinstance(snap, dict) and snap.get("business_name"):
+            return snap
+
         from apps.billing.models import BusinessConfig
+        from apps.billing.branding_utils import build_branding_snapshot
         config = BusinessConfig.objects.filter(organization=obj.organization).first()
         org = obj.organization
-        return {
-            "legal_name": getattr(org, "legal_name", "") or getattr(org, "name", ""),
-            "trade_name": getattr(config, "trade_name", "") or getattr(org, "name", ""),
-            "gstin": getattr(org, "gst_number", "") or getattr(config, "gstin", ""),
-            "address": getattr(org, "address_line1", ""),
-            "city": getattr(org, "city", ""),
-            "state": getattr(org, "state", ""),
-            "pincode": getattr(org, "postal_code", ""),
-            "bank_name": getattr(config, "bank_name", "") if config else "",
-            "bank_account_name": getattr(config, "bank_account_name", "") if config else "",
-            "bank_account_number": getattr(config, "bank_account_number", "") if config else "",
-            "bank_ifsc_code": getattr(config, "bank_ifsc_code", "") if config else "",
-            "bank_branch": getattr(config, "bank_branch", "") if config else "",
-            "bank_upi_id": getattr(config, "bank_upi_id", "") if config else "",
-            "authorized_signatory_name": getattr(config, "authorized_signatory_name", "") if config else "",
-        }
+        store = getattr(obj.transaction, "store", None) if obj.transaction else None
+        return build_branding_snapshot(config, org, store)
 
     def get_origin_quotation_id(self, obj):
         if hasattr(obj, "origin_quotation") and obj.origin_quotation:
@@ -119,15 +110,38 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
         }
 
     def get_business(self, obj):
+        snap = getattr(obj, "branding_snapshot", None)
+        if snap and isinstance(snap, dict) and snap.get("business_name"):
+            return {
+                "name": snap.get("business_name"),
+                "legal_name": snap.get("legal_name"),
+                "city": snap.get("city"),
+                "state": snap.get("state"),
+                "country": snap.get("country", "India"),
+                "currency": "INR",
+                "gst_number": snap.get("gstin", ""),
+                "bank_name": snap.get("bank_name", ""),
+                "bank_account_name": snap.get("bank_account_name", ""),
+                "bank_account_number": snap.get("bank_account_number", ""),
+                "bank_ifsc_code": snap.get("bank_ifsc_code", ""),
+                "bank_branch": snap.get("bank_branch", ""),
+                "bank_upi_id": snap.get("bank_upi_id", ""),
+                "logo_url": snap.get("logo_url"),
+                "branding": snap,
+            }
+
         from apps.billing.models import BusinessConfig
+        from apps.billing.branding_utils import build_branding_snapshot
         config = BusinessConfig.objects.filter(organization=obj.organization).first()
         org = obj.organization
+        store = getattr(obj.transaction, "store", None) if obj.transaction else None
+        full_snap = build_branding_snapshot(config, org, store)
         return {
-            "name": org.name,
-            "legal_name": org.legal_name,
-            "city": org.city,
-            "state": org.state,
-            "country": org.country,
+            "name": org.name if org else "",
+            "legal_name": org.legal_name if org else "",
+            "city": org.city if org else "",
+            "state": org.state if org else "",
+            "country": getattr(org, "country", "India") or "India",
             "currency": getattr(org, "currency", "INR") or "INR",
             "gst_number": getattr(org, "gst_number", "") or "",
             "bank_name": getattr(config, "bank_name", "") if config else "",
@@ -136,6 +150,8 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
             "bank_ifsc_code": getattr(config, "bank_ifsc_code", "") if config else "",
             "bank_branch": getattr(config, "bank_branch", "") if config else "",
             "bank_upi_id": getattr(config, "bank_upi_id", "") if config else "",
+            "logo_url": full_snap.get("logo_url"),
+            "branding": full_snap,
         }
 
     def get_store(self, obj):

@@ -194,13 +194,16 @@ export const customerPortalApi = {
 // Universal POS & Billing Engine
 export const posApi = {
   getConfig: () => api.get("/pos/config/"),
-  updateConfig: (data: unknown) =>
-    api.patch("/pos/config/", data).catch((err) => {
+  updateConfig: (data: unknown) => {
+    const isFormData = typeof FormData !== "undefined" && data instanceof FormData;
+    const reqConfig = isFormData ? { headers: { "Content-Type": "multipart/form-data" } } : undefined;
+    return api.patch("/pos/config/", data, reqConfig).catch((err) => {
       if (err?.response?.status === 405) {
-        return api.post("/pos/config/", data);
+        return api.post("/pos/config/", data, reqConfig);
       }
       throw err;
-    }),
+    });
+  },
   getBusinessTypes: () => api.get("/pos/business-types/"),
   searchProducts: (params?: { search?: string; category?: string; low_stock?: boolean; page?: number; page_size?: number }) =>
     api.get("/pos/products/", { params }),

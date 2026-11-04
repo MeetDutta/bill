@@ -462,6 +462,25 @@ export interface BusinessTypeSchema {
   custom_fields: CustomFieldDefinition[];
 }
 
+export interface InvoiceElementsConfig {
+  show_logo?: boolean;
+  show_address?: boolean;
+  show_gstin?: boolean;
+  show_contact_details?: boolean;
+  show_phone?: boolean;
+  show_email?: boolean;
+  show_website?: boolean;
+  show_tagline?: boolean;
+  show_bill_to?: boolean;
+  show_ship_to?: boolean;
+  show_bank_details?: boolean;
+  show_terms?: boolean;
+  show_notes?: boolean;
+  show_amount_in_words?: boolean;
+  show_authorized_signature?: boolean;
+  show_page_number?: boolean;
+}
+
 export interface BusinessConfig {
   id: string;
   business_type: string;
@@ -472,6 +491,7 @@ export interface BusinessConfig {
   default_tax_rate: string | number;
   gstin: string;
   trade_name: string;
+  business_name?: string;
   allow_credit_sales: boolean;
   default_credit_limit: string | number;
   default_invoice_format: "a4" | "thermal_80mm" | "thermal_58mm";
@@ -486,15 +506,32 @@ export interface BusinessConfig {
   low_stock_threshold: string | number;
   name?: string;
   legal_name?: string;
+  tagline?: string;
   address?: string;
+  address_line1?: string;
+  address_line2?: string;
   city?: string;
+  district?: string;
   state?: string;
+  state_code?: string;
   pincode?: string;
   postal_code?: string;
+  country?: string;
   phone?: string;
+  alternate_phone?: string;
   email?: string;
-  logo_url?: string;
-  logo?: string;
+  website?: string;
+  pan_number?: string;
+  gst_registration_type?: string;
+  paper_size?: string;
+  invoice_template?: string;
+  logo_position?: "left" | "center" | "right";
+  gst_invoice_title?: string;
+  regular_invoice_title?: string;
+  default_invoice_notes?: string;
+  invoice_elements?: InvoiceElementsConfig;
+  logo_url?: string | null;
+  logo?: string | null;
   bank_name?: string;
   bank_account_name?: string;
   bank_account_number?: string;
@@ -503,6 +540,7 @@ export interface BusinessConfig {
   bank_upi_id?: string;
   authorized_signatory_name?: string;
   signature_image?: string | null;
+  signature_url?: string | null;
   updated_at: string;
 }
 

@@ -572,8 +572,10 @@ class CheckoutService:
                     )
 
                 # 8g. Create Invoice Record
+                from apps.billing.branding_utils import build_branding_snapshot
                 secure_token = secrets.token_urlsafe(24)
                 invoice_type = "gst" if config.gst_enabled else "non_gst"
+                branding_snap = build_branding_snapshot(config, organization, store)
                 invoice = Invoice.objects.create(
                     organization=organization,
                     transaction=tx,
@@ -584,6 +586,7 @@ class CheckoutService:
                     custom_notes=config.invoice_footer or "",
                     secure_token=secure_token,
                     web_url=f"/bills/{secure_token}",
+                    branding_snapshot=branding_snap,
                 )
 
                 # 8h. Update Open Cash Register if Cash Payment Involved

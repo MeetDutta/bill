@@ -29,6 +29,27 @@ class AuditLog(UUIDModel, TenantModel, TimeStampedModel):
         return f"{self.action} - {self.entity_type} by {self.user}"
 
 
+def default_invoice_elements():
+    return {
+        "show_logo": True,
+        "show_address": True,
+        "show_gstin": True,
+        "show_contact_details": True,
+        "show_phone": True,
+        "show_email": True,
+        "show_website": False,
+        "show_tagline": False,
+        "show_bill_to": True,
+        "show_ship_to": True,
+        "show_bank_details": True,
+        "show_terms": True,
+        "show_notes": True,
+        "show_amount_in_words": True,
+        "show_authorized_signature": True,
+        "show_page_number": True,
+    }
+
+
 class BusinessConfig(UUIDModel, TenantModel, TimeStampedModel):
     """
     Universal Business Configuration:
@@ -85,6 +106,24 @@ class BusinessConfig(UUIDModel, TenantModel, TimeStampedModel):
     bank_upi_id = models.CharField(max_length=100, blank=True, default="")
     authorized_signatory_name = models.CharField(max_length=150, blank=True, default="")
     signature_image = models.ImageField(upload_to="signatures/", null=True, blank=True)
+    # Custom A4 Invoice Branding & Layout Options
+    tagline = models.CharField(max_length=255, blank=True, default="")
+    alternate_phone = models.CharField(max_length=50, blank=True, default="")
+    website = models.CharField(max_length=255, blank=True, default="")
+    district = models.CharField(max_length=100, blank=True, default="")
+    state_code = models.CharField(max_length=10, blank=True, default="")
+    gst_registration_type = models.CharField(max_length=50, blank=True, default="Regular")
+    paper_size = models.CharField(max_length=20, default="a4")
+    invoice_template = models.CharField(max_length=50, default="classic_gst")
+    logo_position = models.CharField(
+        max_length=20,
+        choices=[("left", "Left"), ("center", "Center"), ("right", "Right")],
+        default="left",
+    )
+    gst_invoice_title = models.CharField(max_length=100, default="TAX INVOICE")
+    regular_invoice_title = models.CharField(max_length=100, default="INVOICE")
+    default_invoice_notes = models.TextField(blank=True, default="Looking forward for your business.")
+    invoice_elements = models.JSONField(default=default_invoice_elements, blank=True)
     auto_print = models.BooleanField(default=False)
     auto_send_whatsapp = models.BooleanField(default=False)
     require_customer = models.BooleanField(default=False)
@@ -118,21 +157,41 @@ class BusinessConfig(UUIDModel, TenantModel, TimeStampedModel):
     def max_cashier_discount_percent(self):
         return self.max_discount_cashier
 
+    @max_cashier_discount_percent.setter
+    def max_cashier_discount_percent(self, value):
+        self.max_discount_cashier = value
+
     @property
     def default_invoice_format(self):
         return self.invoice_format
+
+    @default_invoice_format.setter
+    def default_invoice_format(self, value):
+        self.invoice_format = value
 
     @property
     def invoice_terms_and_conditions(self):
         return self.terms_and_conditions
 
+    @invoice_terms_and_conditions.setter
+    def invoice_terms_and_conditions(self, value):
+        self.terms_and_conditions = value
+
     @property
     def auto_send_digital_bill(self):
         return self.auto_send_whatsapp
 
+    @auto_send_digital_bill.setter
+    def auto_send_digital_bill(self, value):
+        self.auto_send_whatsapp = value
+
     @property
     def auto_print_bill(self):
         return self.auto_print
+
+    @auto_print_bill.setter
+    def auto_print_bill(self, value):
+        self.auto_print = value
 
 
 class HeldCart(UUIDModel, TenantModel, TimeStampedModel):

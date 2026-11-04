@@ -83,23 +83,30 @@ export function IsolatedReceiptModal({
       legal_name: saleData.seller?.legal_name || config?.legal_name || config?.trade_name || config?.name || "BillMeet Technologies Private Limited",
       trade_name: saleData.seller?.trade_name || config?.trade_name || config?.name || "BILLMEET RETAIL",
       gstin: saleData.seller?.gstin || config?.gstin || "",
-      address: saleData.seller?.address || config?.address || "",
+      address: saleData.seller?.address || config?.address_line1 || config?.address || "",
       city: saleData.seller?.city || config?.city || "",
       state: sellerState,
       pincode: saleData.seller?.pincode || config?.pincode || config?.postal_code || "",
       phone: saleData.seller?.phone || config?.phone || "",
+      alternate_phone: saleData.seller?.alternate_phone || config?.alternate_phone || "",
       email: saleData.seller?.email || config?.email || "",
-      logo_url: config?.logo_url || config?.logo || "",
-      invoice_footer: saleData.seller?.invoice_footer || config?.invoice_footer,
-      invoice_terms: saleData.seller?.invoice_terms || config?.invoice_terms_and_conditions,
-      bank_name: config?.bank_name,
-      bank_account_name: config?.bank_account_name,
-      bank_account_number: config?.bank_account_number,
-      bank_ifsc_code: config?.bank_ifsc_code,
-      bank_branch: config?.bank_branch,
-      bank_upi_id: config?.bank_upi_id,
-      authorized_signatory_name: config?.authorized_signatory_name,
-      signature_url: config?.signature_image || undefined,
+      website: saleData.seller?.website || config?.website || "",
+      tagline: saleData.seller?.tagline || config?.tagline || "",
+      logo_url: saleData.seller?.logo_url || config?.logo_url || config?.logo || "",
+      logo_position: saleData.seller?.logo_position || config?.logo_position || "left",
+      gst_invoice_title: saleData.seller?.gst_invoice_title || config?.gst_invoice_title || "TAX INVOICE",
+      regular_invoice_title: saleData.seller?.regular_invoice_title || config?.regular_invoice_title || "INVOICE",
+      invoice_footer: saleData.seller?.default_invoice_notes || saleData.seller?.invoice_footer || config?.default_invoice_notes || config?.invoice_footer,
+      invoice_terms: saleData.seller?.terms_and_conditions || saleData.seller?.invoice_terms || config?.invoice_terms_and_conditions,
+      bank_name: saleData.seller?.bank_name || config?.bank_name,
+      bank_account_name: saleData.seller?.bank_account_name || config?.bank_account_name,
+      bank_account_number: saleData.seller?.bank_account_number || config?.bank_account_number,
+      bank_ifsc_code: saleData.seller?.bank_ifsc_code || config?.bank_ifsc_code,
+      bank_branch: saleData.seller?.bank_branch || config?.bank_branch,
+      bank_upi_id: saleData.seller?.bank_upi_id || config?.bank_upi_id,
+      authorized_signatory_name: saleData.seller?.authorized_signatory_name || config?.authorized_signatory_name,
+      signature_url: saleData.seller?.signature_url || config?.signature_url || config?.signature_image || undefined,
+      invoice_elements: saleData.seller?.invoice_elements || config?.invoice_elements || {},
     },
     customer: saleData.customer ? {
       name: customerName,
@@ -326,40 +333,101 @@ export function IsolatedReceiptModal({
             /* Professional A4 GST Invoice Preview (Matching Zoom Renewables Reference Standard) */
             <div className="border border-black bg-white text-black p-3.5 shadow-sm font-sans text-xs select-none">
               {/* Organization Heading Centered */}
-              <div className="text-center font-bold text-sm text-black mb-1 tracking-tight">
-                {printPayload.seller?.legal_name || "BillMeet Technologies Private Limited"}
+              <div className="text-center mb-1">
+                <div className="font-bold text-sm text-black tracking-tight">
+                  {printPayload.seller?.legal_name || "BillMeet Store"}
+                </div>
+                {printPayload.seller?.invoice_elements?.show_tagline && printPayload.seller?.tagline && (
+                  <div className="text-[9px] italic text-slate-700">{printPayload.seller.tagline}</div>
+                )}
               </div>
 
               {/* Header: Logo & Address Left | TAX INVOICE Right */}
               <div className="flex justify-between items-center border-b border-black pb-2 px-1">
-                <div className="flex items-center gap-2.5">
-                  {printPayload.seller?.logo_url && (
-                    <img
-                      src={printPayload.seller.logo_url}
-                      alt="Logo"
-                      className="max-h-10 max-w-[90px] object-contain"
-                    />
-                  )}
-                  <div className="text-[9px] leading-tight text-black">
-                    {printPayload.seller?.address && <div>{printPayload.seller.address}</div>}
-                    <div>
-                      {[printPayload.seller?.city, printPayload.seller?.pincode ? `- ${printPayload.seller.pincode}` : "", printPayload.seller?.state]
-                        .filter(Boolean)
-                        .join(" ")}
+                {(printPayload.seller?.invoice_elements?.show_logo ?? true) && printPayload.seller?.logo_url && printPayload.seller?.logo_position === "right" ? (
+                  <>
+                    <div className="text-[9px] leading-tight text-black">
+                      {(printPayload.seller?.invoice_elements?.show_address ?? true) && printPayload.seller?.address && (
+                        <div>{printPayload.seller.address}</div>
+                      )}
+                      {(printPayload.seller?.invoice_elements?.show_address ?? true) && (
+                        <div>
+                          {[printPayload.seller?.city, printPayload.seller?.pincode ? `- ${printPayload.seller.pincode}` : "", printPayload.seller?.state]
+                            .filter(Boolean)
+                            .join(" ")}
+                        </div>
+                      )}
+                      {(printPayload.seller?.invoice_elements?.show_gstin ?? true) && printPayload.seller?.gstin && (
+                        <div className="font-semibold mt-0.5">
+                          GSTIN: <span className="font-mono">{printPayload.seller.gstin}</span>
+                        </div>
+                      )}
+                      {(printPayload.seller?.invoice_elements?.show_contact_details ?? true) && (
+                        <div className="text-[8.5px] text-slate-700 mt-0.5">
+                          {[
+                            (printPayload.seller?.invoice_elements?.show_phone ?? true) && printPayload.seller?.phone ? `Phone: ${printPayload.seller.phone}` : "",
+                            (printPayload.seller?.invoice_elements?.show_email ?? true) && printPayload.seller?.email ? `Email: ${printPayload.seller.email}` : "",
+                            (printPayload.seller?.invoice_elements?.show_website ?? false) && printPayload.seller?.website ? `Web: ${printPayload.seller.website}` : "",
+                          ].filter(Boolean).join(" | ")}
+                        </div>
+                      )}
                     </div>
-                    {printPayload.seller?.gstin && (
-                      <div className="font-semibold mt-0.5">
-                        GSTIN: <span className="font-mono">{printPayload.seller.gstin}</span>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xl font-extrabold tracking-wider text-black">
+                        {isGst ? (printPayload.seller?.gst_invoice_title || "TAX INVOICE") : (printPayload.seller?.regular_invoice_title || "INVOICE")}
                       </div>
-                    )}
-                  </div>
-                </div>
+                      <img
+                        src={printPayload.seller.logo_url}
+                        alt="Logo"
+                        className="max-h-10 max-w-[90px] object-contain"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2.5">
+                      {(printPayload.seller?.invoice_elements?.show_logo ?? true) && printPayload.seller?.logo_url && (
+                        <img
+                          src={printPayload.seller.logo_url}
+                          alt="Logo"
+                          className="max-h-10 max-w-[90px] object-contain"
+                        />
+                      )}
+                      <div className="text-[9px] leading-tight text-black">
+                        {(printPayload.seller?.invoice_elements?.show_address ?? true) && printPayload.seller?.address && (
+                          <div>{printPayload.seller.address}</div>
+                        )}
+                        {(printPayload.seller?.invoice_elements?.show_address ?? true) && (
+                          <div>
+                            {[printPayload.seller?.city, printPayload.seller?.pincode ? `- ${printPayload.seller.pincode}` : "", printPayload.seller?.state]
+                              .filter(Boolean)
+                              .join(" ")}
+                          </div>
+                        )}
+                        {(printPayload.seller?.invoice_elements?.show_gstin ?? true) && printPayload.seller?.gstin && (
+                          <div className="font-semibold mt-0.5">
+                            GSTIN: <span className="font-mono">{printPayload.seller.gstin}</span>
+                          </div>
+                        )}
+                        {(printPayload.seller?.invoice_elements?.show_contact_details ?? true) && (
+                          <div className="text-[8.5px] text-slate-700 mt-0.5">
+                            {[
+                              (printPayload.seller?.invoice_elements?.show_phone ?? true) && printPayload.seller?.phone ? `Phone: ${printPayload.seller.phone}` : "",
+                              (printPayload.seller?.invoice_elements?.show_email ?? true) && printPayload.seller?.email ? `Email: ${printPayload.seller.email}` : "",
+                              (printPayload.seller?.invoice_elements?.show_website ?? false) && printPayload.seller?.website ? `Web: ${printPayload.seller.website}` : "",
+                            ].filter(Boolean).join(" | ")}
+                          </div>
+                        )}
+                      </div>
+                    </div>
 
-                <div className="text-right">
-                  <div className="text-xl font-extrabold tracking-wider text-black">
-                    {isGst ? "TAX INVOICE" : "INVOICE"}
-                  </div>
-                </div>
+                    <div className="text-right">
+                      <div className="text-xl font-extrabold tracking-wider text-black">
+                        {isGst ? (printPayload.seller?.gst_invoice_title || "TAX INVOICE") : (printPayload.seller?.regular_invoice_title || "INVOICE")}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Invoice Information: 2 Columns */}
@@ -376,28 +444,34 @@ export function IsolatedReceiptModal({
                 </div>
               </div>
 
-              {/* Bill To / Ship To: 2 Columns */}
-              <div className="grid grid-cols-2 border-b border-black text-[9.5px]">
-                <div className="p-1.5 border-r border-black leading-snug">
-                  <div className="font-bold text-[10px] uppercase text-black mb-0.5">Bill To</div>
-                  <div className="font-bold text-black">{customerName}</div>
-                  {printPayload.customer?.address && <div>{printPayload.customer.address}</div>}
-                  <div>{[printPayload.customer?.city, printPayload.customer?.pincode, printPayload.customer?.state].filter(Boolean).join(", ")}</div>
-                  <div>India</div>
-                  {printPayload.customer?.gstin ? (
-                    <div className="mt-0.5 font-semibold">GSTIN: <span className="font-mono">{printPayload.customer.gstin}</span></div>
-                  ) : customerPhone ? (
-                    <div className="mt-0.5">Contact: {customerPhone}</div>
-                  ) : null}
+              {/* Bill To / Ship To: Conditional */}
+              {((printPayload.seller?.invoice_elements?.show_bill_to ?? true) || (printPayload.seller?.invoice_elements?.show_ship_to ?? true)) && (
+                <div className={`grid ${(printPayload.seller?.invoice_elements?.show_bill_to ?? true) && (printPayload.seller?.invoice_elements?.show_ship_to ?? true) ? "grid-cols-2" : "grid-cols-1"} border-b border-black text-[9.5px]`}>
+                  {(printPayload.seller?.invoice_elements?.show_bill_to ?? true) && (
+                    <div className={`p-1.5 ${(printPayload.seller?.invoice_elements?.show_ship_to ?? true) ? "border-r border-black" : ""} leading-snug`}>
+                      <div className="font-bold text-[10px] uppercase text-black mb-0.5">Bill To</div>
+                      <div className="font-bold text-black">{customerName}</div>
+                      {printPayload.customer?.address && <div>{printPayload.customer.address}</div>}
+                      <div>{[printPayload.customer?.city, printPayload.customer?.pincode, printPayload.customer?.state].filter(Boolean).join(", ")}</div>
+                      <div>India</div>
+                      {printPayload.customer?.gstin ? (
+                        <div className="mt-0.5 font-semibold">GSTIN: <span className="font-mono">{printPayload.customer.gstin}</span></div>
+                      ) : customerPhone ? (
+                        <div className="mt-0.5">Contact: {customerPhone}</div>
+                      ) : null}
+                    </div>
+                  )}
+                  {(printPayload.seller?.invoice_elements?.show_ship_to ?? true) && (
+                    <div className="p-1.5 leading-snug">
+                      <div className="font-bold text-[10px] uppercase text-black mb-0.5">Ship To</div>
+                      <div className="font-bold text-black">{customerName}</div>
+                      {printPayload.customer?.address && <div>{printPayload.customer.address}</div>}
+                      <div>{[printPayload.customer?.city, printPayload.customer?.pincode, printPayload.customer?.state].filter(Boolean).join(", ")}</div>
+                      <div>India</div>
+                    </div>
+                  )}
                 </div>
-                <div className="p-1.5 leading-snug">
-                  <div className="font-bold text-[10px] uppercase text-black mb-0.5">Ship To</div>
-                  <div className="font-bold text-black">{customerName}</div>
-                  {printPayload.customer?.address && <div>{printPayload.customer.address}</div>}
-                  <div>{[printPayload.customer?.city, printPayload.customer?.pincode, printPayload.customer?.state].filter(Boolean).join(", ")}</div>
-                  <div>India</div>
-                </div>
-              </div>
+              )}
 
               {/* Structured Items Table */}
               <div className="overflow-x-auto">
@@ -461,21 +535,27 @@ export function IsolatedReceiptModal({
                   <div>
                     Items in Total <strong>{printPayload.items.reduce((s, it) => s + Number(it.quantity || 1), 0)}</strong>
                   </div>
-                  <div>
-                    <div className="text-[8.5px] text-slate-700">Total In Words</div>
-                    <div className="font-bold italic text-black text-[9.5px]">
-                      {indianNumberToWords(total)}
+                  {((printPayload.seller?.invoice_elements?.show_amount_in_words ?? (printPayload.seller?.invoice_elements as any)?.show_words) ?? true) && (
+                    <div>
+                      <div className="text-[8.5px] text-slate-700">Total In Words</div>
+                      <div className="font-bold italic text-black text-[9.5px]">
+                        {indianNumberToWords(total)}
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-[8.5px] text-slate-700">Notes</div>
-                    <div className="text-black">{printPayload.custom_notes}</div>
-                  </div>
-                  <div>
-                    <div className="text-[8.5px] text-slate-700">Terms & Conditions</div>
-                    <div className="text-black">{printPayload.terms_and_conditions}</div>
-                  </div>
-                  {(printPayload.seller?.bank_name || printPayload.seller?.bank_account_number) && (
+                  )}
+                  {(printPayload.seller?.invoice_elements?.show_notes ?? true) && printPayload.custom_notes && (
+                    <div>
+                      <div className="text-[8.5px] text-slate-700">Notes</div>
+                      <div className="text-black">{printPayload.custom_notes}</div>
+                    </div>
+                  )}
+                  {(printPayload.seller?.invoice_elements?.show_terms ?? true) && printPayload.terms_and_conditions && (
+                    <div>
+                      <div className="text-[8.5px] text-slate-700">Terms & Conditions</div>
+                      <div className="text-black">{printPayload.terms_and_conditions}</div>
+                    </div>
+                  )}
+                  {(printPayload.seller?.invoice_elements?.show_bank_details ?? true) && (printPayload.seller?.bank_name || printPayload.seller?.bank_account_number) && (
                     <div className="pt-1 border-t border-dotted border-black/40 text-[8.5px] space-y-0.5">
                       <div className="font-bold text-black">Bank Details:</div>
                       {printPayload.seller?.bank_account_name && (
@@ -538,32 +618,36 @@ export function IsolatedReceiptModal({
                     </tbody>
                   </table>
 
-                  <div className="p-2 text-center flex flex-col justify-between h-24">
-                    <div className="font-bold text-[9px] text-black">
-                      {printPayload.seller?.legal_name || "BillMeet Store"}
+                  {((printPayload.seller?.invoice_elements?.show_authorized_signature ?? (printPayload.seller?.invoice_elements as any)?.show_signature) ?? true) && (
+                    <div className="p-2 text-center flex flex-col justify-between h-24">
+                      <div className="font-bold text-[9px] text-black">
+                        {printPayload.seller?.legal_name || printPayload.seller?.name || "BillMeet Store"}
+                      </div>
+                      <div className="flex-1 flex items-center justify-center">
+                        {printPayload.seller?.signature_url ? (
+                          <img
+                            src={printPayload.seller.signature_url}
+                            alt="Signature"
+                            className="max-h-8 max-w-[100px] object-contain"
+                          />
+                        ) : (
+                          <div className="h-6" />
+                        )}
+                      </div>
+                      <div className="font-semibold text-[8.5px] text-black border-t border-dashed border-black/40 pt-0.5">
+                        {printPayload.seller?.authorized_signatory_name || "Authorized Signature"}
+                      </div>
                     </div>
-                    <div className="flex-1 flex items-center justify-center">
-                      {printPayload.seller?.signature_url ? (
-                        <img
-                          src={printPayload.seller.signature_url}
-                          alt="Signature"
-                          className="max-h-8 max-w-[100px] object-contain"
-                        />
-                      ) : (
-                        <div className="h-6" />
-                      )}
-                    </div>
-                    <div className="font-semibold text-[8.5px] text-black border-t border-dashed border-black/40 pt-0.5">
-                      Authorized Signature
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
 
               {/* Page Number Bottom Right */}
-              <div className="text-right text-[8px] text-slate-500 pt-1 pr-1">
-                1
-              </div>
+              {((printPayload.seller?.invoice_elements?.show_page_number ?? (printPayload.seller?.invoice_elements as any)?.show_page_numbers) ?? true) && (
+                <div className="text-right text-[8px] text-slate-500 pt-1 pr-1">
+                  1
+                </div>
+              )}
             </div>
           )}
         </div>

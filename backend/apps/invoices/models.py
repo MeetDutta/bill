@@ -38,6 +38,7 @@ class Invoice(UUIDModel, TenantModel, TimeStampedModel):
     terms_and_conditions = models.TextField(blank=True)
     custom_notes = models.TextField(blank=True)
     qr_code_data = models.TextField(blank=True)
+    branding_snapshot = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

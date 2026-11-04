@@ -50,14 +50,25 @@ export interface PrintReceiptData {
     name?: string;
     legal_name?: string;
     trade_name?: string;
+    tagline?: string;
     gstin?: string;
     address?: string;
+    address_line1?: string;
+    address_line2?: string;
     city?: string;
+    district?: string;
     state?: string;
+    state_code?: string;
     pincode?: string;
     phone?: string;
+    alternate_phone?: string;
     email?: string;
-    logo_url?: string;
+    website?: string;
+    logo_url?: string | null;
+    logo_position?: "left" | "center" | "right";
+    gst_invoice_title?: string;
+    regular_invoice_title?: string;
+    default_invoice_notes?: string;
     invoice_footer?: string;
     invoice_terms?: string;
     bank_name?: string;
@@ -68,6 +79,7 @@ export interface PrintReceiptData {
     bank_upi_id?: string;
     authorized_signatory_name?: string;
     signature_url?: string | null;
+    invoice_elements?: Record<string, boolean>;
   };
   customer?: {
     id?: string;
@@ -510,13 +522,52 @@ export function printA4TaxInvoice(data: PrintReceiptData) {
   const customerGstin = escapeHtml(data.customer?.gstin || "");
   const customerPhone = escapeHtml(data.customer?.phone || "");
 
+  const elements = data.seller?.invoice_elements || {};
+  const showLogo = elements.show_logo ?? true;
+  const showAddress = elements.show_address ?? true;
+  const showGstin = elements.show_gstin ?? true;
+  const showContact = elements.show_contact_details ?? true;
+  const showPhone = elements.show_phone ?? true;
+  const showEmail = elements.show_email ?? true;
+  const showWebsite = elements.show_website ?? false;
+  const showTagline = elements.show_tagline ?? false;
+  const showBillTo = elements.show_bill_to ?? true;
+  const showShipTo = elements.show_ship_to ?? true;
+  const showBank = elements.show_bank_details ?? true;
+  const showTerms = elements.show_terms ?? true;
+  const showNotes = elements.show_notes ?? true;
+  const showWords = elements.show_amount_in_words ?? true;
+  const showSignature = elements.show_authorized_signature ?? true;
+  const showPageNumber = elements.show_page_number ?? true;
+
+  const logoPosition = data.seller?.logo_position || "left";
+  const tagline = escapeHtml(data.seller?.tagline || "");
+  const signatoryTitle = escapeHtml(data.seller?.authorized_signatory_name || "Authorized Signature");
+  const sellerPhone = escapeHtml(data.seller?.phone || "");
+  const sellerAltPhone = escapeHtml(data.seller?.alternate_phone || "");
+  const sellerEmail = escapeHtml(data.seller?.email || "");
+  const sellerWebsite = escapeHtml(data.seller?.website || "");
+
   const placeOfSupply = escapeHtml(
     data.place_of_supply || resolvePlaceOfSupply(customerState || sellerState, customerGstin || sellerGstin)
   );
   const reverseCharge = escapeHtml(data.reverse_charge || "No");
 
   const isGst = Boolean(sellerGstin && data.invoice_type !== "non_gst");
-  const docHeading = isGst ? "TAX INVOICE" : "INVOICE";
+  const docHeading = escapeHtml(
+    isGst
+      ? (data.seller?.gst_invoice_title || "TAX INVOICE")
+      : (data.seller?.regular_invoice_title || "INVOICE")
+  );
+
+  const contactParts: string[] = [];
+  if (showContact) {
+    if (showPhone && sellerPhone) contactParts.push(`Phone: ${sellerPhone}`);
+    if (showPhone && sellerAltPhone) contactParts.push(`Alt: ${sellerAltPhone}`);
+    if (showEmail && sellerEmail) contactParts.push(`Email: ${sellerEmail}`);
+    if (showWebsite && sellerWebsite) contactParts.push(`Web: ${sellerWebsite}`);
+  }
+  const sellerContactLine = contactParts.join(" | ");
 
   // Check interstate vs intra-state
   const hasIgst = (data.items || []).some((it) => Number(it.igst_amount || 0) > 0) ||
@@ -671,29 +722,79 @@ export function printA4TaxInvoice(data: PrintReceiptData) {
       <body>
         <div class="invoice-box">
           <!-- Company Name Centered on Top -->
-          <div style="text-align: center; font-weight: 700; font-size: 13.5px; padding-top: 6px; padding-bottom: 3px;">
-            ${sellerLegal}
+          <div style="text-align: center; padding-top: 6px; padding-bottom: 3px;">
+            <div style="font-weight: 700; font-size: 13.5px;">${sellerLegal}</div>
+            ${showTagline && tagline ? `<div style="font-size: 8.5px; font-style: italic; color: #333; margin-top: 1px;">${tagline}</div>` : ""}
           </div>
 
           <!-- Header Two-Column: Logo & Address Left | Document Title Right -->
           <table style="width: 100%; border-bottom: 1px solid #000;">
-            <tr>
-              <td style="width: 62%; vertical-align: middle; padding: 2px 8px 6px 8px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                  ${logoUrl ? `<img src="${logoUrl}" style="max-height: 44px; max-width: 120px; object-fit: contain;" alt="Logo" />` : ""}
+            ${showLogo && logoUrl && logoPosition === "right" ? `
+              <tr>
+                <td style="width: 58%; vertical-align: middle; padding: 2px 8px 6px 8px;">
                   <div style="font-size: 8.5px; line-height: 1.25;">
-                    ${sellerAddress ? `<div>${sellerAddress}</div>` : ""}
-                    ${sellerCityStatePin ? `<div>${sellerCityStatePin}</div>` : ""}
-                    ${sellerGstin ? `<div style="margin-top: 1px;">GSTIN: <strong>${sellerGstin}</strong></div>` : ""}
+                    ${showAddress && sellerAddress ? `<div>${sellerAddress}</div>` : ""}
+                    ${showAddress && sellerCityStatePin ? `<div>${sellerCityStatePin}</div>` : ""}
+                    ${showGstin && sellerGstin ? `<div style="margin-top: 1px;">GSTIN: <strong>${sellerGstin}</strong></div>` : ""}
+                    ${showContact && sellerContactLine ? `<div style="margin-top: 1px; color: #333;">${sellerContactLine}</div>` : ""}
                   </div>
-                </div>
-              </td>
-              <td style="width: 38%; vertical-align: middle; text-align: right; padding: 2px 10px 6px 8px;">
-                <div style="font-size: 21px; font-weight: 800; letter-spacing: 0.5px;">
-                  ${docHeading}
-                </div>
-              </td>
-            </tr>
+                </td>
+                <td style="width: 42%; vertical-align: middle; text-align: right; padding: 2px 10px 6px 8px;">
+                  <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
+                    <div style="font-size: 20px; font-weight: 800; letter-spacing: 0.5px;">${docHeading}</div>
+                    <img src="${logoUrl}" style="max-height: 44px; max-width: 100px; object-fit: contain;" alt="Logo" />
+                  </div>
+                </td>
+              </tr>
+            ` : showLogo && logoUrl && logoPosition === "center" ? `
+              <tr>
+                <td style="width: 42%; vertical-align: middle; padding: 2px 8px 6px 8px;">
+                  <div style="font-size: 8.5px; line-height: 1.25;">
+                    ${showAddress && sellerAddress ? `<div>${sellerAddress}</div>` : ""}
+                    ${showAddress && sellerCityStatePin ? `<div>${sellerCityStatePin}</div>` : ""}
+                    ${showGstin && sellerGstin ? `<div style="margin-top: 1px;">GSTIN: <strong>${sellerGstin}</strong></div>` : ""}
+                    ${showContact && sellerContactLine ? `<div style="margin-top: 1px; color: #333;">${sellerContactLine}</div>` : ""}
+                  </div>
+                </td>
+                <td style="width: 26%; vertical-align: middle; text-align: center; padding: 2px 4px 6px 4px;">
+                  <img src="${logoUrl}" style="max-height: 44px; max-width: 100px; object-fit: contain;" alt="Logo" />
+                </td>
+                <td style="width: 32%; vertical-align: middle; text-align: right; padding: 2px 10px 6px 8px;">
+                  <div style="font-size: 20px; font-weight: 800; letter-spacing: 0.5px;">${docHeading}</div>
+                </td>
+              </tr>
+            ` : showLogo && logoUrl ? `
+              <tr>
+                <td style="width: 62%; vertical-align: middle; padding: 2px 8px 6px 8px;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <img src="${logoUrl}" style="max-height: 44px; max-width: 120px; object-fit: contain;" alt="Logo" />
+                    <div style="font-size: 8.5px; line-height: 1.25;">
+                      ${showAddress && sellerAddress ? `<div>${sellerAddress}</div>` : ""}
+                      ${showAddress && sellerCityStatePin ? `<div>${sellerCityStatePin}</div>` : ""}
+                      ${showGstin && sellerGstin ? `<div style="margin-top: 1px;">GSTIN: <strong>${sellerGstin}</strong></div>` : ""}
+                      ${showContact && sellerContactLine ? `<div style="margin-top: 1px; color: #333;">${sellerContactLine}</div>` : ""}
+                    </div>
+                  </div>
+                </td>
+                <td style="width: 38%; vertical-align: middle; text-align: right; padding: 2px 10px 6px 8px;">
+                  <div style="font-size: 21px; font-weight: 800; letter-spacing: 0.5px;">${docHeading}</div>
+                </td>
+              </tr>
+            ` : `
+              <tr>
+                <td style="width: 65%; vertical-align: middle; padding: 4px 8px 6px 8px;">
+                  <div style="font-size: 8.5px; line-height: 1.25;">
+                    ${showAddress && sellerAddress ? `<div>${sellerAddress}</div>` : ""}
+                    ${showAddress && sellerCityStatePin ? `<div>${sellerCityStatePin}</div>` : ""}
+                    ${showGstin && sellerGstin ? `<div style="margin-top: 1px;">GSTIN: <strong>${sellerGstin}</strong></div>` : ""}
+                    ${showContact && sellerContactLine ? `<div style="margin-top: 1px; color: #333;">${sellerContactLine}</div>` : ""}
+                  </div>
+                </td>
+                <td style="width: 35%; vertical-align: middle; text-align: right; padding: 4px 10px 6px 8px;">
+                  <div style="font-size: 21px; font-weight: 800; letter-spacing: 0.5px;">${docHeading}</div>
+                </td>
+              </tr>
+            `}
           </table>
 
           <!-- Invoice Information (2 Columns with inner border) -->
@@ -716,26 +817,32 @@ export function printA4TaxInvoice(data: PrintReceiptData) {
             </tr>
           </table>
 
-          <!-- Bill To / Ship To Grid (2 Columns) -->
-          <table style="width: 100%; border-bottom: 1px solid #000;">
-            <tr>
-              <td style="width: 50%; vertical-align: top; padding: 5px 8px; border-right: 1px solid #000;">
-                <div style="font-weight: 700; font-size: 10px; margin-bottom: 2px;">Bill To</div>
-                <div style="font-weight: 700; font-size: 11px;">${customerName}</div>
-                ${customerAddress ? `<div>${customerAddress}</div>` : ""}
-                ${customerCityStatePin ? `<div>${customerCityStatePin}</div>` : ""}
-                <div>India</div>
-                ${customerGstin ? `<div style="margin-top: 1px;">GSTIN <strong>${customerGstin}</strong></div>` : (customerPhone ? `<div>Contact: ${customerPhone}</div>` : "")}
-              </td>
-              <td style="width: 50%; vertical-align: top; padding: 5px 8px;">
-                <div style="font-weight: 700; font-size: 10px; margin-bottom: 2px;">Ship To</div>
-                <div style="font-weight: 700; font-size: 11px;">${customerName}</div>
-                ${customerAddress ? `<div>${customerAddress}</div>` : ""}
-                ${customerCityStatePin ? `<div>${customerCityStatePin}</div>` : ""}
-                <div>India</div>
-              </td>
-            </tr>
-          </table>
+          <!-- Bill To / Ship To Grid (Conditional) -->
+          ${(showBillTo || showShipTo) ? `
+            <table style="width: 100%; border-bottom: 1px solid #000;">
+              <tr>
+                ${showBillTo ? `
+                  <td style="width: ${showShipTo ? "50%" : "100%"}; vertical-align: top; padding: 5px 8px; ${showShipTo ? "border-right: 1px solid #000;" : ""}">
+                    <div style="font-weight: 700; font-size: 10px; margin-bottom: 2px;">Bill To</div>
+                    <div style="font-weight: 700; font-size: 11px;">${customerName}</div>
+                    ${customerAddress ? `<div>${customerAddress}</div>` : ""}
+                    ${customerCityStatePin ? `<div>${customerCityStatePin}</div>` : ""}
+                    <div>India</div>
+                    ${customerGstin ? `<div style="margin-top: 1px;">GSTIN <strong>${customerGstin}</strong></div>` : (customerPhone ? `<div>Contact: ${customerPhone}</div>` : "")}
+                  </td>
+                ` : ""}
+                ${showShipTo ? `
+                  <td style="width: ${showBillTo ? "50%" : "100%"}; vertical-align: top; padding: 5px 8px;">
+                    <div style="font-weight: 700; font-size: 10px; margin-bottom: 2px;">Ship To</div>
+                    <div style="font-weight: 700; font-size: 11px;">${customerName}</div>
+                    ${customerAddress ? `<div>${customerAddress}</div>` : ""}
+                    ${customerCityStatePin ? `<div>${customerCityStatePin}</div>` : ""}
+                    <div>India</div>
+                  </td>
+                ` : ""}
+              </tr>
+            </table>
+          ` : ""}
 
           <!-- Structured Item Description Table -->
           <table style="width: 100%; border-bottom: 1px solid #000; font-size: 9px;">
@@ -786,18 +893,24 @@ export function printA4TaxInvoice(data: PrintReceiptData) {
                   Items in Total <strong>${totalItemsCount}</strong>
                 </div>
 
-                <div style="font-size: 8.5px; color: #333; margin-top: 4px;">Total In Words</div>
-                <div style="font-size: 9.5px; font-weight: 700; font-style: italic; margin-bottom: 6px;">
-                  ${amountInWords}
-                </div>
+                ${showWords ? `
+                  <div style="font-size: 8.5px; color: #333; margin-top: 4px;">Total In Words</div>
+                  <div style="font-size: 9.5px; font-weight: 700; font-style: italic; margin-bottom: 6px;">
+                    ${amountInWords}
+                  </div>
+                ` : ""}
 
-                <div style="font-size: 8.5px; color: #333; margin-top: 4px;">Notes</div>
-                <div style="font-size: 8.5px; margin-bottom: 6px;">${notes}</div>
+                ${showNotes ? `
+                  <div style="font-size: 8.5px; color: #333; margin-top: 4px;">Notes</div>
+                  <div style="font-size: 8.5px; margin-bottom: 6px;">${notes}</div>
+                ` : ""}
 
-                <div style="font-size: 8.5px; color: #333; margin-top: 4px;">Terms & Conditions</div>
-                <div style="font-size: 8.5px; margin-bottom: 8px;">${termsText}</div>
+                ${showTerms ? `
+                  <div style="font-size: 8.5px; color: #333; margin-top: 4px;">Terms & Conditions</div>
+                  <div style="font-size: 8.5px; margin-bottom: 8px;">${termsText}</div>
+                ` : ""}
 
-                ${hasBankDetails ? `
+                ${showBank && hasBankDetails ? `
                   <div style="font-size: 8.5px; margin-top: 6px; line-height: 1.3;">
                     <div style="font-weight: 700; margin-bottom: 2px;">Bank Details:</div>
                     ${bankAccountName ? `<div>Bank Account Name : ${bankAccountName}</div>` : ""}
@@ -835,23 +948,27 @@ export function printA4TaxInvoice(data: PrintReceiptData) {
                   </tr>
                 </table>
 
-                <!-- Authorized Signature Box -->
-                <div style="padding: 6px 8px; min-height: 95px; display: flex; flex-direction: column; justify-content: space-between; text-align: center;">
-                  <div style="font-weight: 700; font-size: 9.5px;">${sellerLegal}</div>
-                  <div style="height: 40px; display: flex; align-items: center; justify-content: center;">
-                    ${data.seller?.signature_url ? `<img src="${data.seller.signature_url}" style="max-height: 38px; max-width: 120px; object-fit: contain;" alt="Signature" />` : ""}
+                ${showSignature ? `
+                  <!-- Authorized Signature Box -->
+                  <div style="padding: 6px 8px; min-height: 95px; display: flex; flex-direction: column; justify-content: space-between; text-align: center;">
+                    <div style="font-weight: 700; font-size: 9.5px;">${sellerLegal}</div>
+                    <div style="height: 40px; display: flex; align-items: center; justify-content: center;">
+                      ${data.seller?.signature_url ? `<img src="${data.seller.signature_url}" style="max-height: 38px; max-width: 120px; object-fit: contain;" alt="Signature" />` : ""}
+                    </div>
+                    <div style="font-size: 9px; font-weight: 600;">${signatoryTitle}</div>
                   </div>
-                  <div style="font-size: 9px; font-weight: 600;">Authorized Signature</div>
-                </div>
+                ` : ""}
               </td>
             </tr>
           </table>
         </div>
 
-        <!-- Page Number at bottom right outside border -->
-        <div style="width: 190mm; margin: 2mm auto 0 auto; text-align: right; font-size: 8px; color: #000;">
-          1
-        </div>
+        <!-- Page Number at bottom right outside border (if enabled) -->
+        ${showPageNumber ? `
+          <div style="width: 190mm; margin: 2mm auto 0 auto; text-align: right; font-size: 8px; color: #000;">
+            1
+          </div>
+        ` : ""}
       </body>
     </html>
   `;

@@ -2,7 +2,7 @@ from decimal import Decimal
 import secrets
 from django.db import transaction
 from django.db.models import Q
-from rest_framework import permissions, status, renderers
+from rest_framework import permissions, status, renderers, parsers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
@@ -37,6 +37,7 @@ class StandardPOSPagination(PageNumberPagination):
 
 class BusinessConfigView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
     def get(self, request):
         org = request.user.organization
@@ -66,7 +67,7 @@ class BusinessConfigView(APIView):
 
     def _update(self, request, partial=True):
         from rest_framework.exceptions import PermissionDenied
-        ADMIN_ROLES = ("super_admin", "org_admin", "owner", "store_manager", "manager")
+        ADMIN_ROLES = ("super_admin", "org_admin", "owner", "store_manager", "manager", "admin")
         if request.user.role not in ADMIN_ROLES and not request.user.is_superuser:
             raise PermissionDenied("Only administrators and managers can modify business configuration.")
 
