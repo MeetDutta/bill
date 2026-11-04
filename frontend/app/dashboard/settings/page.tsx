@@ -157,7 +157,7 @@ export default function SettingsPage() {
         ]);
 
         if (waRes.data) {
-          setHasSavedWhatsAppToken(Boolean(waRes.data.has_access_token));
+          setHasSavedWhatsAppToken(Boolean(waRes.data.has_access_token || waRes.data.access_token_configured));
           setWhatsappData({
             business_account_id: waRes.data.business_account_id || "",
             phone_number_id: waRes.data.phone_number_id || "",
@@ -406,7 +406,17 @@ export default function SettingsPage() {
     setTestingWhatsApp(true);
     setWhatsappTest(null);
     try {
-      const response = await whatsappApi.testConnection();
+      const testPayload: { phone_number_id?: string; access_token?: string; business_account_id?: string } = {};
+      if (whatsappData.phone_number_id.trim()) {
+        testPayload.phone_number_id = whatsappData.phone_number_id.trim();
+      }
+      if (whatsappData.access_token.trim()) {
+        testPayload.access_token = whatsappData.access_token.trim();
+      }
+      if (whatsappData.business_account_id.trim()) {
+        testPayload.business_account_id = whatsappData.business_account_id.trim();
+      }
+      const response = await whatsappApi.testConnection(testPayload);
       setWhatsappTest(response.data);
     } catch (err: any) {
       setWhatsappTest({
@@ -430,10 +440,22 @@ export default function SettingsPage() {
       if (!whatsappData.access_token.trim() && hasSavedWhatsAppToken) {
         delete updatePayload.access_token;
       }
-      await whatsappApi.updateConfig(updatePayload);
-      if (whatsappData.access_token.trim()) setHasSavedWhatsAppToken(true);
-      setWhatsappData((previous) => ({ ...previous, access_token: "" }));
-      setMessage("WhatsApp API configuration updated successfully!");
+      const res = await whatsappApi.updateConfig(updatePayload);
+      if (res?.data?.has_access_token || res?.data?.access_token_configured || whatsappData.access_token.trim()) {
+        setHasSavedWhatsAppToken(true);
+      }
+      if (res?.data) {
+        setWhatsappData((previous) => ({
+          ...previous,
+          business_account_id: res.data.business_account_id ?? previous.business_account_id,
+          phone_number_id: res.data.phone_number_id ?? previous.phone_number_id,
+          access_token: "",
+          is_active: res.data.is_active ?? previous.is_active,
+        }));
+      } else {
+        setWhatsappData((previous) => ({ ...previous, access_token: "" }));
+      }
+      setMessage("WhatsApp API credentials updated and persisted successfully!");
     } catch (err: any) {
       setError(parseApiError(err, "Failed to update WhatsApp configuration."));
     } finally {
@@ -1728,17 +1750,24 @@ export default function SettingsPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="font-medium">Permanent Access Token *</label>
+                <div className="flex items-center justify-between">
+                  <label className="font-medium">Permanent Access Token *</label>
+                  {hasSavedWhatsAppToken && (
+                    <span className="inline-flex items-center text-[10px] font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                      <CheckCircle className="w-3 h-3 mr-1 text-emerald-600" /> Token Saved &amp; Secured
+                    </span>
+                  )}
+                </div>
                 <Input
                   type="password"
-                  placeholder="EAAG..."
+                  placeholder={hasSavedWhatsAppToken ? "•••••••••••••••••••••••••••••••• (Saved in backend)" : "EAAG..."}
                   value={whatsappData.access_token}
                   onChange={(e) => setWhatsappData({ ...whatsappData, access_token: e.target.value })}
                   className="text-xs font-mono"
                 />
                 <p className="text-[11px] text-muted-foreground">
                   Meta System User Access Token with `whatsapp_business_messaging` permission.{" "}
-                  {hasSavedWhatsAppToken ? "A token is already saved; leave blank to keep it." : ""}
+                  {hasSavedWhatsAppToken ? "A token is securely saved in the database; leave blank to preserve it or type a new one to replace." : ""}
                 </p>
               </div>
 
@@ -1759,7 +1788,7 @@ export default function SettingsPage() {
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-destructive/15 text-destructive">
                           Failed
                         </span>
-                      ) : !whatsappData.phone_number_id && !hasSavedWhatsAppToken ? (
+                      ) : !whatsappData.phone_number_id.trim() && !hasSavedWhatsAppToken ? (
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-muted text-muted-foreground">
                           Not configured
                         </span>
@@ -1778,7 +1807,7 @@ export default function SettingsPage() {
                     variant="outline"
                     size="sm"
                     onClick={handleTestWhatsApp}
-                    disabled={testingWhatsApp || (!whatsappData.phone_number_id && !hasSavedWhatsAppToken)}
+                    disabled={testingWhatsApp || (!whatsappData.phone_number_id.trim() && !hasSavedWhatsAppToken)}
                     className="gap-1.5"
                   >
                     {testingWhatsApp ? <span className="animate-spin">◌</span> : <MessageSquare className="h-3.5 w-3.5" />}

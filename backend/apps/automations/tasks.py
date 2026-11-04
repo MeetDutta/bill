@@ -106,14 +106,15 @@ def execute_automation_action(execution_id):
         if automation.action == "send_whatsapp":
             message_content = automation.action_config.get("message", "")
             if message_content:
-                from apps.whatsapp.models import WhatsAppConfig, WhatsAppMessage
+                from apps.whatsapp.models import WhatsAppMessage
                 from apps.whatsapp.service import WhatsAppService
 
-                config = WhatsAppConfig.objects.get(organization=execution.organization, is_active=True)
-                service = WhatsAppService(
-                    phone_number_id=config.phone_number_id,
-                    access_token=config.access_token,
-                )
+                service = WhatsAppService.for_organization(execution.organization)
+                if not service:
+                    execution.status = "failed"
+                    execution.logs.append("WhatsApp not configured")
+                    execution.save(update_fields=["status", "logs"])
+                    return
                 phone = customer.phone.replace("+", "").replace(" ", "")
                 if not phone.startswith("91"):
                     phone = f"91{phone}"

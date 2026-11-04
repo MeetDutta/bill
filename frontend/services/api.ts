@@ -125,7 +125,16 @@ export const whatsappApi = {
       }
       throw err;
     }),
-  testConnection: () => api.post<{ connected: boolean; checked_at: string; message: string; phone_number?: string; verified_name?: string }>("/whatsapp/test-connection/"),
+  testConnection: (data?: { phone_number_id?: string; access_token?: string; business_account_id?: string }) =>
+    api.post<{
+      connected: boolean;
+      checked_at: string;
+      message: string;
+      phone_number?: string;
+      verified_name?: string;
+      category?: string;
+      reason?: string;
+    }>("/whatsapp/test-connection/", data || {}),
   getMessages: () => api.get("/whatsapp/messages/"),
   getTemplates: () => api.get("/whatsapp/templates/"),
 };

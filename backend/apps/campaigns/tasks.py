@@ -36,17 +36,11 @@ def process_campaign_task(campaign_id):
     campaign.total_recipients = total
     campaign.save(update_fields=["total_recipients"])
 
-    try:
-        config = WhatsAppConfig.objects.get(organization=campaign.organization, is_active=True)
-    except WhatsAppConfig.DoesNotExist:
+    service = WhatsAppService.for_organization(campaign.organization)
+    if not service:
         campaign.status = "cancelled"
         campaign.save(update_fields=["status"])
         return {"error": "WhatsApp not configured"}
-
-    service = WhatsAppService(
-        phone_number_id=config.phone_number_id,
-        access_token=config.access_token,
-    )
 
     sent = 0
     failed = 0
@@ -130,15 +124,9 @@ def send_campaign_message_task(message_id):
     if not phone.startswith("91"):
         phone = f"91{phone}"
 
-    try:
-        config = WhatsAppConfig.objects.get(organization=msg.campaign.organization, is_active=True)
-    except WhatsAppConfig.DoesNotExist:
+    service = WhatsAppService.for_organization(msg.campaign.organization)
+    if not service:
         return {"error": "WhatsApp not configured"}
-
-    service = WhatsAppService(
-        phone_number_id=config.phone_number_id,
-        access_token=config.access_token,
-    )
 
     try:
         result = service.send_text(
