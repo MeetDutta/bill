@@ -24,33 +24,19 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
         }
 
     def get_has_access_token(self, obj):
-        from django.conf import settings
-        return bool(obj.access_token or getattr(settings, "WHATSAPP_ACCESS_TOKEN", ""))
+        return bool(obj.access_token)
 
     def get_access_token_configured(self, obj):
         return self.get_has_access_token(obj)
 
     def get_configured(self, obj):
-        from django.conf import settings
-        phone_id = obj.phone_number_id or getattr(settings, "WHATSAPP_PHONE_NUMBER_ID", "")
-        token = obj.access_token or getattr(settings, "WHATSAPP_ACCESS_TOKEN", "")
-        return bool(phone_id and token)
+        return bool(obj.phone_number_id and obj.access_token)
 
     def get_masked_access_token(self, obj):
-        from django.conf import settings
-        token = obj.access_token or getattr(settings, "WHATSAPP_ACCESS_TOKEN", "")
+        token = obj.access_token
         if token:
             return "••••" + token[-4:] if len(token) >= 4 else "••••"
         return ""
-
-    def to_representation(self, instance):
-        ret = super().to_representation(instance)
-        from django.conf import settings
-        if not ret.get("phone_number_id"):
-            ret["phone_number_id"] = getattr(settings, "WHATSAPP_PHONE_NUMBER_ID", "")
-        if not ret.get("business_account_id"):
-            ret["business_account_id"] = getattr(settings, "WHATSAPP_BUSINESS_ACCOUNT_ID", "")
-        return ret
 
     def update(self, instance, validated_data):
         # Preserve existing access_token if empty string, whitespace, or not provided

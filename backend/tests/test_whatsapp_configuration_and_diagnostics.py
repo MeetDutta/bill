@@ -192,6 +192,32 @@ class WhatsAppConfigurationAndDiagnosticsTests(TestCase):
         self.assertIn("WhatsApp is not configured", response.data["message"])
 
     @override_settings(
+        WHATSAPP_PHONE_NUMBER_ID="GLOBAL_LEAK_PHONE_ID",
+        WHATSAPP_ACCESS_TOKEN="GLOBAL_LEAK_SECRET_TOKEN",
+        WHATSAPP_BUSINESS_ACCOUNT_ID="GLOBAL_LEAK_WABA_ID",
+    )
+    def test_new_organization_settings_do_not_leak_environment_credentials(self):
+        """Guarantee strict multi-tenant isolation: GET /whatsapp/config/ must never return global env vars to merchants."""
+        new_org = OrganizationFactory(name="Brand New Merchant")
+        new_user = UserFactory(organization=new_org)
+        client = APIClient()
+        client.force_authenticate(user=new_user)
+
+        response = client.get("/api/v1/whatsapp/config/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # All credential fields must be empty and unconfigured
+        self.assertEqual(response.data["phone_number_id"], "")
+        self.assertEqual(response.data["business_account_id"], "")
+        self.assertEqual(response.data["masked_access_token"], "")
+        self.assertFalse(response.data["has_access_token"])
+        self.assertFalse(response.data["access_token_configured"])
+        self.assertFalse(response.data["configured"])
+        # Global secrets must never be present in serialized response
+        self.assertNotIn("GLOBAL_LEAK_PHONE_ID", str(response.data))
+        self.assertNotIn("GLOBAL_LEAK_SECRET_TOKEN", str(response.data))
+        self.assertNotIn("GLOBAL_LEAK_WABA_ID", str(response.data))
+
+    @override_settings(
         WHATSAPP_PHONE_NUMBER_ID="ENV_PHONE_123",
         WHATSAPP_ACCESS_TOKEN="ENV_ACCESS_TOKEN_456",
         WHATSAPP_BUSINESS_ACCOUNT_ID="ENV_WABA_789",
