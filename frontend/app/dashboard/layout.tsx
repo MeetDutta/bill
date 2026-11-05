@@ -342,6 +342,24 @@ export default function DashboardLayout({
           </div>
         </div>
 
+        {/* Quick Launch Copilot from Mobile Menu */}
+        <div className="px-3 pt-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              closeMobile();
+              window.dispatchEvent(new CustomEvent("open-copilot"));
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 border border-indigo-200/70 dark:border-indigo-800/70 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:opacity-90 transition-all active:scale-[0.99]"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-indigo-600 animate-pulse" />
+              <span>Ask AI Copilot</span>
+            </div>
+            <span className="text-[9px] font-bold bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">AI</span>
+          </button>
+        </div>
+
         {/* Scrollable Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-4 text-xs select-none">
           {navSections.map((section) => {
@@ -547,19 +565,19 @@ export default function DashboardLayout({
             <span className="text-[10px] leading-tight mt-0.5">Stock</span>
           </Link>
 
-          {/* 4. Sales Reports */}
-          <Link
-            href="/dashboard/reports/sales"
-            className={cn(
-              "flex flex-col items-center justify-center h-full transition-colors",
-              pathname?.startsWith("/dashboard/reports")
-                ? "text-primary font-bold"
-                : "text-muted-foreground hover:text-foreground"
-            )}
+          {/* 4. AI Business Copilot */}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("open-copilot"))}
+            className="flex flex-col items-center justify-center h-full transition-colors text-muted-foreground hover:text-indigo-600 active:scale-95 group touch-target-min"
+            title="Ask AI Copilot"
+            aria-label="Ask AI Copilot"
           >
-            <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" />
-            <span className="text-[10px] leading-tight mt-0.5">Reports</span>
-          </Link>
+            <div className="p-1 rounded-full text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-50 dark:group-hover:bg-indigo-950/40 transition-colors">
+              <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 animate-pulse" />
+            </div>
+            <span className="text-[10px] leading-tight mt-0.5 font-semibold text-indigo-600 dark:text-indigo-400">Copilot</span>
+          </button>
 
           {/* 5. All Menu */}
           <button
