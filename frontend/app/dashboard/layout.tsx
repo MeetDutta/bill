@@ -137,9 +137,14 @@ export default function DashboardLayout({
 
   useEffect(() => {
     let active = true;
+    const fallbackTimer = setTimeout(() => {
+      if (active) setAuthChecking(false);
+    }, 4000);
+
     const authorizeWorkspace = async () => {
-      const token = localStorage.getItem("access_token");
+      const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
       if (!token) {
+        clearTimeout(fallbackTimer);
         router.replace("/login");
         return;
       }
@@ -148,20 +153,26 @@ export default function DashboardLayout({
         const role = response.data?.role;
         const adminRoles = ["super_admin", "org_admin", "owner", "store_manager", "manager"];
         if (!adminRoles.includes(role)) {
+          clearTimeout(fallbackTimer);
           router.replace("/staff/dashboard");
           return;
         }
       } catch {
+        clearTimeout(fallbackTimer);
         localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
         router.replace("/login");
         return;
       } finally {
+        clearTimeout(fallbackTimer);
         if (active) setAuthChecking(false);
       }
     };
     authorizeWorkspace();
-    return () => { active = false; };
+    return () => {
+      active = false;
+      clearTimeout(fallbackTimer);
+    };
   }, [router]);
 
   useEffect(() => {
