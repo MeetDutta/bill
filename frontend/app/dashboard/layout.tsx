@@ -481,6 +481,17 @@ export default function DashboardLayout({
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Desktop Ask Copilot Action Button */}
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent("open-copilot"))}
+              className="hidden lg:flex items-center gap-1.5 rounded-lg border border-indigo-200/80 dark:border-indigo-800/80 bg-gradient-to-r from-indigo-50/70 to-purple-50/70 dark:from-indigo-950/30 dark:to-purple-950/30 hover:from-indigo-100 hover:to-purple-100 text-indigo-700 dark:text-indigo-300 px-2.5 sm:px-3 py-1.5 text-xs font-semibold shadow-2xs transition-all min-h-[38px] active:scale-95"
+              title="Open AI Business Copilot"
+            >
+              <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 animate-pulse" />
+              <span>Ask Copilot</span>
+            </button>
+
             <Link
               href="/dashboard/notifications"
               className={cn(

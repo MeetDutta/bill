@@ -79,18 +79,6 @@ export function CopilotDrawer() {
 
   return (
     <>
-      {/* Floating Toggle Button (visible on desktop lg:flex, hidden on mobile so it doesn't obstruct view or bottom nav) */}
-      {!isPos && (
-        <button
-          onClick={() => setIsOpen(true)}
-          className="hidden lg:flex fixed bottom-6 right-6 z-40 items-center gap-2 rounded-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-4 py-3 text-sm font-semibold text-white shadow-xl hover:shadow-indigo-500/25 transition-all hover:scale-105 active:scale-95"
-          aria-label="Open AI Business Copilot"
-        >
-          <Sparkles className="h-5 w-5 animate-pulse" />
-          <span>Ask Copilot</span>
-        </button>
-      )}
-
       {/* Drawer Overlay */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-xs transition-opacity animate-in fade-in">
