@@ -242,6 +242,13 @@ export const posApi = {
   getPayables: (params?: unknown) => api.get("/pos/finance/payables/", { params }),
   recordSupplierPayment: (data: unknown) => api.post("/pos/finance/supplier-payments/", data),
   getSalesReport: (params?: unknown) => api.get("/pos/reports/sales/", { params }),
+  exportSalesReport: (params?: {
+    start_date?: string;
+    end_date?: string;
+    period?: string;
+    payment_method?: string;
+    store_id?: string;
+  }) => exportSalesReport(params),
   getPaymentsReport: (params?: unknown) => api.get("/pos/reports/payments/", { params }),
   getProductSalesReport: (params?: unknown) => api.get("/pos/reports/product-sales/", { params }),
   getTaxReport: (params?: unknown) => api.get("/pos/reports/tax/", { params }),
@@ -490,6 +497,29 @@ export const tallyExportApi = {
 
   getHistory: () => api.get<{ history: TallyExportHistoryItem[] }>("/pos/reports/sales/tally-history/"),
 };
+
+/**
+ * Excel Export for POS Sales Reports.
+ * Requests binary spreadsheet stream with responseType: 'blob'.
+ */
+export const exportSalesReport = async (params?: {
+  start_date?: string;
+  end_date?: string;
+  period?: string;
+  payment_method?: string;
+  store_id?: string;
+}): Promise<Blob> => {
+  const res = await api.get<Blob>("/reports/sales/export/", {
+    params,
+    responseType: "blob",
+  });
+  return res.data;
+};
+
+export const reportsApi = {
+  exportSalesReport,
+};
+
 
 
 

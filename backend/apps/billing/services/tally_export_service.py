@@ -315,10 +315,27 @@ class TallyExportService:
                 if item_rate > Decimal("0.00") and not item.hsn_code:
                     warnings.append(f"Invoice #{tx.invoice_number}: Item '{item.name}' ({item_rate}%) is missing HSN/SAC code.")
 
-            # Reconcile invoice subtotal & tax
-            gross_sales = round_cur(tx.subtotal) if tx.subtotal > Decimal("0.00") else (tx_taxable + round_cur(tx.discount))
-            tx_net_taxable = round_cur(gross_sales - round_cur(tx.discount))
+            # Reconcile invoice subtotal & tax across exclusive, inclusive, and split-tax models:
+            subtotal_val = round_cur(tx.subtotal) if tx.subtotal > Decimal("0.00") else (tx_taxable + round_cur(tx.discount))
+            calc_exclusive = subtotal_val - round_cur(tx.discount) + tx_cgst + tx_sgst + tx_igst + round_cur(tx.round_off)
+            calc_inclusive = subtotal_val - round_cur(tx.discount) + round_cur(tx.round_off)
 
+            diff_exclusive = abs(inv_total - calc_exclusive)
+            diff_inclusive = abs(inv_total - calc_inclusive)
+
+            if diff_exclusive <= Decimal("0.05"):
+                # Tax-exclusive model
+                gross_sales = subtotal_val
+            elif diff_inclusive <= Decimal("0.05"):
+                # Tax-inclusive model (MRP retail pricing): Sales ledger receives net taxable value
+                gross_sales = round_cur(subtotal_val - (tx_cgst + tx_sgst + tx_igst))
+            else:
+                gross_sales = subtotal_val
+                blocking_errors.append(
+                    f"Invoice #{tx.invoice_number} fails double-entry balance check: Total ₹{inv_total} vs Calculated ₹{calc_exclusive}."
+                )
+
+            tx_net_taxable = round_cur(gross_sales - round_cur(tx.discount))
             total_taxable_value += tx_net_taxable
             total_cgst += tx_cgst
             total_sgst += tx_sgst
@@ -339,16 +356,6 @@ class TallyExportService:
                     )
             else:
                 exempt_sales += inv_total
-
-            # Check voucher double-entry reconciliation:
-            # Debit: Party (tx.total) + Discount (tx.discount)
-            # Credit: Sales (gross_sales) + CGST + SGST + IGST + RoundOff
-            calc_credit = gross_sales + tx_cgst + tx_sgst + tx_igst - round_cur(tx.discount) + round_cur(tx.round_off)
-            diff = abs(inv_total - calc_credit)
-            if diff > Decimal("0.05"):
-                blocking_errors.append(
-                    f"Invoice #{tx.invoice_number} fails double-entry balance check: Total ₹{inv_total} vs Calculated ₹{calc_credit}."
-                )
 
             # Receipt count
             if tx.amount_paid > Decimal("0.00"):
@@ -511,7 +518,16 @@ class TallyExportService:
                 tx_sgst += round_cur(it.sgst_amount)
                 tx_igst += round_cur(it.igst_amount)
 
-            gross_sales = round_cur(tx.subtotal) if tx.subtotal > Decimal("0.00") else (tx_taxable + discount)
+            subtotal_val = round_cur(tx.subtotal) if tx.subtotal > Decimal("0.00") else (tx_taxable + discount)
+            calc_exclusive = subtotal_val - discount + tx_cgst + tx_sgst + tx_igst + round_off
+            calc_inclusive = subtotal_val - discount + round_off
+
+            if abs(inv_total - calc_exclusive) <= Decimal("0.05"):
+                gross_sales = subtotal_val
+            elif abs(inv_total - calc_inclusive) <= Decimal("0.05"):
+                gross_sales = round_cur(subtotal_val - (tx_cgst + tx_sgst + tx_igst))
+            else:
+                gross_sales = round_cur(inv_total + discount - (tx_cgst + tx_sgst + tx_igst + round_off))
 
             narration = f"POS Sale Invoice #{tx.invoice_number} | Mode: {(tx.payment_method or 'CASH').upper()}"
 

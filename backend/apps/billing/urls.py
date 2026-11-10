@@ -1,4 +1,5 @@
 from django.urls import path
+from apps.reports.views import SalesReportExportView
 from .views import (
     BusinessConfigView,
     BusinessTypesListView,
@@ -112,6 +113,7 @@ urlpatterns = [
 
     # Reports
     path("reports/sales/", POSSalesReportView.as_view(), name="pos-report-sales"),
+    path("reports/sales/export/", SalesReportExportView.as_view(), name="pos-report-sales-export"),
     path("reports/sales/tally-preview/", POSTallyPreviewView.as_view(), name="pos-report-tally-preview"),
     path("reports/sales/tally-export/", POSTallyExportView.as_view(), name="pos-report-tally-export"),
     path("reports/sales/tally-config/", POSTallyConfigView.as_view(), name="pos-report-tally-config"),

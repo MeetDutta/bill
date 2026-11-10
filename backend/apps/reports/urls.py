@@ -23,4 +23,8 @@ urlpatterns = [
     # Daily Business Closing
     path("daily-closing/", views.DailyClosingReportView.as_view(), name="report-daily-closing"),
     path("daily-closing/finalize/", views.DailyClosingFinalizeView.as_view(), name="report-daily-closing-finalize"),
+
+    # Sales Report Excel Export
+    path("sales/export/", views.SalesReportExportView.as_view(), name="sales-report-export"),
+    path("export-sales/", views.SalesReportExportView.as_view(), name="export-sales"),
 ]

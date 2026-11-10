@@ -470,3 +470,69 @@ class TestTallyGSTAccountingExport:
         assert any("double-entry balance check" in err for err in preview["validation"]["blocking_errors"])
         assert any("Customer GSTIN 'INVALID-GSTIN-123' is invalid" in warn for warn in preview["validation"]["warnings"])
 
+    def test_tax_inclusive_sales_voucher_double_entry_balance(self, tally_setup):
+        """
+        Tax-inclusive (MRP retail) sales vouchers correctly map taxable value to Sales ledger
+        and CGST/SGST to tax ledgers, achieving exact double-entry zero-sum balance.
+        """
+        import xml.etree.ElementTree as ET
+        org = tally_setup["org"]
+        store = tally_setup["store"]
+        admin = tally_setup["admin"]
+
+        # Tax-inclusive item: MRP 118.00 (Taxable 100.00 + CGST 9.00 + SGST 9.00)
+        tx = Transaction.objects.create(
+            organization=org,
+            store=store,
+            invoice_number="INV-INCLUSIVE-01",
+            transaction_date=timezone.now(),
+            subtotal=Decimal("118.00"),  # Inclusive subtotal
+            tax=Decimal("18.00"),
+            total=Decimal("118.00"),
+            amount_paid=Decimal("118.00"),
+            payment_status="paid",
+            payment_method="cash",
+        )
+        TransactionItem.objects.create(
+            transaction=tx,
+            name="Retail Inclusive Item",
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("118.00"),
+            tax=Decimal("18.00"),
+            tax_rate=Decimal("18.00"),
+            cgst_amount=Decimal("9.00"),
+            sgst_amount=Decimal("9.00"),
+            total=Decimal("118.00"),
+        )
+
+        preview = TallyExportService.validate_and_preview(organization=org, include_previously_exported=True)
+        assert preview["validation"]["can_export"] is True, f"Blocking errors: {preview['validation']['blocking_errors']}"
+
+        xml_str, filename, _ = TallyExportService.generate_tally_xml(
+            organization=org, user=admin, include_previously_exported=True
+        )
+        assert "Tally_GST_Sales_Export" in filename
+
+        # Validate voucher zero-sum balance
+        root = ET.fromstring(xml_str.encode("utf-8"))
+        vouchers = [v for v in root.findall(".//VOUCHER") if v.attrib.get("VCHTYPE") == "Sales"]
+        inclusive_vch = None
+        for v in vouchers:
+            if v.find("VOUCHERNUMBER") is not None and v.find("VOUCHERNUMBER").text == "INV-INCLUSIVE-01":
+                inclusive_vch = v
+                break
+
+        assert inclusive_vch is not None
+        ledger_entries = inclusive_vch.findall("ALLLEDGERENTRIES.LIST")
+        net_balance = Decimal("0.00")
+        sales_amt = Decimal("0.00")
+        for ent in ledger_entries:
+            amt = Decimal(ent.find("AMOUNT").text)
+            net_balance += amt
+            if ent.find("LEDGERNAME").text == "Sales Account":
+                sales_amt = amt
+
+        assert abs(net_balance) <= Decimal("0.01"), f"Voucher net balance must be zero, got {net_balance}"
+        assert sales_amt == Decimal("100.00"), f"Sales ledger should record net taxable 100.00, got {sales_amt}"
+
+

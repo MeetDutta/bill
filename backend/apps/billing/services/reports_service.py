@@ -21,6 +21,17 @@ class ReportsService:
         now = timezone.now()
         today = now.date()
 
+        if start_date and end_date:
+            try:
+                s_d = datetime.strptime(start_date, "%Y-%m-%d").date()
+                e_d = datetime.strptime(end_date, "%Y-%m-%d").date()
+                start_dt = timezone.make_aware(datetime.combine(s_d, time.min))
+                end_dt = timezone.make_aware(datetime.combine(e_d, time.max))
+                return start_dt, end_dt
+            except (ValueError, TypeError) as e:
+                import logging
+                logging.getLogger(__name__).warning("Invalid date format in reports query (%s, %s): %s. Falling back to period.", start_date, end_date, e)
+
         if period == "today":
             start_dt = timezone.make_aware(datetime.combine(today, time.min))
             end_dt = timezone.make_aware(datetime.combine(today, time.max))
@@ -36,17 +47,6 @@ class ReportsService:
             start_of_month = today.replace(day=1)
             start_dt = timezone.make_aware(datetime.combine(start_of_month, time.min))
             end_dt = timezone.make_aware(datetime.combine(today, time.max))
-        elif start_date and end_date:
-            try:
-                s_d = datetime.strptime(start_date, "%Y-%m-%d").date()
-                e_d = datetime.strptime(end_date, "%Y-%m-%d").date()
-                start_dt = timezone.make_aware(datetime.combine(s_d, time.min))
-                end_dt = timezone.make_aware(datetime.combine(e_d, time.max))
-            except (ValueError, TypeError) as e:
-                import logging
-                logging.getLogger(__name__).warning("Invalid date format in reports query (%s, %s): %s. Falling back to today.", start_date, end_date, e)
-                start_dt = timezone.make_aware(datetime.combine(today, time.min))
-                end_dt = timezone.make_aware(datetime.combine(today, time.max))
         else:
             start_dt = timezone.make_aware(datetime.combine(today, time.min))
             end_dt = timezone.make_aware(datetime.combine(today, time.max))

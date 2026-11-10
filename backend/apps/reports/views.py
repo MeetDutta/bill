@@ -6,11 +6,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.stores.models import Store
+from common.permissions import IsAdminOrManager
 from .services.health_service import SystemHealthService
 from .services.financial_reconciliation import FinancialReconciliationService
 from .services.inventory_reconciliation import InventoryReconciliationService
 from .services.backup_service import BackupService
 from .services.daily_closing import DailyBusinessClosingService
+from .services.sales_export_service import SalesExportService
 
 logger = logging.getLogger(__name__)
 
@@ -240,3 +242,43 @@ class DailyClosingFinalizeView(APIView):
             return Response(result, status=status.HTTP_200_OK)
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SalesReportExportView(APIView):
+    """
+    Exports organization sales transactions, KPI summaries, and GST breakdowns
+    to an Excel (.xlsx) workbook. Strictly tenant-isolated and restricted to Admin/Manager roles.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManager]
+
+    def get(self, request):
+        organization = request.user.organization
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        period = request.query_params.get("period")
+        payment_method = request.query_params.get("payment_method")
+        store_id = request.query_params.get("store_id")
+
+        try:
+            excel_bytes, filename = SalesExportService.generate_sales_excel(
+                organization=organization,
+                start_date=start_date,
+                end_date=end_date,
+                period=period,
+                payment_method=payment_method,
+                store_id=store_id,
+            )
+        except Exception as e:
+            logger.error("Failed to generate sales report Excel: %s", e, exc_info=True)
+            return Response(
+                {"error": "Failed to generate sales report spreadsheet."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        response = HttpResponse(
+            excel_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
