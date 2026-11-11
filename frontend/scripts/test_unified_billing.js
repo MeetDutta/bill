@@ -15,6 +15,7 @@ function testUnifiedBillingWorkspace() {
     "app/dashboard/invoices/page.tsx",
     "app/staff/pos/page.tsx",
     "app/staff/invoices/page.tsx",
+    "components/billing/EmbeddedPaymentPanel.tsx",
     "components/billing/UnifiedBillingWorkspace.tsx",
   ];
 
@@ -27,8 +28,9 @@ function testUnifiedBillingWorkspace() {
   // 2. Verify Admin Navigation in dashboard/layout.tsx
   const dashboardLayout = fs.readFileSync(path.join(frontendRoot, "app/dashboard/layout.tsx"), "utf8");
   assert(
-    dashboardLayout.includes('{ name: "Billing", href: "/dashboard/billing", icon: Receipt }'),
-    "Admin navigation does not contain consolidated 'Billing' entry with /dashboard/billing"
+    dashboardLayout.includes('{ name: "Sell", href: "/dashboard/billing", icon: Receipt }') ||
+      dashboardLayout.includes('{ name: "Billing", href: "/dashboard/billing", icon: Receipt }'),
+    "Admin navigation does not contain consolidated Sell/Billing entry with /dashboard/billing"
   );
   assert(
     !dashboardLayout.includes('{ name: "POS Terminal", href: "/dashboard/pos"'),
@@ -116,11 +118,17 @@ function testUnifiedBillingWorkspace() {
   assert(workspaceSrc.includes("calculateCart") && workspaceSrc.includes("handleHoldCart"), "Missing cart calculations and hold bill support");
   assert(workspaceSrc.includes("handleLoadQuotation"), "Missing quotation load support");
 
-  // Checkout, Payments & Idempotency
+  // Checkout, Payments & Idempotency (direct embedded workspace panel, no payment popup modal)
+  const paymentPanelSrc = fs.readFileSync(path.join(frontendRoot, "components/billing/EmbeddedPaymentPanel.tsx"), "utf8");
+  assert(workspaceSrc.includes("EmbeddedPaymentPanel"), "Missing direct EmbeddedPaymentPanel integration");
+  assert(!workspaceSrc.includes("paymentModalOpen") && !workspaceSrc.includes("openPaymentModal"), "Payment popup modal state/opener must be removed from normal billing");
   assert(workspaceSrc.includes("inFlightCheckoutRef"), "Missing synchronous double-submission lock");
   assert(workspaceSrc.includes("idempotency_key"), "Missing idempotency key in checkout payload");
   assert(workspaceSrc.includes("IsolatedReceiptModal"), "Missing post-sale IsolatedReceiptModal");
-  assert(workspaceSrc.includes("UPI") && workspaceSrc.includes("CREDIT") && workspaceSrc.includes("CASH"), "Missing multi-payment support");
+  assert(
+    paymentPanelSrc.includes("UPI") && paymentPanelSrc.includes("CREDIT") && paymentPanelSrc.includes("CASH") && paymentPanelSrc.includes("HYBRID"),
+    "Missing multi-payment / split support in EmbeddedPaymentPanel"
+  );
 
   // Invoice History Table & Actions
   assert(workspaceSrc.includes("fetchHistoryInvoices"), "Missing invoice history fetching");

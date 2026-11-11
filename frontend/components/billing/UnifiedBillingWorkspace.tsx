@@ -11,9 +11,6 @@ import {
   Minus,
   Pause,
   RotateCcw,
-  CreditCard,
-  QrCode,
-  Banknote,
   Receipt,
   User,
   Users,
@@ -38,9 +35,6 @@ import {
   FileCheck,
   Loader2,
   History,
-  Wallet,
-  Landmark,
-  Split,
 } from "lucide-react";
 import {
   posApi,
@@ -83,6 +77,11 @@ import {
   isEditableEventTarget,
 } from "@/lib/keyboardUtils";
 import { IsolatedReceiptModal } from "@/components/pos/IsolatedReceiptModal";
+import {
+  EmbeddedPaymentPanel,
+  PaymentMode,
+  OtherPaymentSubMethod,
+} from "@/components/billing/EmbeddedPaymentPanel";
 import {
   resolveWhatsAppPresentation,
   isWhatsAppDelivered,
@@ -232,11 +231,10 @@ export default function UnifiedBillingWorkspace({
   const [heldModalOpen, setHeldModalOpen] = useState(false);
 
   // ==========================================
-  // 8. PAYMENT & SETTLEMENT DIALOG
+  // 8. EMBEDDED PAYMENT & SETTLEMENT STATE
   // ==========================================
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
-  const [paymentMode, setPaymentMode] = useState<"CASH" | "UPI" | "CARD" | "CREDIT" | "OTHER" | "HYBRID">("CASH");
-  const [otherPaymentMethod, setOtherPaymentMethod] = useState<"NETBANKING" | "CHEQUE" | "WALLET">("NETBANKING");
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>(null);
+  const [otherPaymentMethod, setOtherPaymentMethod] = useState<OtherPaymentSubMethod>("NETBANKING");
   const [singlePaymentReference, setSinglePaymentReference] = useState("");
   const [hybridPayments, setHybridPayments] = useState<{ method: string; amount: number; reference?: string }[]>([
     { method: "CASH", amount: 0 },
@@ -244,13 +242,15 @@ export default function UnifiedBillingWorkspace({
     { method: "CARD", amount: 0 },
   ]);
   const [hybridDrafts, setHybridDrafts] = useState<Record<number, string>>({});
-  const [cashAmountDraft, setCashAmountDraft] = useState<string>("");
-  const [payingCashAmount, setPayingCashAmount] = useState<number>(0);
+  const [singleAmountDraft, setSingleAmountDraft] = useState<string>("");
+  const [singlePayingAmount, setSinglePayingAmount] = useState<number>(0);
+  const [singleAmountManuallyEdited, setSingleAmountManuallyEdited] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
-  const [mobileTab, setMobileTab] = useState<"catalog" | "cart">("catalog");
   const inFlightCheckoutRef = useRef(false);
   const checkoutIdempotencyKeyRef = useRef<string>("");
+  const paymentSectionRef = useRef<HTMLDivElement | null>(null);
+  const firstPaymentMethodRef = useRef<HTMLButtonElement | null>(null);
 
   // Post-Sale Modal
   const [completedSale, setCompletedSale] = useState<any | null>(null);
@@ -812,6 +812,22 @@ export default function UnifiedBillingWorkspace({
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const resetPaymentState = useCallback(() => {
+    setPaymentMode(null);
+    setOtherPaymentMethod("NETBANKING");
+    setSinglePaymentReference("");
+    setSingleAmountDraft("");
+    setSinglePayingAmount(0);
+    setSingleAmountManuallyEdited(false);
+    setHybridDrafts({});
+    setHybridPayments([
+      { method: "CASH", amount: 0 },
+      { method: "UPI", amount: 0 },
+      { method: "CARD", amount: 0 },
+    ]);
+    setCheckoutError("");
+  }, []);
+
   const clearCart = () => {
     checkoutIdempotencyKeyRef.current = "";
     setPriceDrafts({});
@@ -820,6 +836,7 @@ export default function UnifiedBillingWorkspace({
     setIsWalkIn(true);
     setSelectedCustomer(null);
     setLoadedQuoteBanner(null);
+    resetPaymentState();
   };
 
   const handleHoldCart = async () => {
@@ -874,7 +891,7 @@ export default function UnifiedBillingWorkspace({
     setHeldModalOpen(false);
   };
 
-  const openPaymentModalRef = useRef<() => void>(() => {});
+  const handleCheckoutRef = useRef<() => void>(() => {});
   const handleBarcodeScannedRef = useRef<
     (code: string, options?: { exactOnly?: boolean; clearSearchOnMatch?: boolean }) => Promise<void>
   >(async () => {});
@@ -888,10 +905,10 @@ export default function UnifiedBillingWorkspace({
     activeView,
     cartLength: cart.length,
     hasOpenModal:
-      paymentModalOpen ||
       customerModalOpen ||
       quickAddModalOpen ||
       heldModalOpen ||
+      quoteModalOpen ||
       Boolean(selectedInvoice) ||
       Boolean(completedSale),
   };
@@ -907,10 +924,10 @@ export default function UnifiedBillingWorkspace({
 
       if (key === "Escape") {
         barcodeBufferRef.current = "";
-        setPaymentModalOpen(false);
         setCustomerModalOpen(false);
         setQuickAddModalOpen(false);
         setHeldModalOpen(false);
+        setQuoteModalOpen(false);
         setSelectedInvoice(null);
         return;
       }
@@ -958,7 +975,7 @@ export default function UnifiedBillingWorkspace({
             document.activeElement.blur();
           }
           if (state.cartLength > 0) {
-            openPaymentModalRef.current();
+            handleCheckoutRef.current();
           }
           return;
         }
@@ -1123,17 +1140,47 @@ export default function UnifiedBillingWorkspace({
       ? Number(calcSummary.grand_total)
       : localCartSubtotal;
 
+  // Reset payment state automatically whenever cart becomes empty
+  useEffect(() => {
+    if (cart.length === 0) {
+      resetPaymentState();
+    }
+  }, [cart.length, resetPaymentState]);
+
+  // Keep single-mode payment amount synchronized to live grandTotal unless manually edited
+  useEffect(() => {
+    if (cart.length === 0) return;
+    if (paymentMode && paymentMode !== "HYBRID" && !singleAmountManuallyEdited) {
+      const synced = roundCurrency(grandTotalNum);
+      setSinglePayingAmount(synced);
+      setSingleAmountDraft(synced > 0 ? synced.toFixed(2) : "");
+    }
+  }, [cart.length, paymentMode, grandTotalNum, singleAmountManuallyEdited]);
+
+  const resolveActivePaymentLines = (
+    mode: PaymentMode,
+    effectiveTotal: number,
+    manualOverride = singleAmountManuallyEdited
+  ): { method: string; amount: number; reference?: string }[] => {
+    if (mode === null) return [];
+    if (mode === "HYBRID") {
+      return hybridPayments
+        .filter((p) => Number(p.amount) > 0)
+        .map((p) => ({
+          method: p.method,
+          amount: roundCurrency(Number(p.amount)),
+          reference: p.reference,
+        }));
+    }
+    const singleAmt = manualOverride ? roundCurrency(Number(singlePayingAmount) || 0) : roundCurrency(effectiveTotal);
+    const resolvedMethod = mode === "OTHER" ? otherPaymentMethod : mode;
+    return singleAmt > 0
+      ? [{ method: resolvedMethod, amount: singleAmt, reference: singlePaymentReference || undefined }]
+      : [];
+  };
+
   // Derived active payment allocations for validation & checkout payload
-  const activePaymentLines: { method: string; amount: number; reference?: string }[] =
-    paymentMode === "HYBRID"
-      ? hybridPayments
-          .filter((p) => Number(p.amount) > 0)
-          .map((p) => ({ method: p.method, amount: roundCurrency(Number(p.amount)), reference: p.reference }))
-      : paymentMode === "CASH"
-      ? [{ method: "CASH", amount: roundCurrency(Number(payingCashAmount) || 0), reference: singlePaymentReference || undefined }]
-      : paymentMode === "OTHER"
-      ? [{ method: otherPaymentMethod, amount: roundCurrency(grandTotalNum), reference: singlePaymentReference || undefined }]
-      : [{ method: paymentMode, amount: roundCurrency(grandTotalNum), reference: singlePaymentReference || undefined }];
+  const activePaymentLines = resolveActivePaymentLines(paymentMode, grandTotalNum, singleAmountManuallyEdited);
 
   const totalPaidSoFar = roundCurrency(
     activePaymentLines.reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
@@ -1143,64 +1190,119 @@ export default function UnifiedBillingWorkspace({
       .filter((p) => p.method === "CASH")
       .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
   );
-  const usesCredit = activePaymentLines.some((p) => p.method === "CREDIT" && p.amount > 0);
+  const creditRequestedTotal = roundCurrency(
+    activePaymentLines
+      .filter((p) => p.method === "CREDIT")
+      .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+  );
+  const usesCredit = creditRequestedTotal > 0;
   const remainingDue = Math.max(0, roundCurrency(grandTotalNum - totalPaidSoFar));
   const rawOverpayment = totalPaidSoFar > grandTotalNum ? roundCurrency(totalPaidSoFar - grandTotalNum) : 0;
   const isElectronicOverpay = rawOverpayment > 0.009 && cashPaidTotal < rawOverpayment - 0.009;
   const cashChange = rawOverpayment > 0 && !isElectronicOverpay ? rawOverpayment : 0;
 
-  const openPaymentModal = async () => {
-    if (cart.length === 0) return;
-    setCheckoutError("");
-    setSinglePaymentReference("");
-    setHybridDrafts({});
-    setPaymentMode("CASH");
-    checkoutIdempotencyKeyRef.current = `pos-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-    let payable = grandTotalNum;
-    if (!isCalcSynced) {
-      const synced = await calculateCartImmediate();
-      if (synced && synced.grand_total !== undefined) {
-        payable = Number(synced.grand_total);
-      } else {
-        payable = localCartSubtotal;
-      }
-    }
-
-    setPayingCashAmount(payable);
-    setCashAmountDraft(payable > 0 ? payable.toFixed(2) : "0");
-    setHybridPayments([
-      { method: "CASH", amount: payable },
-      { method: "UPI", amount: 0 },
-      { method: "CARD", amount: 0 },
-    ]);
-    setPaymentModalOpen(true);
+  const hasInvalidDraftPrecision = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return false;
+    return !/^\d*(\.\d{0,2})?$/.test(trimmed);
   };
-  openPaymentModalRef.current = openPaymentModal;
 
-  // Keep single-mode cash default synced if calc finishes right after opening
-  useEffect(() => {
-    if (paymentModalOpen && paymentMode === "CASH" && isCalcSynced && calcSummary?.grand_total !== undefined) {
-      const syncedPayable = Number(calcSummary.grand_total);
-      if (cashAmountDraft === "" || Math.abs((Number(cashAmountDraft) || 0) - payingCashAmount) < 0.01) {
-        setPayingCashAmount((prev) => (prev === grandTotalNum || prev === 0 ? syncedPayable : prev));
+  const validatePaymentState = (
+    mode: PaymentMode,
+    effectiveTotal: number,
+    lines: { method: string; amount: number; reference?: string }[]
+  ): string | null => {
+    if (cart.length === 0 || mode === null) return null;
+
+    if (mode !== "HYBRID" && singleAmountDraft.trim() !== "") {
+      const parsedDraft = Number(singleAmountDraft);
+      if (!Number.isFinite(parsedDraft) || parsedDraft < 0) {
+        return "Enter a valid payment amount.";
+      }
+      if (hasInvalidDraftPrecision(singleAmountDraft)) {
+        return "Payment amount supports at most 2 decimal places.";
       }
     }
-  }, [isCalcSynced, calcSummary, paymentModalOpen, paymentMode, cashAmountDraft, payingCashAmount, grandTotalNum]);
 
-  const selectPaymentMode = (mode: "CASH" | "UPI" | "CARD" | "CREDIT" | "OTHER" | "HYBRID") => {
+    if (mode === "HYBRID") {
+      for (const draft of Object.values(hybridDrafts)) {
+        if (draft.trim() !== "") {
+          const parsed = Number(draft);
+          if (!Number.isFinite(parsed) || parsed < 0) {
+            return "Enter valid non-negative amounts for split payments.";
+          }
+          if (hasInvalidDraftPrecision(draft)) {
+            return "Split payment amounts support at most 2 decimal places.";
+          }
+        }
+      }
+    }
+
+    const totalPaid = roundCurrency(lines.reduce((acc, p) => acc + (Number(p.amount) || 0), 0));
+    const cashPaid = roundCurrency(
+      lines.filter((p) => p.method === "CASH").reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+    );
+    const creditTotal = roundCurrency(
+      lines.filter((p) => p.method === "CREDIT").reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+    );
+
+    if (effectiveTotal > 0 && lines.length === 0) {
+      return "Enter a valid payment amount greater than ₹0.00.";
+    }
+
+    if (creditTotal > 0) {
+      if (!creditSalesEnabled) {
+        return "Credit / Udhaar sales are disabled in business settings.";
+      }
+      if (isWalkIn || !selectedCustomer) {
+        return "Walk-in customers cannot take Credit sales. Select a registered customer first.";
+      }
+      const creditLimit = Number(selectedCustomer.credit_limit || 0);
+      if (creditLimit > 0) {
+        const projectedOutstanding = roundCurrency(
+          Number(selectedCustomer.outstanding_credit || 0) + creditTotal
+        );
+        if (projectedOutstanding > creditLimit) {
+          return `Customer credit limit of ₹${creditLimit.toFixed(2)} exceeded (Current due: ₹${Number(
+            selectedCustomer.outstanding_credit || 0
+          ).toFixed(2)}).`;
+        }
+      }
+    }
+
+    const overpay = totalPaid > effectiveTotal ? roundCurrency(totalPaid - effectiveTotal) : 0;
+    if (overpay > 0.009 && cashPaid < overpay - 0.009) {
+      return `Overpayment of ₹${overpay.toFixed(2)} is only permitted in Cash. Electronic payments cannot exceed ₹${effectiveTotal.toFixed(2)}.`;
+    }
+
+    if (totalPaid < effectiveTotal - 0.009) {
+      const due = Math.max(0, roundCurrency(effectiveTotal - totalPaid));
+      return mode === "HYBRID"
+        ? `Split total (₹${totalPaid.toFixed(2)}) must equal ₹${effectiveTotal.toFixed(2)}. Remaining: ₹${due.toFixed(2)}.`
+        : `Paid amount (₹${totalPaid.toFixed(2)}) is less than bill total (₹${effectiveTotal.toFixed(2)}). Remaining: ₹${due.toFixed(2)}.`;
+    }
+
+    return null;
+  };
+
+  const paymentValidationMessage = validatePaymentState(paymentMode, grandTotalNum, activePaymentLines);
+
+  const selectPaymentMode = (mode: Exclude<PaymentMode, null>) => {
+    checkoutIdempotencyKeyRef.current = "";
     setCheckoutError("");
     setPaymentMode(mode);
-    if (mode === "CASH") {
-      setPayingCashAmount(grandTotalNum);
-      setCashAmountDraft(grandTotalNum.toFixed(2));
-    } else if (mode === "HYBRID") {
+    if (mode !== "HYBRID") {
+      setSingleAmountManuallyEdited(false);
+      const payable = roundCurrency(grandTotalNum);
+      setSinglePayingAmount(payable);
+      setSingleAmountDraft(payable > 0 ? payable.toFixed(2) : "");
+    } else {
       setHybridDrafts({});
       setHybridPayments((prev) => {
         const hasPositive = prev.some((p) => p.amount > 0);
         if (hasPositive) return prev;
         return [
-          { method: "CASH", amount: grandTotalNum },
+          { method: "CASH", amount: roundCurrency(grandTotalNum) },
           { method: "UPI", amount: 0 },
           { method: "CARD", amount: 0 },
         ];
@@ -1208,7 +1310,51 @@ export default function UnifiedBillingWorkspace({
     }
   };
 
+  const handleSingleAmountChange = (raw: string) => {
+    if (raw.trim().startsWith("-")) return;
+    checkoutIdempotencyKeyRef.current = "";
+    setSingleAmountManuallyEdited(true);
+    setSingleAmountDraft(raw);
+    const num = raw.trim() === "" ? 0 : Number(raw);
+    if (Number.isFinite(num) && num >= 0) {
+      setSinglePayingAmount(roundCurrency(num));
+    }
+    setCheckoutError("");
+  };
+
+  const handleSingleAmountBlur = () => {
+    if (singleAmountDraft.trim() === "") {
+      setSinglePayingAmount(0);
+      return;
+    }
+    const num = Number(singleAmountDraft);
+    if (Number.isFinite(num) && num >= 0) {
+      const rounded = roundCurrency(num);
+      setSinglePayingAmount(rounded);
+      setSingleAmountDraft(rounded.toFixed(2));
+    }
+  };
+
+  const setExactSingleAmount = () => {
+    checkoutIdempotencyKeyRef.current = "";
+    const rounded = roundCurrency(grandTotalNum);
+    setSingleAmountManuallyEdited(false);
+    setSinglePayingAmount(rounded);
+    setSingleAmountDraft(rounded > 0 ? rounded.toFixed(2) : "");
+    setCheckoutError("");
+  };
+
+  const setQuickCashTender = (tenderedAmount: number) => {
+    checkoutIdempotencyKeyRef.current = "";
+    const rounded = roundCurrency(tenderedAmount);
+    setSingleAmountManuallyEdited(true);
+    setSinglePayingAmount(rounded);
+    setSingleAmountDraft(rounded.toFixed(2));
+    setCheckoutError("");
+  };
+
   const updateHybridPaymentMethod = (index: number, newMethod: string) => {
+    checkoutIdempotencyKeyRef.current = "";
     setHybridPayments((prev) => {
       const updated = [...prev];
       updated[index] = { ...updated[index], method: newMethod };
@@ -1219,6 +1365,7 @@ export default function UnifiedBillingWorkspace({
 
   const updateHybridPaymentAmount = (index: number, raw: string) => {
     if (raw.trim().startsWith("-")) return;
+    checkoutIdempotencyKeyRef.current = "";
     setHybridDrafts((prev) => ({ ...prev, [index]: raw }));
     const parsed = raw.trim() === "" ? 0 : Number(raw);
     if (!Number.isFinite(parsed) || parsed < 0) return;
@@ -1231,7 +1378,16 @@ export default function UnifiedBillingWorkspace({
     setCheckoutError("");
   };
 
+  const blurHybridPaymentAmount = (index: number) => {
+    setHybridDrafts((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+  };
+
   const fillHybridRemaining = (index: number) => {
+    checkoutIdempotencyKeyRef.current = "";
     const currentLineAmt = Number(hybridPayments[index]?.amount) || 0;
     const otherPaid = totalPaidSoFar - currentLineAmt;
     const fillAmt = Math.max(0, roundCurrency(grandTotalNum - otherPaid));
@@ -1250,58 +1406,48 @@ export default function UnifiedBillingWorkspace({
   };
 
   const addHybridPaymentRow = (method = "NETBANKING") => {
+    checkoutIdempotencyKeyRef.current = "";
     setHybridPayments((prev) => [...prev, { method, amount: remainingDue > 0 ? remainingDue : 0 }]);
     setCheckoutError("");
   };
 
   const removeHybridPaymentRow = (index: number) => {
+    checkoutIdempotencyKeyRef.current = "";
     setHybridDrafts({});
     setHybridPayments((prev) => prev.filter((_, i) => i !== index));
     setCheckoutError("");
   };
 
-  const setQuickCashTender = (tenderedAmount: number) => {
-    const rounded = roundCurrency(tenderedAmount);
-    setPayingCashAmount(rounded);
-    setCashAmountDraft(rounded.toFixed(2));
-    setCheckoutError("");
-  };
-
   // Checkout Execution with Idempotency Protection
   const handleCheckout = async () => {
+    if (cart.length === 0) return;
     // Synchronous lock to prevent duplicate concurrent submissions
     if (inFlightCheckoutRef.current || checkoutLoading) return;
 
+    if (paymentMode === null) {
+      setCheckoutError("Please select a payment method to complete the sale.");
+      paymentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      firstPaymentMethodRef.current?.focus();
+      return;
+    }
+
+    let effectiveTotal = grandTotalNum;
     if (!isCalcSynced) {
-      await calculateCartImmediate();
+      const synced = await calculateCartImmediate();
+      if (synced && synced.grand_total !== undefined) {
+        effectiveTotal = Number(synced.grand_total);
+      }
     }
 
-    if (grandTotalNum > 0 && activePaymentLines.length === 0) {
-      setCheckoutError("Please enter a valid payment amount.");
-      return;
-    }
-
-    if (usesCredit && !creditSalesEnabled) {
-      setCheckoutError("Credit / Udhaar sales are disabled in business settings.");
-      return;
-    }
-
-    if (usesCredit && isWalkIn) {
-      setCheckoutError("Walk-in customers cannot take Credit sales. Please select or register a customer first.");
-      return;
-    }
-
-    if (isElectronicOverpay) {
-      setCheckoutError(
-        `Overpayment of ₹${rawOverpayment.toFixed(2)} is only permitted in Cash. Electronic payments cannot exceed ₹${grandTotalNum.toFixed(2)}.`
-      );
-      return;
-    }
-
-    if (totalPaidSoFar < grandTotalNum - 0.009) {
-      setCheckoutError(
-        `Paid amount (₹${totalPaidSoFar.toFixed(2)}) is less than bill total (₹${grandTotalNum.toFixed(2)}). Remaining due: ₹${remainingDue.toFixed(2)}.`
-      );
+    const effectiveLines = resolveActivePaymentLines(
+      paymentMode,
+      effectiveTotal,
+      singleAmountManuallyEdited
+    );
+    const validationErr = validatePaymentState(paymentMode, effectiveTotal, effectiveLines);
+    if (validationErr) {
+      setCheckoutError(validationErr);
+      paymentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       return;
     }
 
@@ -1315,8 +1461,8 @@ export default function UnifiedBillingWorkspace({
 
     try {
       const payloadPayments =
-        activePaymentLines.length > 0
-          ? activePaymentLines.map((p) => ({
+        effectiveLines.length > 0
+          ? effectiveLines.map((p) => ({
               payment_method: p.method.toLowerCase(),
               amount: p.amount,
               reference: p.reference,
@@ -1347,7 +1493,6 @@ export default function UnifiedBillingWorkspace({
       const res = await posApi.checkout(payload);
       checkoutIdempotencyKeyRef.current = "";
       setCompletedSale(res.data);
-      setPaymentModalOpen(false);
       clearCart();
       // Silently refresh history in background
       fetchHistoryInvoices(true);
@@ -1359,6 +1504,7 @@ export default function UnifiedBillingWorkspace({
       setCheckoutLoading(false);
     }
   };
+  handleCheckoutRef.current = handleCheckout;
 
   // ==========================================
   // 10. INVOICE HISTORY FETCHING & ACTIONS
@@ -1641,7 +1787,7 @@ export default function UnifiedBillingWorkspace({
   ).length;
 
   return (
-    <div className="flex flex-col gap-3 min-h-[calc(100vh-8.5rem)] lg:h-[calc(100vh-8rem)] pb-16 lg:pb-0">
+    <div className="flex flex-col gap-3 min-h-[calc(100vh-8.5rem)] md:h-[calc(100vh-8rem)] pb-20 md:pb-0">
       {/* ========================================================================= */}
       {/* UNIFIED WORKSPACE HEADER & VIEW SEGMENTED CONTROLS                         */}
       {/* ========================================================================= */}
@@ -1838,7 +1984,7 @@ export default function UnifiedBillingWorkspace({
                 <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F2</span> Search
                 <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F4</span> Customer
                 <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F6</span> Hold
-                <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F8</span> Pay
+                <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F8</span> Complete
               </div>
             </>
           )}
@@ -1849,45 +1995,26 @@ export default function UnifiedBillingWorkspace({
       {/* VIEW 1: NEW BILL (POS TERMINAL CATALOG, CART & CHECKOUT)                   */}
       {/* ========================================================================= */}
       {activeView === "new" && (
-        <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
-          {/* Mobile/Tablet Catalog vs Cart Tab Switcher */}
-          <div className="flex lg:hidden items-center rounded-lg border bg-muted/40 p-1">
-            <button
-              type="button"
-              onClick={() => setMobileTab("catalog")}
-              className={cn(
-                "flex-1 py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all min-h-[40px] touch-target-min",
-                mobileTab === "catalog"
-                  ? "bg-background text-foreground shadow-xs border font-bold"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <ShoppingBag className="h-4 w-4" />
-              <span>Catalog & Items</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMobileTab("cart")}
-              className={cn(
-                "flex-1 py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all relative min-h-[40px] touch-target-min",
-                mobileTab === "cart"
-                  ? "bg-background text-foreground shadow-xs border font-bold"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Receipt className="h-4 w-4 text-emerald-600" />
-              <span>Bill & Payment</span>
-              {cart.length > 0 && (
-                <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground leading-none">
-                  {cart.length}
-                </span>
-              )}
-              {cart.length > 0 && (
-                <span className="font-bold text-primary text-xs ml-1">
-                  ₹{grandTotalNum.toFixed(0)}
-                </span>
-              )}
-            </button>
+        <div className="flex-1 flex flex-col gap-3 min-h-0 md:overflow-hidden">
+          {/* Mobile Compact Quick-Jump Header (Catalog + Billing & Payment both stacked naturally below) */}
+          <div className="flex md:hidden items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <ShoppingBag className="h-4 w-4 text-primary shrink-0" />
+              <span className="font-semibold truncate">
+                {cart.length === 0
+                  ? "Select products below to start billing"
+                  : `${cart.reduce((s, i) => s + i.quantity, 0)} items • ₹${grandTotalNum.toFixed(2)}`}
+              </span>
+            </div>
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={() => paymentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground shadow-2xs"
+              >
+                Bill &amp; Pay ↓
+              </button>
+            )}
           </div>
 
           {/* Quotation Loaded Notification Banner */}
@@ -1933,15 +2060,10 @@ export default function UnifiedBillingWorkspace({
             </div>
           )}
 
-          {/* Main Work Area: Left Catalog & Right Cart */}
-          <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-12 min-h-0">
+          {/* Main Work Area: Left Catalog & Right Cart + Embedded Payment */}
+          <div className="grid flex-1 grid-cols-1 gap-3 md:overflow-hidden md:grid-cols-12 min-h-0">
             {/* Left Side: Product Search, Category Pills, Grid */}
-            <div
-              className={cn(
-                "flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-xs lg:col-span-7 xl:col-span-7 overflow-hidden min-h-0",
-                mobileTab === "cart" ? "hidden lg:flex" : "flex"
-              )}
-            >
+            <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-xs md:col-span-6 lg:col-span-7 overflow-hidden max-h-[430px] md:max-h-none min-h-0">
               {/* Search bar + Quick Add Product */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
@@ -2009,7 +2131,7 @@ export default function UnifiedBillingWorkspace({
                     </Button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {products.map((p) => {
                       const stockNum = Number(p.current_stock) || 0;
                       const isOutOfStock = p.track_inventory && stockNum <= 0;
@@ -2080,13 +2202,8 @@ export default function UnifiedBillingWorkspace({
               </div>
             </div>
 
-            {/* Right Side: Compact Billing List, Customer, Calculations, and Payment CTA */}
-            <div
-              className={cn(
-                "flex flex-col rounded-lg border bg-card p-3 shadow-xs lg:col-span-5 xl:col-span-5 overflow-hidden min-h-0",
-                mobileTab === "catalog" ? "hidden lg:flex" : "flex"
-              )}
-            >
+            {/* Right Side: Compact Billing List, Customer, Calculations, and Embedded Payment */}
+            <div className="flex flex-col rounded-lg border bg-card p-3 shadow-xs md:col-span-6 lg:col-span-5 md:overflow-hidden min-h-0">
               {/* Customer Selection Header */}
               <div className="flex items-center justify-between border-b pb-2.5 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
@@ -2113,14 +2230,21 @@ export default function UnifiedBillingWorkspace({
                 </Button>
               </div>
 
-              {/* Compact Billing List / Table (Desktop Table + Intelligent Mobile List) */}
-              <div className="flex-1 overflow-y-auto my-2 min-h-0 rounded-md border bg-background">
-                {cart.length === 0 ? (
-                  <div className="flex h-48 flex-col items-center justify-center gap-2 text-center text-muted-foreground px-4">
-                    <Receipt className="h-8 w-8 text-muted-foreground/40" />
-                    <p className="text-xs font-medium">Bill is empty</p>
-                    <p className="text-[11px]">Scan barcode or click items on the left to add.</p>
-                  </div>
+              {/* Scrollable Middle Checkout Body: Cart -> Summary -> Embedded Payment */}
+              <div className="flex-1 md:overflow-y-auto min-h-0 my-2 pr-0.5 space-y-2.5">
+                {/* Compact Billing List / Table (Desktop Table + Intelligent Mobile List) */}
+                <div
+                  className={cn(
+                    "overflow-y-auto rounded-md border bg-background",
+                    cart.length > 0 && "max-h-[260px] md:max-h-[210px] lg:max-h-[235px]"
+                  )}
+                >
+                  {cart.length === 0 ? (
+                    <div className="flex h-24 flex-col items-center justify-center gap-1 text-center text-muted-foreground px-4">
+                      <Receipt className="h-6 w-6 text-muted-foreground/40" />
+                      <p className="text-xs font-medium">Bill is empty</p>
+                      <p className="text-[11px]">Scan barcode or click items on the left to add.</p>
+                    </div>
                 ) : (
                   <>
                     {/* Desktop Compact Cashier Table */}
@@ -2356,82 +2480,170 @@ export default function UnifiedBillingWorkspace({
                 )}
               </div>
 
-              {/* Cart Calculation & Summary */}
-              <div className="border-t pt-2.5 space-y-1.5 text-xs shrink-0">
-                {/* Discount & Interstate Toggles */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground">Bill Discount:</span>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="0"
-                      value={overallDiscountValue || ""}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        setOverallDiscountValue(Number.isFinite(v) && v >= 0 ? v : 0);
-                      }}
-                      className="w-16 rounded border px-1.5 py-0.5 text-right text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setOverallDiscountType(overallDiscountType === "fixed" ? "percentage" : "fixed")
-                      }
-                      className="rounded bg-muted px-1.5 py-0.5 font-bold text-[10px]"
-                    >
-                      {overallDiscountType === "fixed" ? "₹" : "%"}
-                    </button>
-                  </div>
-
-                  <label className="flex items-center gap-1 cursor-pointer text-muted-foreground text-[11px]">
-                    <input
-                      type="checkbox"
-                      checked={isInterstate}
-                      onChange={(e) => setIsInterstate(e.target.checked)}
-                      className="rounded"
-                    />
-                    IGST (Interstate)
-                  </label>
-                </div>
-
-                {/* Calculations Breakdown */}
-                <div className="space-y-1 rounded bg-muted/40 p-2">
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Subtotal:</span>
-                    <span className="tabular-nums">₹{displayedSubtotal.toFixed(2)}</span>
-                  </div>
-                  {displayedDiscount > 0 && (
-                    <div className="flex justify-between text-emerald-600 font-medium">
-                      <span>Total Discount:</span>
-                      <span className="tabular-nums">-₹{displayedDiscount.toFixed(2)}</span>
+                {/* Bill Discount, Tax Summary & Embedded Payment */}
+                <div className="border-t pt-2.5 space-y-2.5 text-xs">
+                  {/* Discount & Interstate Toggles */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Bill Discount:</span>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={overallDiscountValue || ""}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          checkoutIdempotencyKeyRef.current = "";
+                          setOverallDiscountValue(Number.isFinite(v) && v >= 0 ? v : 0);
+                        }}
+                        className="w-16 rounded border px-1.5 py-0.5 text-right text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          checkoutIdempotencyKeyRef.current = "";
+                          setOverallDiscountType(overallDiscountType === "fixed" ? "percentage" : "fixed");
+                        }}
+                        className="rounded bg-muted px-1.5 py-0.5 font-bold text-[10px]"
+                      >
+                        {overallDiscountType === "fixed" ? "₹" : "%"}
+                      </button>
                     </div>
-                  )}
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Tax ({isInterstate ? "IGST" : "CGST + SGST"}):</span>
-                    <span className="tabular-nums">
-                      {calcLoading && !isCalcSynced ? "..." : `₹${displayedTax.toFixed(2)}`}
-                    </span>
+
+                    <label className="flex items-center gap-1 cursor-pointer text-muted-foreground text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={isInterstate}
+                        onChange={(e) => {
+                          checkoutIdempotencyKeyRef.current = "";
+                          setIsInterstate(e.target.checked);
+                        }}
+                        className="rounded"
+                      />
+                      IGST (Interstate)
+                    </label>
                   </div>
-                  {displayedRoundOff !== 0 && (
-                    <div className="flex justify-between text-muted-foreground text-[11px]">
-                      <span>Round Off:</span>
+
+                  {/* Calculations Breakdown */}
+                  <div className="space-y-1 rounded-md border bg-muted/40 p-2.5">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Subtotal:</span>
+                      <span className="tabular-nums">₹{displayedSubtotal.toFixed(2)}</span>
+                    </div>
+                    {displayedDiscount > 0 && (
+                      <div className="flex justify-between text-emerald-600 font-medium">
+                        <span>Total Discount:</span>
+                        <span className="tabular-nums">-₹{displayedDiscount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Tax ({isInterstate ? "IGST" : "CGST + SGST"}):</span>
                       <span className="tabular-nums">
-                        {displayedRoundOff > 0 ? "+" : ""}₹{displayedRoundOff.toFixed(2)}
+                        {calcLoading && !isCalcSynced ? "..." : `₹${displayedTax.toFixed(2)}`}
                       </span>
                     </div>
-                  )}
-                  <div className="flex justify-between border-t pt-1 text-sm font-black text-foreground">
-                    <span>Grand Total:</span>
-                    <span className="text-primary text-base tabular-nums">
-                      ₹{grandTotalNum.toFixed(2)}
-                    </span>
+                    {displayedRoundOff !== 0 && (
+                      <div className="flex justify-between text-muted-foreground text-[11px]">
+                        <span>Round Off:</span>
+                        <span className="tabular-nums">
+                          {displayedRoundOff > 0 ? "+" : ""}₹{displayedRoundOff.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t pt-1.5 text-sm font-black text-foreground">
+                      <span>Grand Total:</span>
+                      <span className="text-primary text-base tabular-nums">
+                        ₹{grandTotalNum.toFixed(2)}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                {/* Bottom Cart Action Buttons */}
-                <div className="grid grid-cols-3 gap-2 pt-1">
+                  {/* Direct Embedded Payment Section (replaces payment popup modal) */}
+                  <EmbeddedPaymentPanel
+                    cartLength={cart.length}
+                    grandTotal={grandTotalNum}
+                    isWalkIn={isWalkIn}
+                    selectedCustomer={selectedCustomer}
+                    creditSalesEnabled={creditSalesEnabled}
+                    paymentMode={paymentMode}
+                    otherPaymentMethod={otherPaymentMethod}
+                    singleAmountDraft={singleAmountDraft}
+                    singlePayingAmount={singlePayingAmount}
+                    singlePaymentReference={singlePaymentReference}
+                    hybridPayments={hybridPayments}
+                    hybridDrafts={hybridDrafts}
+                    upiId={upiId}
+                    upiUrl={upiUrl}
+                    upiQrAmount={upiQrAmount}
+                    totalPaidSoFar={totalPaidSoFar}
+                    remainingDue={remainingDue}
+                    cashChange={cashChange}
+                    isElectronicOverpay={isElectronicOverpay}
+                    usesCredit={usesCredit}
+                    validationMessage={paymentValidationMessage}
+                    checkoutError={checkoutError}
+                    containerRef={paymentSectionRef}
+                    firstMethodButtonRef={firstPaymentMethodRef}
+                    onSelectPaymentMode={selectPaymentMode}
+                    onChangeOtherMethod={(m) => {
+                      checkoutIdempotencyKeyRef.current = "";
+                      setOtherPaymentMethod(m);
+                      setCheckoutError("");
+                    }}
+                    onSingleAmountChange={handleSingleAmountChange}
+                    onSingleAmountBlur={handleSingleAmountBlur}
+                    onSetExactAmount={setExactSingleAmount}
+                    onSetQuickCash={setQuickCashTender}
+                    onChangeSingleReference={setSinglePaymentReference}
+                    onUpdateHybridMethod={updateHybridPaymentMethod}
+                    onUpdateHybridAmount={updateHybridPaymentAmount}
+                    onBlurHybridAmount={blurHybridPaymentAmount}
+                    onUpdateHybridReference={(idx, val) =>
+                      setHybridPayments((prev) =>
+                        prev.map((row, i) => (i === idx ? { ...row, reference: val } : row))
+                      )
+                    }
+                    onFillHybridRemaining={fillHybridRemaining}
+                    onAddHybridRow={() => addHybridPaymentRow("NETBANKING")}
+                    onRemoveHybridRow={removeHybridPaymentRow}
+                    onOpenCustomerModal={() => setCustomerModalOpen(true)}
+                  />
+                </div>
+              </div>
+
+              {/* Sticky Checkout Action Footer */}
+              <div className="border-t pt-2.5 space-y-2 shrink-0 bg-card">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleCheckout}
+                  disabled={
+                    cart.length === 0 ||
+                    checkoutLoading ||
+                    paymentMode === null ||
+                    Boolean(paymentValidationMessage)
+                  }
+                  className="w-full h-10 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+                >
+                  {checkoutLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  )}
+                  <span>
+                    {checkoutLoading
+                      ? "Completing Sale..."
+                      : cart.length === 0
+                        ? "Add Products to Complete Sale"
+                        : paymentMode === null
+                          ? "Select Payment Method to Complete Sale"
+                          : `Complete Sale (₹${grandTotalNum.toFixed(2)}) · F8`}
+                  </span>
+                </Button>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   <Button
+                    type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => {
@@ -2439,85 +2651,37 @@ export default function UnifiedBillingWorkspace({
                         clearCart();
                       }
                     }}
-                    disabled={cart.length === 0}
-                    className="text-xs h-9"
+                    disabled={cart.length === 0 || checkoutLoading}
+                    className="text-xs h-8"
                   >
                     Clear
                   </Button>
                   <Button
+                    type="button"
                     variant="secondary"
                     size="sm"
                     onClick={handleHoldCart}
-                    disabled={cart.length === 0}
-                    className="text-xs h-9 gap-1"
+                    disabled={cart.length === 0 || checkoutLoading}
+                    className="text-xs h-8 gap-1"
                   >
                     <Pause className="h-3 w-3" />
                     Hold (F6)
                   </Button>
                   <Button
-                    size="sm"
-                    onClick={openPaymentModal}
-                    disabled={cart.length === 0}
-                    className="text-xs h-9 font-bold bg-primary text-primary-foreground gap-1 hover:bg-primary/90 shadow-sm cursor-pointer"
-                  >
-                    <CreditCard className="h-3.5 w-3.5" />
-                    Payment (F8)
-                  </Button>
-                </div>
-
-                {cart.length > 0 && (
-                  <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => openQuoteModal(true)}
-                    className="w-full text-xs h-8 gap-1.5 border-dashed font-semibold text-foreground hover:bg-accent"
+                    disabled={cart.length === 0 || checkoutLoading}
+                    className="col-span-2 sm:col-span-1 text-xs h-8 gap-1 border-dashed font-semibold text-foreground hover:bg-accent"
                   >
                     <FileCheck className="h-3.5 w-3.5 text-blue-600" />
-                    <span>Save Cart as Quotation</span>
+                    <span>Save Quote</span>
                   </Button>
-                )}
+                </div>
               </div>
             </div>
           </div>
-
-          {/* Sticky Floating Mobile Bar */}
-          {mobileTab === "catalog" && cart.length > 0 && (
-            <div className="lg:hidden fixed bottom-[calc(3.75rem+env(safe-area-inset-bottom,0px))] left-2.5 right-2.5 sm:left-4 sm:right-4 z-30 flex items-center justify-between rounded-xl bg-slate-900/95 text-white p-2.5 sm:p-3 shadow-2xl border border-slate-700/80 backdrop-blur-md animate-in slide-in-from-bottom-2">
-              <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white font-bold text-xs shadow-sm shrink-0">
-                  {cart.reduce((s, i) => s + i.quantity, 0)}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs sm:text-sm font-bold text-emerald-400">₹{grandTotalNum.toFixed(2)}</span>
-                    <span className="text-[10px] text-slate-400 truncate">({cart.length} items)</span>
-                  </div>
-                  <p className="text-[10px] text-slate-300 truncate">
-                    {isWalkIn ? "Walk-in" : selectedCustomer?.full_name || "Customer Selected"}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setMobileTab("cart")}
-                  className="text-xs h-9 px-2.5 font-medium border-slate-600 bg-slate-800 text-white hover:bg-slate-700 active:bg-slate-600"
-                >
-                  Review Bill
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={openPaymentModal}
-                  className="text-xs h-9 px-3 font-bold bg-emerald-600 hover:bg-emerald-500 text-white gap-1 shadow-sm active:bg-emerald-700"
-                >
-                  <CreditCard className="h-3.5 w-3.5" />
-                  <span>Payment</span>
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -2928,473 +3092,6 @@ export default function UnifiedBillingWorkspace({
           </div>
         </div>
       )}
-
-      {/* ========================================================================= */}
-      {/* ========================================================================= */}
-      {/* MODAL 1: DIRECT PAYMENT OPTIONS DIALOG                                    */}
-      {/* ========================================================================= */}
-      <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
-        <DialogContent className="max-w-2xl w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
-          <DialogHeader className="border-b pb-3 shrink-0">
-            <DialogTitle className="flex items-center justify-between text-base sm:text-lg">
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-5 w-5 text-primary" />
-                <span>Payment</span>
-              </div>
-              <div className="text-right">
-                <span className="text-xs font-normal text-muted-foreground block">Payable Amount</span>
-                <span className="text-xl font-black text-primary tabular-nums">
-                  ₹{grandTotalNum.toFixed(2)}
-                </span>
-              </div>
-            </DialogTitle>
-            {/* Compact Bill Review Strip */}
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-              <span>
-                {cart.reduce((acc, c) => acc + c.quantity, 0)} items •{" "}
-                {isWalkIn ? "Walk-in Customer" : selectedCustomer?.full_name || "Customer"}
-              </span>
-              <div className="flex items-center gap-3 tabular-nums">
-                <span>Sub: ₹{displayedSubtotal.toFixed(2)}</span>
-                {displayedDiscount > 0 && (
-                  <span className="text-emerald-600 font-medium">Disc: -₹{displayedDiscount.toFixed(2)}</span>
-                )}
-                <span>Tax: ₹{displayedTax.toFixed(2)}</span>
-              </div>
-            </div>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto pr-1 py-2 space-y-4 min-h-0">
-            {/* Direct Payment Method Selector */}
-            <div>
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                Select Payment Option
-              </label>
-              <div
-                className={cn(
-                  "grid gap-2",
-                  creditSalesEnabled ? "grid-cols-3 sm:grid-cols-6" : "grid-cols-3 sm:grid-cols-5"
-                )}
-              >
-                {[
-                  { id: "CASH" as const, label: "Cash", icon: Banknote },
-                  { id: "UPI" as const, label: "UPI", icon: QrCode },
-                  { id: "CARD" as const, label: "Card", icon: CreditCard },
-                  ...(creditSalesEnabled
-                    ? [{ id: "CREDIT" as const, label: "Credit", icon: Receipt }]
-                    : []),
-                  { id: "OTHER" as const, label: "Other", icon: Landmark },
-                  { id: "HYBRID" as const, label: "Hybrid / Split", icon: Split },
-                ].map((m) => {
-                  const isSelected = paymentMode === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => selectPaymentMode(m.id)}
-                      className={cn(
-                        "flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs font-semibold transition-all gap-1 text-center cursor-pointer",
-                        isSelected
-                          ? "border-primary bg-primary/10 text-primary ring-1 ring-primary shadow-xs font-bold"
-                          : "border-border bg-card hover:bg-muted/60 text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      <m.icon className={cn("h-4 w-4", isSelected ? "text-primary" : "text-muted-foreground")} />
-                      <span className="leading-tight">{m.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* CASH PAYMENT DETAILS */}
-            {paymentMode === "CASH" && (
-              <div className="rounded-lg border bg-emerald-500/5 border-emerald-500/25 p-3 space-y-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                    Cash Tendered
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setQuickCashTender(grandTotalNum)}
-                      className="h-7 text-xs bg-emerald-100/60 hover:bg-emerald-200/70 border-emerald-300 text-emerald-900 font-bold"
-                    >
-                      Exact ₹{grandTotalNum.toFixed(2)}
-                    </Button>
-                    {[100, 200, 500, 1000, 2000]
-                      .filter((n) => n >= grandTotalNum)
-                      .slice(0, 4)
-                      .map((amt) => (
-                        <Button
-                          key={amt}
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setQuickCashTender(amt)}
-                          className="h-7 text-xs bg-white dark:bg-card border-border hover:bg-muted font-semibold"
-                        >
-                          ₹{amt}
-                        </Button>
-                      ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center">
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-muted-foreground font-bold text-xs">₹</span>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      aria-label="Cash tendered amount"
-                      value={cashAmountDraft !== "" ? cashAmountDraft : payingCashAmount}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        if (raw.trim().startsWith("-")) return;
-                        setCashAmountDraft(raw);
-                        const num = raw.trim() === "" ? 0 : Number(raw);
-                        if (Number.isFinite(num) && num >= 0) {
-                          setPayingCashAmount(roundCurrency(num));
-                        }
-                        setCheckoutError("");
-                      }}
-                      onBlur={() => {
-                        setCashAmountDraft(payingCashAmount.toFixed(2));
-                      }}
-                      className="h-9 pl-7 font-mono text-sm font-bold tabular-nums"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2 text-xs">
-                    <span className="text-muted-foreground font-medium">Cash Change Return:</span>
-                    <span className="font-bold text-sm tabular-nums text-amber-700 dark:text-amber-300">
-                      ₹{cashChange.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* UPI PAYMENT DETAILS */}
-            {paymentMode === "UPI" && (
-              <div className="rounded-lg border bg-card p-3 space-y-3 shadow-2xs">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-white p-1.5 rounded-lg border shadow-xs shrink-0">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(upiUrl)}`}
-                        alt="UPI Payment QR"
-                        className="h-20 w-20"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold block">Scan to Pay via UPI</span>
-                      <span className="text-[11px] font-mono text-muted-foreground block">{upiId}</span>
-                      <span className="text-xs font-bold text-emerald-600 block mt-0.5 tabular-nums">
-                        Amount: ₹{grandTotalNum.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                  <span className="inline-block rounded bg-muted px-2 py-1 text-[11px] font-mono text-muted-foreground">
-                    GPay • PhonePe • Paytm • BHIM
-                  </span>
-                </div>
-                <Input
-                  placeholder="Optional UPI UTR / Transaction Reference"
-                  value={singlePaymentReference}
-                  onChange={(e) => setSinglePaymentReference(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-            )}
-
-            {/* CARD PAYMENT DETAILS */}
-            {paymentMode === "CARD" && (
-              <div className="rounded-lg border bg-card p-3 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold">Card POS Settlement</span>
-                  <span className="font-bold text-primary tabular-nums">₹{grandTotalNum.toFixed(2)}</span>
-                </div>
-                <Input
-                  placeholder="Optional Card Approval / Last 4 Digits / Auth Code"
-                  value={singlePaymentReference}
-                  onChange={(e) => setSinglePaymentReference(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-            )}
-
-            {/* OTHER SUPPORTED METHODS (Netbanking / Cheque / Wallet) */}
-            {paymentMode === "OTHER" && (
-              <div className="rounded-lg border bg-card p-3 space-y-2.5 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold">Other Payment Method</span>
-                  <span className="font-bold text-primary tabular-nums">₹{grandTotalNum.toFixed(2)}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: "NETBANKING" as const, label: "Net Banking", icon: Landmark },
-                    { id: "CHEQUE" as const, label: "Cheque", icon: Receipt },
-                    { id: "WALLET" as const, label: "Wallet", icon: Wallet },
-                  ].map((om) => (
-                    <button
-                      key={om.id}
-                      type="button"
-                      onClick={() => setOtherPaymentMethod(om.id)}
-                      className={cn(
-                        "flex items-center justify-center gap-1.5 rounded-md border py-2 px-2 text-xs font-semibold transition-all",
-                        otherPaymentMethod === om.id
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border bg-background text-muted-foreground hover:bg-muted/60"
-                      )}
-                    >
-                      <om.icon className="h-3.5 w-3.5" />
-                      <span>{om.label}</span>
-                    </button>
-                  ))}
-                </div>
-                <Input
-                  placeholder="Reference / Cheque # / UTR / Wallet Txn ID"
-                  value={singlePaymentReference}
-                  onChange={(e) => setSinglePaymentReference(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-            )}
-
-            {/* HYBRID / SPLIT PAYMENT BREAKDOWN */}
-            {paymentMode === "HYBRID" && (
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-foreground">
-                    Hybrid / Split Payment
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => addHybridPaymentRow("NETBANKING")}
-                    className="text-xs text-primary font-semibold hover:underline flex items-center gap-1"
-                  >
-                    <Plus className="h-3 w-3" />
-                    Add Method
-                  </button>
-                </div>
-
-                <div className="divide-y rounded-md border bg-background">
-                  {hybridPayments.map((p, idx) => {
-                    const draft = hybridDrafts[idx];
-                    return (
-                      <div key={idx} className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2 text-xs">
-                        <select
-                          value={p.method}
-                          onChange={(e) => updateHybridPaymentMethod(idx, e.target.value)}
-                          aria-label={`Split payment method ${idx + 1}`}
-                          className="h-8 rounded border bg-background px-2 font-bold uppercase text-xs w-28 shrink-0"
-                        >
-                          <option value="CASH">Cash</option>
-                          <option value="UPI">UPI</option>
-                          <option value="CARD">Card</option>
-                          {creditSalesEnabled && <option value="CREDIT">Credit</option>}
-                          <option value="NETBANKING">Net Banking</option>
-                          <option value="CHEQUE">Cheque</option>
-                          <option value="WALLET">Wallet</option>
-                        </select>
-
-                        <div className="relative w-32 shrink-0">
-                          <span className="absolute left-2.5 top-2 text-muted-foreground font-bold">₹</span>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            aria-label={`Split amount for ${p.method}`}
-                            value={draft !== undefined ? draft : p.amount || ""}
-                            placeholder="0.00"
-                            onChange={(e) => updateHybridPaymentAmount(idx, e.target.value)}
-                            onBlur={() => {
-                              setHybridDrafts((prev) => {
-                                const next = { ...prev };
-                                delete next[idx];
-                                return next;
-                              });
-                            }}
-                            className="h-8 pl-6 text-right text-xs font-bold font-mono tabular-nums"
-                          />
-                        </div>
-
-                        {remainingDue > 0.009 && (
-                          <button
-                            type="button"
-                            onClick={() => fillHybridRemaining(idx)}
-                            className="rounded border border-primary/30 bg-primary/5 px-2 py-1 text-[10px] font-semibold text-primary hover:bg-primary/10 shrink-0"
-                          >
-                            Fill ₹{remainingDue.toFixed(2)}
-                          </button>
-                        )}
-
-                        <Input
-                          placeholder="Ref / UTR (optional)"
-                          value={p.reference || ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setHybridPayments((prev) => {
-                              const updated = [...prev];
-                              updated[idx] = { ...updated[idx], reference: val };
-                              return updated;
-                            });
-                          }}
-                          className="h-8 text-xs flex-1 min-w-[110px]"
-                        />
-
-                        {hybridPayments.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeHybridPaymentRow(idx)}
-                            className="text-destructive hover:text-destructive/80 p-1 rounded hover:bg-destructive/10 shrink-0"
-                            aria-label="Remove split row"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Live UPI QR inside Hybrid if UPI > 0 */}
-                {hybridPayments.some((p) => p.method === "UPI" && p.amount > 0) && (
-                  <div className="rounded-md border bg-background p-2.5 flex items-center gap-3">
-                    <div className="bg-white p-1 rounded border shrink-0">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(upiUrl)}`}
-                        alt="UPI Split QR"
-                        className="h-14 w-14"
-                      />
-                    </div>
-                    <div className="text-xs">
-                      <span className="font-bold block">UPI QR ({upiId})</span>
-                      <span className="text-[11px] font-bold text-emerald-600 tabular-nums">
-                        UPI Split: ₹{upiQrAmount.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Credit Customer Verification & Live Total / Remaining Summary */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
-              <div className="md:col-span-7 space-y-2">
-                {usesCredit && (
-                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-semibold flex items-center gap-1.5">
-                        <Receipt className="h-3.5 w-3.5 text-amber-600" />
-                        Customer Credit / Udhaar
-                      </p>
-                      {isWalkIn && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setCustomerModalOpen(true)}
-                          className="h-6 text-[11px] border-amber-600/40"
-                        >
-                          Select Customer
-                        </Button>
-                      )}
-                    </div>
-                    {isWalkIn ? (
-                      <p className="text-destructive font-medium mt-1">
-                        Walk-in customers cannot use Credit. Select or add a registered customer first.
-                      </p>
-                    ) : (
-                      <p className="mt-0.5 text-muted-foreground">
-                        Customer: <strong>{selectedCustomer?.full_name}</strong> • Ph: {selectedCustomer?.phone} • Outstanding: ₹{selectedCustomer?.outstanding_credit || 0}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {isElectronicOverpay && !checkoutError && (
-                  <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive flex items-center gap-1.5">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>Electronic payments cannot exceed the payable total of ₹{grandTotalNum.toFixed(2)}.</span>
-                  </div>
-                )}
-
-                {checkoutError && (
-                  <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive flex items-center gap-1.5 animate-in shake">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>{checkoutError}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="md:col-span-5 rounded-lg border bg-muted/30 p-2.5 space-y-1 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Bill Total:</span>
-                  <span className="font-bold tabular-nums">₹{grandTotalNum.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Paid / Allocated:</span>
-                  <span className="font-bold text-emerald-600 tabular-nums">₹{totalPaidSoFar.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between font-black border-t pt-1">
-                  <span>Remaining:</span>
-                  <span className={cn("tabular-nums", remainingDue > 0.009 ? "text-destructive" : "text-emerald-600")}>
-                    ₹{remainingDue.toFixed(2)}
-                  </span>
-                </div>
-                {cashChange > 0 && (
-                  <div className="flex justify-between font-bold text-amber-700 dark:text-amber-300 bg-amber-500/15 p-1.5 rounded mt-1">
-                    <span>Cash Change:</span>
-                    <span className="tabular-nums">₹{cashChange.toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="mt-auto pt-3 border-t flex flex-row items-center justify-between sm:justify-end gap-2 shrink-0 bg-background sticky bottom-0 z-20 safe-area-bottom">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setPaymentModalOpen(false)}
-              disabled={checkoutLoading}
-              className="h-11 sm:h-9 text-xs sm:text-sm touch-target-min"
-            >
-              Back to Bill
-            </Button>
-            <Button
-              type="button"
-              onClick={handleCheckout}
-              disabled={
-                checkoutLoading ||
-                (usesCredit && (isWalkIn || !creditSalesEnabled)) ||
-                isElectronicOverpay ||
-                totalPaidSoFar < grandTotalNum - 0.009 ||
-                (grandTotalNum > 0 && activePaymentLines.length === 0)
-              }
-              className="h-11 sm:h-9 font-bold bg-primary text-primary-foreground gap-1.5 min-w-[150px] text-xs sm:text-sm touch-target-min shadow-md"
-            >
-              {checkoutLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Processing...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>Complete Sale</span>
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* ========================================================================= */}
       {/* MODAL 2: POST-SALE ISOLATED RECEIPT & TAX INVOICE                          */}
