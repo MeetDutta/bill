@@ -47,6 +47,9 @@ class ReportsService:
             start_of_month = today.replace(day=1)
             start_dt = timezone.make_aware(datetime.combine(start_of_month, time.min))
             end_dt = timezone.make_aware(datetime.combine(today, time.max))
+        elif period == "all":
+            start_dt = timezone.make_aware(datetime(2000, 1, 1, 0, 0, 0))
+            end_dt = timezone.make_aware(datetime.combine(today, time.max))
         else:
             start_dt = timezone.make_aware(datetime.combine(today, time.min))
             end_dt = timezone.make_aware(datetime.combine(today, time.max))

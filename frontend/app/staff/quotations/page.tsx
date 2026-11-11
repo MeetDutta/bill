@@ -4,23 +4,21 @@ import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { formatCurrency } from "@/lib/utils";
 import { parseApiError } from "@/lib/api-error";
-import { staffApi, quotationApi, posApi, customerApi } from "@/services/api";
-import type { Quotation, QuotationItem, Customer, POSProduct } from "@/types";
+import { staffApi, quotationApi, authApi } from "@/services/api";
+import type { Quotation, WhatsAppDeliverySummary } from "@/types";
+import { QuotationCreateModal } from "@/components/quotations/QuotationCreateModal";
+import { WhatsAppDeliveryBadge } from "@/components/whatsapp/WhatsAppDeliveryBadge";
 import {
   Search,
   Plus,
-  FileCheck,
   CheckCircle2,
   AlertCircle,
   X,
   RefreshCw,
   Eye,
-  ArrowRight,
   CreditCard,
   Banknote,
   QrCode,
-  Trash2,
-  Calendar,
 } from "lucide-react";
 
 export default function StaffQuotationsPage() {
@@ -35,20 +33,11 @@ export default function StaffQuotationsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Create Modal
+  // Create Modal & RBAC
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [availableProducts, setAvailableProducts] = useState<POSProduct[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState("");
-  const [customCustomerName, setCustomCustomerName] = useState("");
-  const [customCustomerPhone, setCustomCustomerPhone] = useState("");
-  const [validUntil, setValidUntil] = useState("");
-  const [notes, setNotes] = useState("");
-  const [formError, setFormError] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [items, setItems] = useState<Array<QuotationItem & { original_price?: number }>>([
-    { name: "", quantity: 1, unit_price: 0, discount: 0, tax_rate: 18, total: 0 },
-  ]);
+  const [userRole, setUserRole] = useState<string>("");
+  const [listError, setListError] = useState<string | null>(null);
+  const canManageQuotations = userRole !== "inventory";
 
   // Convert Modal
   const [showConvertModal, setShowConvertModal] = useState(false);
@@ -60,13 +49,20 @@ export default function StaffQuotationsPage() {
   const [isSplit, setIsSplit] = useState(false);
   const [converting, setConverting] = useState(false);
   const [convertError, setConvertError] = useState<string | null>(null);
-  const [convertSuccess, setConvertSuccess] = useState<{ invoice_number: string; invoice_id: string } | null>(null);
+  const [convertSuccess, setConvertSuccess] = useState<{
+    invoice_number: string;
+    invoice_id: string;
+    bill_sent?: boolean;
+    whatsapp_delivery?: WhatsAppDeliverySummary | null;
+    customer_phone?: string;
+  } | null>(null);
 
   // Detail Modal
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
 
   const fetchQuotations = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true);
+    setListError(null);
     try {
       const res = await staffApi.getQuotations({
         search: searchTerm || undefined,
@@ -87,6 +83,7 @@ export default function StaffQuotationsPage() {
       }
     } catch (err) {
       console.error("Failed to load staff quotations:", err);
+      setListError(parseApiError(err, "Failed to load quotations. Please try refreshing."));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -97,134 +94,33 @@ export default function StaffQuotationsPage() {
     fetchQuotations();
   }, [fetchQuotations]);
 
-  const loadAuxiliaryData = async () => {
-    try {
-      const [custRes, prodRes] = await Promise.all([
-        customerApi.list(),
-        posApi.searchProducts({ page_size: 100 }),
-      ]);
-      if (Array.isArray(custRes.data)) setCustomers(custRes.data);
-      else if (custRes.data?.results) setCustomers(custRes.data.results);
-
-      if (Array.isArray(prodRes.data)) setAvailableProducts(prodRes.data);
-      else if (prodRes.data?.results) setAvailableProducts(prodRes.data.results);
-    } catch (err) {
-      console.error("Failed to load customer/product options:", err);
-    }
-  };
+  useEffect(() => {
+    let active = true;
+    const initRoleAndDeepLink = async () => {
+      let resolvedRole = "";
+      try {
+        const res = await authApi.getProfile();
+        resolvedRole = res.data?.role || "";
+        if (active) setUserRole(resolvedRole);
+      } catch {
+        // Handled by staff layout session guard
+      }
+      if (typeof window !== "undefined" && resolvedRole !== "inventory") {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("action") === "new" || params.get("create") === "1") {
+          setShowCreateModal(true);
+        }
+      }
+    };
+    initRoleAndDeepLink();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleOpenCreate = () => {
-    loadAuxiliaryData();
-    const d = new Date();
-    d.setDate(d.getDate() + 15);
-    setValidUntil(d.toISOString().split("T")[0]);
-    setItems([{ name: "", quantity: 1, unit_price: 0, discount: 0, tax_rate: 18, total: 0 }]);
-    setSelectedCustomerId("");
-    setCustomCustomerName("");
-    setCustomCustomerPhone("");
-    setNotes("");
-    setFormError("");
+    if (!canManageQuotations) return;
     setShowCreateModal(true);
-  };
-
-  const updateItem = (index: number, field: keyof QuotationItem, value: any) => {
-    const updated = [...items];
-    const item = { ...updated[index], [field]: value };
-    const qty = parseFloat(String(item.quantity)) || 0;
-    const price = parseFloat(String(item.unit_price)) || 0;
-    const disc = parseFloat(String(item.discount)) || 0;
-    const rate = parseFloat(String(item.tax_rate)) || 0;
-
-    const sub = Math.max(0, qty * price - disc);
-    const tax = sub * (rate / 100);
-    item.total = Math.round((sub + tax) * 100) / 100;
-    item.tax = Math.round(tax * 100) / 100;
-
-    updated[index] = item;
-    setItems(updated);
-  };
-
-  const handleSelectProduct = (index: number, productId: string) => {
-    const prod = availableProducts.find((p) => p.id === productId);
-    if (!prod) return;
-    const authoritativePrice = Number(prod.selling_price ?? (prod as any).unit_price) || 0;
-    const updated = [...items];
-    const qty = updated[index].quantity || 1;
-    const disc = updated[index].discount || 0;
-    const rate = Number(prod.tax_rate ?? 18);
-
-    const sub = Math.max(0, Number(qty) * authoritativePrice - Number(disc));
-    const tax = sub * (rate / 100);
-
-    updated[index] = {
-      product_id: prod.id,
-      name: prod.name,
-      unit_price: authoritativePrice,
-      original_price: authoritativePrice,
-      quantity: qty,
-      discount: disc,
-      tax_rate: rate,
-      tax: Math.round(tax * 100) / 100,
-      total: Math.round((sub + tax) * 100) / 100,
-      hsn_code: prod.hsn_code || "",
-      unit: prod.unit || "pcs",
-    };
-    setItems(updated);
-  };
-
-  const addItemRow = () => {
-    setItems([...items, { name: "", quantity: 1, unit_price: 0, discount: 0, tax_rate: 18, total: 0 }]);
-  };
-
-  const removeItemRow = (index: number) => {
-    if (items.length <= 1) return;
-    setItems(items.filter((_, i) => i !== index));
-  };
-
-  const calcSubtotal = items.reduce(
-    (sum, it) => sum + (parseFloat(String(it.quantity)) || 0) * (parseFloat(String(it.unit_price)) || 0),
-    0
-  );
-  const calcDiscount = items.reduce((sum, it) => sum + (parseFloat(String(it.discount)) || 0), 0);
-  const calcTax = items.reduce((sum, it) => sum + (parseFloat(String(it.tax)) || 0), 0);
-  const calcGrandTotal = items.reduce((sum, it) => sum + (parseFloat(String(it.total)) || 0), 0);
-
-  const handleCreateQuotation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError("");
-
-    const validItems = items.filter((it) => it.name && (Number(it.quantity) || 0) > 0);
-    if (validItems.length === 0) {
-      setFormError("Add at least one item with a valid name and quantity.");
-      return;
-    }
-
-    setCreating(true);
-    try {
-      await quotationApi.create({
-        customer_id: selectedCustomerId || undefined,
-        customer_name: customCustomerName || undefined,
-        customer_phone: customCustomerPhone || undefined,
-        valid_until: validUntil || undefined,
-        notes: notes || undefined,
-        items: validItems.map((it) => ({
-          product_id: it.product_id || undefined,
-          name: it.name,
-          quantity: it.quantity,
-          unit_price: it.unit_price,
-          discount: it.discount,
-          tax_rate: it.tax_rate,
-          hsn_code: it.hsn_code,
-          unit: it.unit,
-        })),
-      });
-      setShowCreateModal(false);
-      fetchQuotations(false);
-    } catch (err: any) {
-      setFormError(err.response?.data?.detail || err.response?.data?.error || "Failed to create quotation.");
-    } finally {
-      setCreating(false);
-    }
   };
 
   const handleOpenConvert = (q: Quotation) => {
@@ -255,6 +151,11 @@ export default function StaffQuotationsPage() {
       setConvertSuccess({
         invoice_id: res.data.invoice_id,
         invoice_number: res.data.invoice_number,
+        bill_sent: res.data.bill_sent,
+        whatsapp_delivery: res.data.whatsapp_delivery,
+        customer_phone:
+          (typeof quotationToConvert.customer === "object" ? quotationToConvert.customer?.phone : null) ||
+          quotationToConvert.customer_phone,
       });
       fetchQuotations(true);
     } catch (err: unknown) {
@@ -284,15 +185,36 @@ export default function StaffQuotationsPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
             <span>Refresh</span>
           </button>
-          <button
-            onClick={handleOpenCreate}
-            className="flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-lg bg-foreground text-background hover:bg-foreground/90 shadow-sm transition-transform active:scale-95"
-          >
-            <Plus className="h-4 w-4" />
-            <span>New Quotation</span>
-          </button>
+          {canManageQuotations && (
+            <button
+              onClick={handleOpenCreate}
+              className="flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-lg bg-foreground text-background hover:bg-foreground/90 shadow-sm transition-transform active:scale-95"
+            >
+              <Plus className="h-4 w-4" />
+              <span>New Quotation</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {!canManageQuotations && (
+        <div className="flex items-start gap-2.5 p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold">Quotation Access Restricted</p>
+            <p className="mt-0.5">
+              Warehouse inventory accounts do not have permission to create or manage sales quotations.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {listError && (
+        <div className="flex items-start gap-2.5 p-3.5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400 text-xs">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>{listError}</span>
+        </div>
+      )}
 
       {/* FILTER BAR */}
       <div className="p-4 rounded-xl border border-border bg-card shadow-xs space-y-3">
@@ -378,8 +300,18 @@ export default function StaffQuotationsPage() {
                 </tr>
               ) : quotations.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-muted-foreground">
-                    No quotations found. Click &quot;New Quotation&quot; to draft one.
+                  <td colSpan={7} className="py-12 text-center text-muted-foreground space-y-3">
+                    <p>No quotations found.</p>
+                    {canManageQuotations && !searchTerm && !statusFilter && !startDate && !endDate && (
+                      <button
+                        type="button"
+                        onClick={handleOpenCreate}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-lg bg-foreground text-background hover:bg-foreground/90 shadow-sm"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>New Quotation</span>
+                      </button>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -431,7 +363,7 @@ export default function StaffQuotationsPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </button>
-                          {!isConverted && q.status !== "rejected" && q.status !== "expired" && (
+                          {canManageQuotations && !isConverted && q.status !== "rejected" && q.status !== "expired" && (
                             <button
                               onClick={() => handleOpenConvert(q)}
                               className="px-2.5 py-1 rounded-md bg-emerald-600 text-white font-bold text-[11px] hover:bg-emerald-700 shadow-xs"
@@ -451,223 +383,12 @@ export default function StaffQuotationsPage() {
         </div>
       </div>
 
-      {/* CREATE QUOTATION MODAL */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="relative w-full max-w-3xl rounded-2xl border bg-card p-6 shadow-2xl text-foreground space-y-4 my-8">
-            <div className="flex items-start justify-between border-b pb-3">
-              <div>
-                <h3 className="text-base font-bold text-foreground">Create Price Quotation</h3>
-                <p className="text-xs text-muted-foreground">
-                  Draft a customer estimate. Stock is not reserved until converted.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-xs">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreateQuotation} className="space-y-4 text-xs">
-              {/* Customer & Valid Date */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-semibold mb-1">Customer</label>
-                  <select
-                    value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border bg-background"
-                  >
-                    <option value="">Walk-in / Custom Name</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.full_name} ({c.phone || "No phone"})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {!selectedCustomerId && (
-                  <div>
-                    <label className="block font-semibold mb-1">Customer Name</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Ramesh Kumar"
-                      value={customCustomerName}
-                      onChange={(e) => setCustomCustomerName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border bg-background"
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block font-semibold mb-1">Valid Until Date</label>
-                  <input
-                    type="date"
-                    value={validUntil}
-                    onChange={(e) => setValidUntil(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border bg-background"
-                  />
-                </div>
-              </div>
-
-              {/* Items Section */}
-              <div className="space-y-2 border-t pt-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-foreground">Quotation Items</h4>
-                  <button
-                    type="button"
-                    onClick={addItemRow}
-                    className="text-[11px] font-bold text-foreground px-2 py-1 rounded border hover:bg-accent flex items-center gap-1"
-                  >
-                    <Plus className="h-3 w-3" />
-                    <span>Add Item</span>
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  {items.map((it, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 rounded-lg border bg-muted/20 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-2"
-                    >
-                      {/* Product Selector */}
-                      <div className="flex-1">
-                        <select
-                          value={it.product_id || ""}
-                          onChange={(e) => handleSelectProduct(idx, e.target.value)}
-                          className="w-full px-2.5 py-1.5 rounded border bg-background text-xs"
-                        >
-                          <option value="">Custom Item / Select Product...</option>
-                          {availableProducts.map((p) => {
-                            const pPrice = Number(p.selling_price ?? (p as any).unit_price) || 0;
-                            return (
-                              <option key={p.id} value={p.id}>
-                                {p.name} {p.sku ? `(${p.sku})` : ""} - ₹{pPrice} | Stock: {p.current_stock || 0}
-                              </option>
-                            );
-                          })}
-                        </select>
-                        {!it.product_id && (
-                          <input
-                            type="text"
-                            placeholder="Enter item description..."
-                            value={it.name}
-                            onChange={(e) => updateItem(idx, "name", e.target.value)}
-                            className="w-full px-2.5 py-1 rounded border bg-background text-xs mt-1"
-                          />
-                        )}
-                      </div>
-
-                      {/* Quantity */}
-                      <div className="w-20">
-                        <span className="text-[10px] text-muted-foreground sm:hidden">Qty: </span>
-                        <input
-                          type="number"
-                          min="1"
-                          step="any"
-                          value={it.quantity}
-                          onChange={(e) => updateItem(idx, "quantity", e.target.value)}
-                          className="w-full px-2 py-1.5 rounded border bg-background text-center text-xs"
-                          placeholder="Qty"
-                        />
-                      </div>
-
-                      {/* Selling Price / Rate */}
-                      <div className="w-28">
-                        <span className="text-[10px] text-muted-foreground sm:hidden">Rate: </span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={it.unit_price}
-                          onChange={(e) => updateItem(idx, "unit_price", e.target.value)}
-                          className="w-full px-2 py-1.5 rounded border bg-background text-right text-xs"
-                          placeholder="Unit Price"
-                        />
-                        {it.original_price !== undefined && it.original_price !== Number(it.unit_price) && (
-                          <div className="text-[9px] text-muted-foreground text-right mt-0.5">
-                            Orig: ₹{it.original_price}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Tax % */}
-                      <div className="w-20">
-                        <span className="text-[10px] text-muted-foreground sm:hidden">Tax %: </span>
-                        <input
-                          type="number"
-                          step="1"
-                          value={it.tax_rate}
-                          onChange={(e) => updateItem(idx, "tax_rate", e.target.value)}
-                          className="w-full px-2 py-1.5 rounded border bg-background text-center text-xs"
-                          placeholder="Tax %"
-                        />
-                      </div>
-
-                      {/* Line Total */}
-                      <div className="w-28 text-right font-mono font-bold text-foreground">
-                        ₹{Number(it.total || 0).toFixed(2)}
-                      </div>
-
-                      {/* Remove */}
-                      <div>
-                        <button
-                          type="button"
-                          onClick={() => removeItemRow(idx)}
-                          className="p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Totals Summary */}
-              <div className="border-t pt-3 flex flex-col items-end space-y-1">
-                <div className="flex justify-between w-64 text-muted-foreground">
-                  <span>Subtotal:</span>
-                  <span className="font-mono">₹{calcSubtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between w-64 text-muted-foreground">
-                  <span>Taxes (GST):</span>
-                  <span className="font-mono">₹{calcTax.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between w-64 font-black text-sm text-foreground pt-1 border-t">
-                  <span>Grand Total:</span>
-                  <span className="font-mono">₹{calcGrandTotal.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="border-t pt-4 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 rounded-lg border font-semibold hover:bg-accent"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="px-5 py-2 rounded-lg bg-foreground text-background font-bold hover:bg-foreground/90 disabled:opacity-50"
-                >
-                  {creating ? "Creating Quote..." : "Save Quotation"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <QuotationCreateModal
+        open={showCreateModal && canManageQuotations}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={() => fetchQuotations(false)}
+        title="New Staff Quotation"
+      />
 
       {/* CONVERT TO INVOICE & PAY MODAL */}
       {showConvertModal && quotationToConvert && (
@@ -701,6 +422,14 @@ export default function StaffQuotationsPage() {
                     Invoice <span className="font-mono font-bold text-foreground">#{convertSuccess.invoice_number}</span> has been issued and inventory deducted.
                   </p>
                 </div>
+                {convertSuccess.invoice_id && (
+                  <WhatsAppDeliveryBadge
+                    invoiceId={convertSuccess.invoice_id}
+                    initialDelivery={convertSuccess.whatsapp_delivery}
+                    initialBillSent={convertSuccess.bill_sent}
+                    customerPhone={convertSuccess.customer_phone}
+                  />
+                )}
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <Link
                     href={`/staff/billing?view=history`}

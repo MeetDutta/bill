@@ -64,6 +64,7 @@ const navSections: NavSection[] = [
     items: [
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { name: "Sell", href: "/dashboard/billing", icon: Receipt },
+      { name: "Quotations", href: "/dashboard/quotations", icon: FileCheck },
       { name: "Inventory", href: "/dashboard/inventory", icon: Boxes },
       { name: "Customers", href: "/dashboard/customers", icon: Users },
     ],
@@ -84,7 +85,6 @@ const navSections: NavSection[] = [
     title: "MORE",
     key: "more",
     items: [
-      { name: "Quotations", href: "/dashboard/quotations", icon: FileCheck },
       { name: "Returns", href: "/dashboard/returns", icon: RotateCcw },
       { name: "Purchase Orders", href: "/dashboard/purchases", icon: ClipboardList },
       { name: "Suppliers", href: "/dashboard/suppliers", icon: Truck },

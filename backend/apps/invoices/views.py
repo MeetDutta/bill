@@ -10,7 +10,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError, PermissionDenied
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.dateparse import parse_date
 from common.pagination import StandardPagination
+from common.permissions import IsCashierOrAbove
 from apps.billing.models import BusinessConfig
 from apps.billing.services.cart_engine import round_decimal
 from apps.billing.services.tax_engine import TaxEngine
@@ -95,6 +98,23 @@ class InvoiceListView(generics.ListAPIView):
 
         return qs
 
+    def list(self, request, *args, **kwargs):
+        from apps.whatsapp.service import get_invoices_whatsapp_status_map
+
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            whatsapp_map = get_invoices_whatsapp_status_map(page)
+            ctx = {**self.get_serializer_context(), "whatsapp_map": whatsapp_map}
+            serializer = self.get_serializer(page, many=True, context=ctx)
+            return self.get_paginated_response(serializer.data)
+
+        objs = list(queryset)
+        whatsapp_map = get_invoices_whatsapp_status_map(objs)
+        ctx = {**self.get_serializer_context(), "whatsapp_map": whatsapp_map}
+        serializer = self.get_serializer(objs, many=True, context=ctx)
+        return Response(serializer.data)
+
 
 class InvoiceDetailView(generics.RetrieveAPIView):
     serializer_class = InvoiceSerializer
@@ -137,9 +157,12 @@ class InvoicePDFView(APIView):
 
     def get(self, request, pk):
         invoice = self._get_invoice_with_permissions(request, pk)
-        format_type = request.query_params.get("format_type", "a4").lower()
-        if format_type not in ("a4", "thermal", "receipt"):
-            format_type = "a4"
+        raw_format = (
+            request.query_params.get("format_type")
+            or request.query_params.get("format")
+            or "a4"
+        ).lower()
+        format_type = raw_format if raw_format in ("a4", "thermal", "receipt") else "a4"
 
         # Check if direct PDF download/streaming is requested
         wants_pdf = (
@@ -149,14 +172,27 @@ class InvoicePDFView(APIView):
             or "application/pdf" in request.headers.get("Accept", "")
         )
 
-        from apps.invoices.pdf import generate_invoice_pdf, generate_invoice_pdf_bytes
+        from apps.invoices.pdf import (
+            generate_invoice_pdf,
+            generate_invoice_pdf_bytes,
+            sanitize_invoice_pdf_filename,
+        )
 
         if wants_pdf:
             try:
                 pdf_bytes = generate_invoice_pdf_bytes(invoice, format_type=format_type)
+                if not pdf_bytes or not pdf_bytes.startswith(b"%PDF-"):
+                    raise ValueError("Generated PDF payload is invalid.")
                 disp = "attachment" if request.query_params.get("download") == "true" else "inline"
+                safe_filename = sanitize_invoice_pdf_filename(
+                    invoice.invoice_number,
+                    format_type=format_type if format_type in ("thermal", "receipt") else "a4",
+                )
                 response = HttpResponse(pdf_bytes, content_type="application/pdf")
-                response["Content-Disposition"] = f'{disp}; filename="{invoice.invoice_number}.pdf"'
+                response["Content-Disposition"] = f'{disp}; filename="{safe_filename}"'
+                response["Content-Length"] = str(len(pdf_bytes))
+                response["X-Content-Type-Options"] = "nosniff"
+                response["Cache-Control"] = "private, no-store"
                 return response
             except Exception as e:
                 logger.error("Error generating PDF bytes for invoice %s: %s", invoice.invoice_number, e)
@@ -182,6 +218,134 @@ class InvoicePDFView(APIView):
 
     def post(self, request, pk):
         return self.get(request, pk)
+
+
+class InvoiceSendWhatsAppView(APIView):
+    """
+    Trigger or inspect official Meta WhatsApp PDF delivery for a finalized invoice.
+    Generates the canonical invoice PDF, uploads via Meta Media API, and sends a
+    PDF document message (instead of URL links).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from apps.whatsapp.service import get_invoice_whatsapp_status
+
+        invoice = InvoicePDFView()._get_invoice_with_permissions(request, pk)
+        return Response({
+            "invoice_id": str(invoice.id),
+            "invoice_number": invoice.invoice_number,
+            "bill_sent": bool(invoice.transaction.bill_sent) if invoice.transaction else False,
+            "whatsapp_delivery": get_invoice_whatsapp_status(invoice),
+        })
+
+    def post(self, request, pk):
+        from apps.whatsapp.service import (
+            WhatsAppService,
+            deliver_invoice_pdf_via_whatsapp,
+            format_whatsapp_phone,
+            get_invoice_whatsapp_status,
+        )
+
+        invoice = InvoicePDFView()._get_invoice_with_permissions(request, pk)
+        data = request.data if isinstance(request.data, dict) else {}
+        force = bool(data.get("force", False))
+        async_mode = bool(data.get("async", False))
+        phone_override = (data.get("phone") or "").strip() or None
+        format_type = (data.get("format_type") or "").strip().lower() or None
+        if format_type and format_type not in ("a4", "thermal", "receipt"):
+            format_type = None
+
+        if async_mode:
+            candidate_phone = phone_override or (
+                invoice.transaction.customer.phone if invoice.transaction and invoice.transaction.customer else ""
+            )
+            if not format_whatsapp_phone(candidate_phone):
+                return Response(
+                    {
+                        "status": "skipped",
+                        "error": "Customer phone number is missing or invalid for WhatsApp",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not WhatsAppService.for_organization(invoice.organization):
+                return Response(
+                    {
+                        "status": "failed",
+                        "error": "WhatsApp Cloud API is not configured or active for this organization.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            from apps.whatsapp.tasks import send_digital_bill_task
+            send_digital_bill_task.delay(str(invoice.transaction_id), force=force)
+            return Response(
+                {
+                    "status": "queued",
+                    "message": "Invoice PDF queued for WhatsApp delivery.",
+                    "invoice_id": str(invoice.id),
+                    "invoice_number": invoice.invoice_number,
+                    "whatsapp_delivery": get_invoice_whatsapp_status(invoice),
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+
+        result = deliver_invoice_pdf_via_whatsapp(
+            invoice=invoice,
+            force=force,
+            record_failure=True,
+            format_type=format_type,
+            phone_override=phone_override,
+        )
+
+        delivery_status = result.get("status")
+        if delivery_status in ("sent", "already_sent"):
+            msg_text = (
+                "Invoice PDF sent to WhatsApp."
+                if delivery_status == "sent"
+                else "Invoice PDF was already sent to WhatsApp."
+            )
+            return Response(
+                {
+                    **result,
+                    "message": msg_text,
+                    "whatsapp_delivery": get_invoice_whatsapp_status(invoice),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if delivery_status == "processing":
+            return Response(
+                {
+                    **result,
+                    "message": "Invoice PDF delivery is already in progress.",
+                    "whatsapp_delivery": get_invoice_whatsapp_status(invoice),
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+
+        err_msg = result.get("error") or "WhatsApp delivery failed."
+        if err_msg == "WhatsApp not configured":
+            err_msg = "WhatsApp Cloud API is not configured or active. Configure credentials in Settings."
+
+        http_status = (
+            status.HTTP_400_BAD_REQUEST
+            if delivery_status == "skipped"
+            or result.get("error") in (
+                "WhatsApp not configured",
+                "Customer phone number is missing or invalid for WhatsApp",
+                "Customer opted out of WhatsApp",
+                "No customer linked to transaction",
+            )
+            else status.HTTP_502_BAD_GATEWAY
+        )
+        return Response(
+            {
+                **result,
+                "error": err_msg,
+                "whatsapp_delivery": get_invoice_whatsapp_status(invoice),
+            },
+            status=http_status,
+        )
 
 
 class InvoicePublicView(generics.RetrieveAPIView):
@@ -210,9 +374,22 @@ class InvoicePublicView(generics.RetrieveAPIView):
 # ============================================================================
 
 class QuotationListView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCashierOrAbove]
+
+    @staticmethod
+    def _parse_decimal(raw_value, field_label, item_name, default="0.00"):
+        val = default if raw_value is None or raw_value == "" else raw_value
+        try:
+            dec = Decimal(str(val))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValidationError({"items": f"Invalid {field_label} '{raw_value}' for item {item_name}."})
+        if not dec.is_finite():
+            raise ValidationError({"items": f"{field_label.capitalize()} must be a finite number for item {item_name}."})
+        return dec
 
     def get(self, request):
+        if not request.user.organization:
+            return Response({"count": 0, "next": None, "previous": None, "results": []})
         qs = Quotation.objects.filter(
             organization=request.user.organization
         ).select_related("customer", "store", "converted_invoice", "created_by").order_by("-created_at")
@@ -252,9 +429,12 @@ class QuotationListView(APIView):
 
     def post(self, request):
         org = request.user.organization
-        data = request.data
+        if not org:
+            raise ValidationError("User must belong to an organization to create quotations.")
+
+        data = request.data if isinstance(request.data, dict) else {}
         items_data = data.get("items", [])
-        if not items_data:
+        if not isinstance(items_data, list) or not items_data:
             raise ValidationError({"items": "Quotation must contain at least one item."})
 
         # Customer resolution
@@ -263,18 +443,21 @@ class QuotationListView(APIView):
         if customer_id:
             try:
                 customer = Customer.objects.get(id=customer_id, organization=org)
-            except Customer.DoesNotExist:
-                pass
+            except (Customer.DoesNotExist, ValueError, DjangoValidationError):
+                raise ValidationError({"customer_id": "Selected customer was not found for this business."})
 
-        customer_name = data.get("customer_name") or (customer.full_name if customer else "Walk-in Customer")
-        customer_phone = data.get("customer_phone") or (customer.phone if customer else "")
-        customer_email = data.get("customer_email") or (customer.email if customer else "")
+        customer_name = str(data.get("customer_name") or (customer.full_name if customer else "Walk-in Customer")).strip() or "Walk-in Customer"
+        customer_phone = str(data.get("customer_phone") or (customer.phone if customer else "")).strip()
+        customer_email = str(data.get("customer_email") or (customer.email if customer else "")).strip()
 
         # Store resolution
         store = None
         store_id = data.get("store_id") or data.get("store")
         if store_id:
-            store = Store.objects.filter(id=store_id, organization=org).first()
+            try:
+                store = Store.objects.filter(id=store_id, organization=org).first()
+            except (ValueError, DjangoValidationError):
+                raise ValidationError({"store_id": "Invalid store selection."})
         if not store:
             store = Store.objects.filter(organization=org).first()
         if not store and org:
@@ -285,7 +468,37 @@ class QuotationListView(APIView):
                 status="active",
             )
 
-        # Parse items and compute totals
+        # Validate dates and status
+        raw_quotation_date = data.get("quotation_date")
+        if raw_quotation_date in (None, ""):
+            quotation_date = timezone.now().date()
+        else:
+            quotation_date = parse_date(str(raw_quotation_date))
+            if quotation_date is None:
+                raise ValidationError({"quotation_date": "Invalid quotation date format. Expected YYYY-MM-DD."})
+
+        raw_valid_until = data.get("valid_until")
+        if raw_valid_until in (None, ""):
+            valid_until = None
+        else:
+            valid_until = parse_date(str(raw_valid_until))
+            if valid_until is None:
+                raise ValidationError({"valid_until": "Invalid validity date format. Expected YYYY-MM-DD."})
+
+        req_status = str(data.get("status") or "draft").strip().lower()
+        allowed_create_statuses = ("draft", "sent", "accepted")
+        if req_status not in allowed_create_statuses:
+            raise ValidationError({"status": f"Invalid initial quotation status '{req_status}'. Allowed: {', '.join(allowed_create_statuses)}."})
+
+        config = BusinessConfig.objects.filter(organization=org).first()
+        gst_enabled = bool(config.gst_enabled) if config else True
+        req_tax_mode = str(data.get("tax_mode") or "").strip().lower()
+        if req_tax_mode in ("inclusive", "exclusive"):
+            is_tax_inclusive = req_tax_mode == "inclusive"
+        else:
+            is_tax_inclusive = (config.default_tax_mode == "inclusive") if config else False
+
+        # Parse items and compute totals (never touches inventory or sales transactions)
         parsed_items = []
         tot_subtotal = Decimal("0.00")
         tot_discount = Decimal("0.00")
@@ -293,33 +506,66 @@ class QuotationListView(APIView):
         tot_grand = Decimal("0.00")
 
         for it in items_data:
+            if not isinstance(it, dict):
+                raise ValidationError({"items": "Each quotation item must be an object."})
+
             p = None
             p_id = it.get("product_id") or it.get("product")
             if p_id:
-                p = Product.objects.filter(id=p_id, organization=org).first()
+                try:
+                    p = Product.objects.filter(id=p_id, organization=org).first()
+                except (ValueError, DjangoValidationError):
+                    raise ValidationError({"items": "Invalid product selection in quotation items."})
+                if p is None:
+                    raise ValidationError({"items": "One or more selected products were not found in your catalog."})
 
-            name = it.get("name") or (p.name if p else "Item")
-            qty = Decimal(str(it.get("quantity") or 1))
+            name = str(it.get("name") or (p.name if p else "")).strip()
+            if not name:
+                raise ValidationError({"items": "Each quotation line item must have a product or item name."})
+
+            qty = self._parse_decimal(it.get("quantity"), "quantity", name, default="1")
             if qty <= Decimal("0.00"):
-                raise ValidationError(f"Invalid quantity {qty} for item {name}.")
+                raise ValidationError({"items": f"Quantity must be greater than zero for item '{name}'."})
 
-            unit_price = Decimal(str(it.get("unit_price") if it.get("unit_price") is not None else (p.selling_price if p else 0)))
-            disc = Decimal(str(it.get("discount") or 0))
-            tax_rate = Decimal(str(it.get("tax_rate") if it.get("tax_rate") is not None else (p.tax_rate if p else 0)))
-            hsn_code = it.get("hsn_code") or (p.hsn_code if p else "")
-            unit = it.get("unit") or (p.unit if p else "pcs")
+            raw_price = it.get("unit_price")
+            unit_price = (
+                self._parse_decimal(raw_price, "unit price", name, default="0.00")
+                if raw_price is not None and raw_price != ""
+                else Decimal(str(p.unit_price if p else 0))
+            )
+            if unit_price < Decimal("0.00"):
+                raise ValidationError({"items": f"Unit price cannot be negative for item '{name}'."})
+
+            disc = self._parse_decimal(it.get("discount"), "discount", name, default="0.00")
+            if disc < Decimal("0.00"):
+                raise ValidationError({"items": f"Discount cannot be negative for item '{name}'."})
+            line_gross = unit_price * qty
+            if disc > line_gross:
+                raise ValidationError({"items": f"Discount (₹{disc}) cannot exceed line total (₹{round_decimal(line_gross)}) for item '{name}'."})
+
+            raw_tax = it.get("tax_rate")
+            tax_rate = (
+                self._parse_decimal(raw_tax, "tax rate", name, default="0.00")
+                if raw_tax is not None and raw_tax != ""
+                else Decimal(str(p.tax_rate if p else 0))
+            )
+            if tax_rate < Decimal("0.00") or tax_rate > Decimal("100.00"):
+                raise ValidationError({"items": f"Tax rate must be between 0% and 100% for item '{name}'."})
+
+            hsn_code = str(it.get("hsn_code") or (p.hsn_code if p else "")).strip()
+            unit = str(it.get("unit") or (p.unit if p else "pcs")).strip() or "pcs"
 
             tax_calc = TaxEngine.calculate_item_tax(
                 unit_price=unit_price,
                 quantity=qty,
                 discount=disc,
                 tax_rate=tax_rate,
-                is_tax_inclusive=False,
+                is_tax_inclusive=is_tax_inclusive,
                 is_interstate=False,
-                gst_enabled=True,
+                gst_enabled=gst_enabled,
             )
 
-            tot_subtotal += (unit_price * qty)
+            tot_subtotal += line_gross
             tot_discount += disc
             tot_tax += tax_calc["total_tax"]
             tot_grand += tax_calc["line_total"]
@@ -330,7 +576,7 @@ class QuotationListView(APIView):
                 "quantity": qty,
                 "unit_price": unit_price,
                 "discount": disc,
-                "tax_rate": tax_rate,
+                "tax_rate": tax_calc["tax_rate"],
                 "tax": tax_calc["total_tax"],
                 "total": tax_calc["line_total"],
                 "hsn_code": hsn_code,
@@ -351,15 +597,15 @@ class QuotationListView(APIView):
                 customer_name=customer_name,
                 customer_phone=customer_phone,
                 customer_email=customer_email,
-                quotation_date=data.get("quotation_date") or timezone.now().date(),
-                valid_until=data.get("valid_until"),
-                status=data.get("status", "draft"),
+                quotation_date=quotation_date,
+                valid_until=valid_until,
+                status=req_status,
                 subtotal=round_decimal(tot_subtotal),
                 discount=round_decimal(tot_discount),
                 tax=round_decimal(tot_tax),
                 total=round_decimal(tot_grand),
-                notes=data.get("notes", ""),
-                terms_and_conditions=data.get("terms_and_conditions", ""),
+                notes=str(data.get("notes") or ""),
+                terms_and_conditions=str(data.get("terms_and_conditions") or ""),
                 created_by=request.user,
             )
 
@@ -383,7 +629,7 @@ class QuotationListView(APIView):
 
 
 class QuotationDetailView(generics.RetrieveUpdateDestroyAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCashierOrAbove]
     serializer_class = QuotationSerializer
 
     def get_queryset(self):
@@ -408,7 +654,7 @@ class QuotationLookupView(APIView):
     Looks up a quotation by exact or partial quotation number (e.g., QT-2026-0001 or 0001)
     and returns its full details including items and customer info for POS loading.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCashierOrAbove]
 
     def get(self, request, number):
         org = request.user.organization
@@ -434,7 +680,7 @@ class QuotationConvertView(APIView):
     updates customer statistics and credit ledger, and links the quotation.
     Prevents duplicate conversion and handles concurrency/idempotency.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCashierOrAbove]
 
     def post(self, request, pk):
         try:
@@ -816,17 +1062,34 @@ class QuotationConvertView(APIView):
                 if active_register:
                     active_register.record_sale(cash_applied)
 
-            # 9. Generate PDF
-            try:
-                from apps.invoices.pdf import generate_invoice_pdf
-                pdf_url = generate_invoice_pdf(invoice)
-                if pdf_url:
-                    invoice.pdf_url = pdf_url
-                    invoice.save(update_fields=["pdf_url"])
-            except Exception as e:
-                logger.warning("PDF generation failed on quote conversion: %s", e)
+        # 9. Post-commit PDF generation & automatic WhatsApp delivery (never fails sale)
+        try:
+            from apps.invoices.pdf import generate_invoice_pdf
+            pdf_url = generate_invoice_pdf(invoice)
+            if pdf_url:
+                invoice.pdf_url = pdf_url
+                invoice.save(update_fields=["pdf_url"])
+        except Exception as e:
+            logger.warning("PDF generation failed on quote conversion: %s", e)
 
-        # 10. Realtime notification
+        whatsapp_delivery = None
+        bill_sent = False
+        try:
+            from apps.whatsapp.service import (
+                get_invoice_whatsapp_status,
+                prepare_and_dispatch_post_sale_invoice_whatsapp,
+            )
+
+            prepare_and_dispatch_post_sale_invoice_whatsapp(
+                str(invoice.transaction.id),
+                dispatch_whatsapp=True,
+            )
+            invoice.transaction.refresh_from_db(fields=["bill_sent", "bill_sent_at"])
+            bill_sent = bool(invoice.transaction.bill_sent)
+            whatsapp_delivery = get_invoice_whatsapp_status(invoice)
+        except Exception as e:
+            logger.warning("Failed to dispatch WhatsApp PDF after quote conversion: %s", e)
+
         try:
             from apps.billing.services.realtime_service import RealtimeService
             RealtimeService.publish_event(
@@ -846,6 +1109,7 @@ class QuotationConvertView(APIView):
         return Response(
             {
                 "message": "Quotation converted to invoice successfully",
+                "transaction_id": str(invoice.transaction.id),
                 "invoice_id": str(invoice.id),
                 "invoice_number": invoice.invoice_number,
                 "quotation_id": str(quotation.id),
@@ -853,6 +1117,8 @@ class QuotationConvertView(APIView):
                 "pdf_url": invoice.pdf_url,
                 "web_url": invoice.web_url,
                 "total": str(invoice.transaction.total),
+                "bill_sent": bill_sent,
+                "whatsapp_delivery": whatsapp_delivery,
             },
             status=status.HTTP_201_CREATED,
         )

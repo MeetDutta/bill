@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   FileText,
   AlertTriangle,
@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { tallyExportApi } from "@/services/api";
 import type { TallyPreviewData, TallyLedgerConfigData, TallyExportHistoryItem } from "@/types";
-import { cn } from "@/lib/utils";
+import { cn, parseApiError } from "@/lib/utils";
 
 interface TallyExportModalProps {
   isOpen: boolean;
@@ -55,37 +55,49 @@ export function TallyExportModal({
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [configSuccess, setConfigSuccess] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
 
   // History state
   const [history, setHistory] = useState<TallyExportHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
+  const previewReqIdRef = useRef(0);
+
   const fetchPreview = useCallback(async () => {
+    const reqId = ++previewReqIdRef.current;
     setLoadingPreview(true);
     setPreviewError(null);
     try {
       const res = await tallyExportApi.getPreview({
         period,
-        start_date: startDate,
-        end_date: endDate,
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
         include_previously_exported: includePrevious,
       });
-      setPreview(res.data);
+      if (reqId === previewReqIdRef.current) {
+        setPreview(res.data);
+      }
     } catch (err: any) {
       console.error("Failed to load Tally export preview:", err);
-      setPreviewError(err?.response?.data?.error || "Failed to load Tally export validation preview.");
+      if (reqId === previewReqIdRef.current) {
+        setPreviewError(parseApiError(err, "Failed to load Tally export validation preview."));
+      }
     } finally {
-      setLoadingPreview(false);
+      if (reqId === previewReqIdRef.current) {
+        setLoadingPreview(false);
+      }
     }
   }, [period, startDate, endDate, includePrevious]);
 
   const fetchConfig = useCallback(async () => {
     setLoadingConfig(true);
+    setConfigError(null);
     try {
       const res = await tallyExportApi.getConfig();
       setConfig(res.data);
     } catch (err) {
       console.error("Failed to load Tally ledger config:", err);
+      setConfigError(parseApiError(err, "Failed to load Tally ledger configuration."));
     } finally {
       setLoadingConfig(false);
     }
@@ -116,6 +128,7 @@ export function TallyExportModal({
     if (!config) return;
     setSavingConfig(true);
     setConfigSuccess(false);
+    setConfigError(null);
     try {
       await tallyExportApi.updateConfig(config);
       setConfigSuccess(true);
@@ -123,6 +136,7 @@ export function TallyExportModal({
       fetchPreview();
     } catch (err) {
       console.error("Failed to save ledger config:", err);
+      setConfigError(parseApiError(err, "Failed to save Tally ledger configuration."));
     } finally {
       setSavingConfig(false);
     }
@@ -134,8 +148,8 @@ export function TallyExportModal({
     try {
       const res = await tallyExportApi.exportXml({
         period,
-        start_date: startDate,
-        end_date: endDate,
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
         include_previously_exported: includePrevious,
       });
 
@@ -155,17 +169,15 @@ export function TallyExportModal({
       fetchHistory();
     } catch (err: any) {
       console.error("Failed to download Tally XML:", err);
-      let errorMsg = "Failed to generate Tally XML export.";
+      let errorMsg = parseApiError(err, "Failed to generate Tally XML export.");
       if (err?.response?.data instanceof Blob) {
         try {
           const text = await err.response.data.text();
           const json = JSON.parse(text);
-          if (json?.error) errorMsg = json.error;
+          if (json?.error || json?.detail) errorMsg = json.error || json.detail;
         } catch {
           // not json
         }
-      } else if (err?.response?.data?.error) {
-        errorMsg = err.response.data.error;
       }
       alert(errorMsg);
     } finally {
@@ -526,6 +538,12 @@ export function TallyExportModal({
                 <div className="p-3 rounded-lg bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2">
                   <Check className="h-4 w-4" />
                   <span>Tally ledger configuration updated successfully!</span>
+                </div>
+              )}
+
+              {configError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 dark:bg-red-950/30 dark:text-red-300 text-xs font-medium">
+                  {configError}
                 </div>
               )}
 

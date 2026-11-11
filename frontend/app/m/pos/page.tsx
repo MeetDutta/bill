@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { formatCurrency, parseApiError } from "@/lib/utils";
-import { posApi, quotationApi, customerApi, productApi } from "@/services/api";
-import type { Product, Quotation, Customer } from "@/types";
+import { resolveWhatsAppPresentation, WhatsAppUiStatus } from "@/lib/whatsappStatus";
+import { posApi, quotationApi, customerApi, productApi, invoiceApi } from "@/services/api";
+import type { Product, Quotation, Customer, BusinessConfig, POSCalculateResponse, WhatsAppDeliverySummary } from "@/types";
 import {
   Search,
   Barcode,
@@ -30,6 +31,10 @@ import {
   Printer,
   Download,
   Share2,
+  Landmark,
+  Wallet,
+  Split,
+  Loader2,
 } from "lucide-react";
 import { printThermalReceipt, downloadInvoicePdf } from "@/lib/receiptPrinter";
 
@@ -41,6 +46,7 @@ interface CartItem {
   barcode?: string;
   quantity: number;
   unit_price: number;
+  original_unit_price?: number;
   tax_rate: number;
   discount: number;
 }
@@ -64,7 +70,12 @@ export default function MobilePOSPage() {
   const [loadingProducts, setLoadingProducts] = useState(false);
 
   // Cart State
+  const [config, setConfig] = useState<BusinessConfig | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
+  const [calcSummary, setCalcSummary] = useState<POSCalculateResponse | null>(null);
+  const [calcSyncedSignature, setCalcSyncedSignature] = useState<string>("");
+  const calcSeqRef = useRef(0);
   const [customer, setCustomer] = useState<{ id?: string; name: string; phone: string; is_walk_in: boolean }>({
     name: "Walk-in Customer",
     phone: "",
@@ -80,12 +91,21 @@ export default function MobilePOSPage() {
   const [manualBarcodeInput, setManualBarcodeInput] = useState("");
 
   // Payment State
-  const [primaryMethod, setPrimaryMethod] = useState<"cash" | "upi" | "card" | "credit">("cash");
+  const [primaryMethod, setPrimaryMethod] = useState<"cash" | "upi" | "card" | "credit" | "other">("cash");
+  const [otherMethod, setOtherMethod] = useState<"netbanking" | "cheque" | "wallet">("netbanking");
   const [isSplit, setIsSplit] = useState(false);
   const [cashTendered, setCashTendered] = useState<number>(0);
-  const [splitPayments, setSplitPayments] = useState<SplitPaymentRow[]>([]);
+  const [cashDraft, setCashDraft] = useState<string>("");
+  const [splitPayments, setSplitPayments] = useState<SplitPaymentRow[]>([
+    { payment_method: "cash", amount: 0 },
+    { payment_method: "upi", amount: 0 },
+    { payment_method: "card", amount: 0 },
+  ]);
+  const [splitDrafts, setSplitDrafts] = useState<Record<number, string>>({});
   const [electronicRef, setElectronicRef] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const inFlightSubmitRef = useRef(false);
+  const idempotencyKeyRef = useRef("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmedSale, setConfirmedSale] = useState<{
     transaction_id: string;
@@ -98,28 +118,81 @@ export default function MobilePOSPage() {
     web_url?: string;
     customer_name?: string;
     customer_phone?: string;
+    bill_sent?: boolean;
+    whatsapp_delivery?: WhatsAppDeliverySummary | null;
     raw?: any;
   } | null>(null);
+  const [waStatus, setWaStatus] = useState<{
+    state: WhatsAppUiStatus;
+    message: string;
+  }>({ state: "idle", message: "" });
+  const [mobileWaPhone, setMobileWaPhone] = useState("");
 
-  // Load all tenant categories on mount
   useEffect(() => {
-    const loadAllCategories = async () => {
+    const invId = confirmedSale?.invoice_id;
+    if (!invId || waStatus.state !== "queued") return;
+    let cancelled = false;
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts += 1;
       try {
-        const catRes = await productApi.listCategories({ all: true });
-        const raw = catRes.data as any;
-        const list = Array.isArray(raw) ? raw : raw?.results || [];
-        const names = list
-          .filter((c: any) => c.is_active !== false)
-          .map((c: any) => c.name)
-          .filter(Boolean);
-        if (names.length > 0) {
-          setCategories((prev) => Array.from(new Set([...prev, ...names])));
+        const res = await invoiceApi.getWhatsAppStatus(invId);
+        if (cancelled) return;
+        const delivery = res.data?.whatsapp_delivery;
+        const billSent = Boolean(res.data?.bill_sent);
+        const next = resolveWhatsAppPresentation(delivery, billSent);
+        if (next.status !== "queued" && next.status !== "idle") {
+          setWaStatus({ state: next.status, message: next.message });
+          setConfirmedSale((prev) =>
+            prev && prev.invoice_id === invId
+              ? { ...prev, bill_sent: billSent, whatsapp_delivery: delivery }
+              : prev
+          );
+          return;
         }
-      } catch (err) {
-        console.error("Failed to load categories for mobile POS:", err);
+      } catch {
+        // Ignore transient poll errors
+      }
+      if (!cancelled && attempts < 20) {
+        timer = window.setTimeout(poll, 1500);
       }
     };
-    loadAllCategories();
+
+    let timer = window.setTimeout(poll, 1200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [confirmedSale?.invoice_id, waStatus.state]);
+
+  // Load tenant config & categories on mount
+  useEffect(() => {
+    const loadMetadata = async () => {
+      try {
+        const [cfgRes, catRes] = await Promise.allSettled([
+          posApi.getConfig(),
+          productApi.listCategories({ all: true }),
+        ]);
+        if (cfgRes.status === "fulfilled" && cfgRes.value?.data) {
+          setConfig(cfgRes.value.data);
+        }
+        if (catRes.status === "fulfilled") {
+          const raw = catRes.value.data as any;
+          const list = Array.isArray(raw) ? raw : raw?.results || [];
+          const names = list
+            .filter((c: any) => c.is_active !== false)
+            .map((c: any) => c.name)
+            .filter(Boolean);
+          if (names.length > 0) {
+            setCategories((prev) => Array.from(new Set([...prev, ...names])));
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load metadata for mobile POS:", err);
+      }
+    };
+    loadMetadata();
   }, []);
 
   // Load products on search / category filter
@@ -170,49 +243,106 @@ export default function MobilePOSPage() {
     }
   }, []);
 
-  // Cart calculations
+  const roundCurrency = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
+  const creditSalesEnabled = config ? config.allow_credit_sales !== false : true;
+
+  const currentCartSignature = useMemo(
+    () =>
+      JSON.stringify(
+        cart.map((it) => ({
+          id: it.id,
+          unit_price: it.unit_price,
+          quantity: it.quantity,
+          tax_rate: it.tax_rate,
+          discount: it.discount,
+        }))
+      ),
+    [cart]
+  );
+  const isCalcSynced = cart.length === 0 || (calcSummary !== null && calcSyncedSignature === currentCartSignature);
+
+  const calculateMobileCartImmediate = useCallback(async () => {
+    if (cart.length === 0) {
+      setCalcSummary(null);
+      setCalcSyncedSignature("");
+      return null;
+    }
+    const seq = ++calcSeqRef.current;
+    const sig = currentCartSignature;
+    try {
+      const itemsPayload = cart.map((it) => ({
+        product_id: it.product?.id || (it.id.startsWith("custom-") ? undefined : it.id),
+        name: it.name,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        tax_rate: it.tax_rate,
+        discount: it.discount,
+      }));
+      const res = await posApi.calculateCart({ items: itemsPayload, is_interstate: false });
+      if (seq === calcSeqRef.current) {
+        setCalcSummary(res.data);
+        setCalcSyncedSignature(sig);
+      }
+      return res.data as POSCalculateResponse;
+    } catch (err) {
+      console.error("Mobile POS cart calculate failed", err);
+      return null;
+    }
+  }, [cart, currentCartSignature]);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      setCalcSummary(null);
+      setCalcSyncedSignature("");
+      return;
+    }
+    const timer = setTimeout(() => {
+      calculateMobileCartImmediate();
+    }, 90);
+    return () => clearTimeout(timer);
+  }, [cart, calculateMobileCartImmediate]);
+
+  // Cart calculations (immediate subtotal + authoritative backend tax/grand_total)
   const cartSummary = useMemo(() => {
-    let subtotal = 0;
-    let totalTax = 0;
+    let localSubtotal = 0;
     let itemCount = 0;
 
     cart.forEach((item) => {
-      const lineSub = item.unit_price * item.quantity;
-      const lineTax = (lineSub * (item.tax_rate || 0)) / 100;
-      subtotal += lineSub;
-      totalTax += lineTax;
+      localSubtotal += Math.max(0, item.unit_price * item.quantity - (item.discount || 0));
       itemCount += item.quantity;
     });
 
-    const exactTotal = subtotal + totalTax;
-    const grandTotal = Math.round(exactTotal);
-    const roundOff = Number((grandTotal - exactTotal).toFixed(2));
+    if (isCalcSynced && calcSummary) {
+      return {
+        subtotal: Number(calcSummary.subtotal ?? localSubtotal),
+        totalTax: Number(calcSummary.tax ?? 0),
+        roundOff: Number(calcSummary.round_off ?? 0),
+        grandTotal: Number(calcSummary.grand_total ?? localSubtotal),
+        itemCount,
+      };
+    }
 
     return {
-      subtotal,
-      totalTax,
-      roundOff,
-      grandTotal,
+      subtotal: roundCurrency(localSubtotal),
+      totalTax: 0,
+      roundOff: 0,
+      grandTotal: roundCurrency(localSubtotal),
       itemCount,
     };
-  }, [cart]);
+  }, [cart, isCalcSynced, calcSummary]);
 
-  // Synchronize payment amounts when grand total changes
+  // Synchronize payment amounts when grand total changes in single mode
   useEffect(() => {
-    if (cartSummary.grandTotal > 0 && !isSplit) {
+    if (!isSplit) {
       setCashTendered(cartSummary.grandTotal);
-      setSplitPayments([
-        {
-          payment_method: primaryMethod,
-          amount: cartSummary.grandTotal,
-          reference: electronicRef,
-        },
-      ]);
+      setCashDraft(cartSummary.grandTotal > 0 ? cartSummary.grandTotal.toFixed(2) : "0");
     }
-  }, [cartSummary.grandTotal, primaryMethod, isSplit, electronicRef]);
+  }, [cartSummary.grandTotal, primaryMethod, isSplit]);
 
   // Add product to cart
   const addToCart = (product: Product) => {
+    idempotencyKeyRef.current = "";
+    const defaultPrice = Math.max(0, Number(product.selling_price || product.unit_price || 0));
     setCart((prev) => {
       const existing = prev.find((i) => i.id === product.id);
       if (existing) {
@@ -229,7 +359,8 @@ export default function MobilePOSPage() {
           sku: product.sku,
           barcode: product.barcode,
           quantity: 1,
-          unit_price: Number(product.selling_price || product.unit_price || 0),
+          unit_price: defaultPrice,
+          original_unit_price: defaultPrice,
           tax_rate: Number(product.tax_rate || 0),
           discount: 0,
         },
@@ -239,6 +370,7 @@ export default function MobilePOSPage() {
 
   // Update item quantity
   const updateQuantity = (id: string, delta: number) => {
+    idempotencyKeyRef.current = "";
     setCart((prev) =>
       prev
         .map((item) => {
@@ -252,14 +384,69 @@ export default function MobilePOSPage() {
     );
   };
 
+  // Update item unit price
+  const updateItemPrice = (id: string, raw: string) => {
+    idempotencyKeyRef.current = "";
+    if (raw.trim().startsWith("-")) return;
+    setPriceDrafts((prev) => ({ ...prev, [id]: raw }));
+    if (raw.trim() === "") return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) return;
+    setCart((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, unit_price: parsed } : item))
+    );
+  };
+
+  const commitItemPrice = (id: string) => {
+    const draft = priceDrafts[id];
+    setPriceDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (draft !== undefined) {
+      const parsed = Number(draft);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        const rounded = roundCurrency(parsed);
+        setCart((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, unit_price: rounded } : item))
+        );
+      }
+    }
+  };
+
+  const resetItemPrice = (id: string) => {
+    idempotencyKeyRef.current = "";
+    setPriceDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setCart((prev) =>
+      prev.map((item) =>
+        item.id === id && item.original_unit_price !== undefined
+          ? { ...item, unit_price: item.original_unit_price }
+          : item
+      )
+    );
+  };
+
   // Remove item
   const removeItem = (id: string) => {
+    idempotencyKeyRef.current = "";
+    setPriceDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     setCart((prev) => prev.filter((i) => i.id !== id));
   };
 
   // Clear cart
   const clearCart = () => {
     if (confirm("Clear all items in cart?")) {
+      idempotencyKeyRef.current = "";
+      setPriceDrafts({});
       setCart([]);
       setQuotationRef(null);
       setActiveTab("catalog");
@@ -269,12 +456,16 @@ export default function MobilePOSPage() {
   // Load quotation helper
   const loadQuotationIntoCart = (q: Quotation) => {
     if (!q || !q.items || q.items.length === 0) return;
+    idempotencyKeyRef.current = "";
+    setPriceDrafts({});
     const loadedItems: CartItem[] = q.items.map((it: any) => ({
       id: typeof it.product === "object" && it.product?.id ? it.product.id : it.product || `custom-${it.id || Math.random()}`,
       product: it.product,
       name: it.name,
+      sku: it.sku || "",
       quantity: Number(it.quantity || 1),
       unit_price: Number(it.unit_price || 0),
+      original_unit_price: Number(it.original_unit_price ?? it.unit_price ?? 0),
       tax_rate: Number(it.tax_rate || 0),
       discount: Number(it.discount || 0),
     }));
@@ -303,42 +494,108 @@ export default function MobilePOSPage() {
     }
   };
 
-  // Fast cash tender buttons
-  const cashChange = useMemo(() => {
-    if (primaryMethod !== "cash" && !isSplit) return 0;
-    return cashTendered > cartSummary.grandTotal ? cashTendered - cartSummary.grandTotal : 0;
-  }, [cashTendered, cartSummary.grandTotal, primaryMethod, isSplit]);
+  // Payment computations (Single & Hybrid)
+  const activePaymentRows: SplitPaymentRow[] = useMemo(() => {
+    if (isSplit) {
+      return splitPayments.filter((p) => Number(p.amount) > 0);
+    }
+    if (primaryMethod === "cash") {
+      return [{ payment_method: "cash", amount: roundCurrency(Number(cashTendered) || 0) }];
+    }
+    if (primaryMethod === "other") {
+      return [{ payment_method: otherMethod, amount: cartSummary.grandTotal, reference: electronicRef }];
+    }
+    return [{ payment_method: primaryMethod, amount: cartSummary.grandTotal, reference: electronicRef }];
+  }, [isSplit, splitPayments, primaryMethod, cashTendered, otherMethod, cartSummary.grandTotal, electronicRef]);
+
+  const totalAllocated = useMemo(
+    () => roundCurrency(activePaymentRows.reduce((s, p) => s + (Number(p.amount) || 0), 0)),
+    [activePaymentRows]
+  );
+  const cashPaidSum = useMemo(
+    () => roundCurrency(activePaymentRows.filter((p) => p.payment_method === "cash").reduce((s, p) => s + p.amount, 0)),
+    [activePaymentRows]
+  );
+  const splitUsesCredit = activePaymentRows.some((p) => p.payment_method === "credit" && p.amount > 0);
+  const splitRemaining = Math.max(0, roundCurrency(cartSummary.grandTotal - totalAllocated));
+  const excessPayment = totalAllocated > cartSummary.grandTotal ? roundCurrency(totalAllocated - cartSummary.grandTotal) : 0;
+  const isElectronicOverpay = excessPayment > 0.009 && cashPaidSum < excessPayment - 0.009;
+  const cashChange = excessPayment > 0 && !isElectronicOverpay ? excessPayment : 0;
 
   // Set primary payment method
-  const handleSelectPrimaryMethod = (method: "cash" | "upi" | "card" | "credit") => {
+  const handleSelectPrimaryMethod = (method: "cash" | "upi" | "card" | "credit" | "other") => {
+    setErrorMessage(null);
     setPrimaryMethod(method);
     setIsSplit(false);
     if (method === "cash") {
       setCashTendered(cartSummary.grandTotal);
+      setCashDraft(cartSummary.grandTotal.toFixed(2));
     }
-    setSplitPayments([
-      {
-        payment_method: method,
-        amount: cartSummary.grandTotal,
-        reference: electronicRef,
-      },
-    ]);
+  };
+
+  const handleSelectHybridMode = () => {
+    setErrorMessage(null);
+    setIsSplit(true);
+    setSplitDrafts({});
+    setSplitPayments((prev) => {
+      if (prev.some((p) => p.amount > 0)) return prev;
+      return [
+        { payment_method: "cash", amount: cartSummary.grandTotal },
+        { payment_method: "upi", amount: 0 },
+        { payment_method: "card", amount: 0 },
+      ];
+    });
+  };
+
+  const goToPaymentTab = async () => {
+    setErrorMessage(null);
+    if (!isCalcSynced) {
+      await calculateMobileCartImmediate();
+    }
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = `M-POS-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    }
+    setActiveTab("payment");
   };
 
   // Submit Complete Sale
   const handleCompleteSale = async () => {
+    if (inFlightSubmitRef.current || isSubmitting) return;
     if (cart.length === 0) {
       alert("Cart cannot be empty.");
       return;
     }
 
+    if (!isCalcSynced) {
+      await calculateMobileCartImmediate();
+    }
+
+    if (splitUsesCredit && !creditSalesEnabled) {
+      setErrorMessage("Credit / Udhaar sales are disabled in business settings.");
+      return;
+    }
+    if (splitUsesCredit && customer.is_walk_in) {
+      setErrorMessage("Walk-in customers cannot take Credit. Please select a registered customer first.");
+      return;
+    }
+    if (isElectronicOverpay) {
+      setErrorMessage("Overpayment is only permitted in Cash. Electronic payments cannot exceed bill total.");
+      return;
+    }
+    if (totalAllocated < cartSummary.grandTotal - 0.009) {
+      setErrorMessage(`Paid amount (${formatCurrency(totalAllocated)}) is less than bill total (${formatCurrency(cartSummary.grandTotal)}).`);
+      return;
+    }
+
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = `M-POS-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    }
+
+    inFlightSubmitRef.current = true;
     setErrorMessage(null);
     setIsSubmitting(true);
 
     try {
-      const idempotencyKey = `M-POS-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-      // Prepare items payload
       const itemsPayload = cart.map((it) => ({
         product_id: it.product?.id || (it.id.startsWith("custom-") ? undefined : it.id),
         name: it.name,
@@ -348,23 +605,13 @@ export default function MobilePOSPage() {
         discount: it.discount,
       }));
 
-      // Prepare payments payload
-      let paymentsPayload: SplitPaymentRow[] = [];
-      if (isSplit) {
-        paymentsPayload = splitPayments.filter((p) => p.amount > 0);
-      } else if (primaryMethod === "cash") {
-        paymentsPayload = [{ payment_method: "cash", amount: cashTendered }];
-      } else {
-        paymentsPayload = [
-          {
-            payment_method: primaryMethod,
-            amount: cartSummary.grandTotal,
-            reference: electronicRef,
-          },
-        ];
-      }
+      const paymentsPayload =
+        activePaymentRows.length > 0
+          ? activePaymentRows
+          : [{ payment_method: "cash", amount: 0 }];
 
       const checkoutPayload = {
+        quotation_number: quotationRef || undefined,
         items: itemsPayload,
         payments: paymentsPayload,
         is_walk_in: customer.is_walk_in,
@@ -375,11 +622,12 @@ export default function MobilePOSPage() {
               name: customer.name,
               phone: customer.phone,
             },
-        idempotency_key: idempotencyKey,
+        idempotency_key: idempotencyKeyRef.current,
       };
 
       const res = await posApi.checkout(checkoutPayload);
       const data = res.data;
+      idempotencyKeyRef.current = "";
 
       setConfirmedSale({
         transaction_id: data.transaction_id || data.id,
@@ -388,14 +636,20 @@ export default function MobilePOSPage() {
         total: Number(data.total || cartSummary.grandTotal),
         amount_paid: Number(data.amount_paid || cartSummary.grandTotal),
         change_amount: Number(data.change_amount || 0),
-        payment_method: data.payment_method || primaryMethod,
+        payment_method: data.payment_method || (isSplit ? "split" : primaryMethod),
         web_url: data.invoice?.web_url,
         customer_name: customer.name,
         customer_phone: customer.phone,
+        bill_sent: Boolean(data.bill_sent),
+        whatsapp_delivery: data.whatsapp_delivery || null,
         raw: data,
       });
+      setMobileWaPhone(customer.phone || "");
+      const waPresentation = resolveWhatsAppPresentation(data.whatsapp_delivery, data.bill_sent);
+      setWaStatus({ state: waPresentation.status, message: waPresentation.message });
 
       // Clear cart on confirmed success
+      setPriceDrafts({});
       setCart([]);
       setQuotationRef(null);
       setActiveTab("success");
@@ -403,6 +657,7 @@ export default function MobilePOSPage() {
       const msg = parseApiError(err, "Payment checkout failed. Please review cart and retry.");
       setErrorMessage(msg);
     } finally {
+      inFlightSubmitRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -638,82 +893,126 @@ export default function MobilePOSPage() {
               </button>
             </div>
           ) : (
-            <div className="space-y-2">
-              {cart.map((item) => {
-                const lineTotal = item.unit_price * item.quantity;
-                return (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
-                  >
-                    <div className="min-w-0 flex-1 pr-2">
-                      <h4 className="text-xs font-bold text-slate-900 truncate">{item.name}</h4>
-                      <p className="text-[10px] text-slate-400">
-                        {formatCurrency(item.unit_price)} each • Tax: {item.tax_rate}%
-                      </p>
-                      <p className="text-xs font-extrabold text-blue-600 mt-0.5">
-                        {formatCurrency(lineTotal)}
-                      </p>
-                    </div>
+            <div className="space-y-3">
+              {/* Compact Mobile Billing List (Non-card divided rows with editable Unit Price) */}
+              <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-200 overflow-hidden shadow-xs">
+                {cart.map((item) => {
+                  const lineTotal = Math.max(0, item.unit_price * item.quantity - (item.discount || 0));
+                  const isModified =
+                    item.original_unit_price !== undefined &&
+                    Math.abs(item.unit_price - item.original_unit_price) > 0.001;
+                  const draft = priceDrafts[item.id];
+                  return (
+                    <div key={item.id} className="p-2.5 space-y-2 text-xs">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-slate-900 truncate">{item.name}</h4>
+                          <p className="text-[10px] text-slate-400">
+                            {item.sku ? `${item.sku} • ` : ""}
+                            Tax: {item.tax_rate}%
+                            {isModified && (
+                              <span className="ml-1.5 text-amber-600 line-through">
+                                {formatCurrency(item.original_unit_price!)}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-xs font-extrabold text-blue-600 tabular-nums">
+                            {formatCurrency(lineTotal)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeItem(item.id)}
+                            className="text-slate-400 hover:text-rose-600 p-1"
+                            title="Remove Item"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
 
-                    {/* Quantity Stepper (44px touch targets) */}
-                    <div className="flex items-center gap-1.5 shrink-0 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
-                      <button
-                        onClick={() => updateQuantity(item.id, -1)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm active:bg-slate-200"
-                      >
-                        <Minus className="h-3 w-3" />
-                      </button>
-                      <span className="w-5 text-center text-xs font-extrabold text-slate-900">
-                        {item.quantity}
-                      </span>
-                      <button
-                        onClick={() => updateQuantity(item.id, 1)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm active:bg-slate-200"
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(item.id, -1)}
+                            className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm active:bg-slate-200"
+                          >
+                            <Minus className="h-3 w-3" />
+                          </button>
+                          <span className="w-6 text-center text-xs font-extrabold text-slate-900 tabular-nums">
+                            {item.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(item.id, 1)}
+                            className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm active:bg-slate-200"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                        </div>
 
-                    <button
-                      onClick={() => removeItem(item.id)}
-                      className="ml-2 text-slate-400 hover:text-rose-600 p-1"
-                      title="Remove Item"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-semibold text-slate-500">Rate ₹</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            aria-label={`Unit price for ${item.name}`}
+                            value={draft !== undefined ? draft : item.unit_price}
+                            onChange={(e) => updateItemPrice(item.id, e.target.value)}
+                            onBlur={() => commitItemPrice(item.id)}
+                            onFocus={(e) => e.currentTarget.select()}
+                            className={`w-20 rounded-lg border px-2 py-1 text-right text-xs font-bold tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-100 ${
+                              isModified ? "border-amber-400 bg-amber-50/50 text-slate-900" : "border-slate-200 text-slate-900"
+                            }`}
+                          />
+                          {isModified && (
+                            <button
+                              type="button"
+                              onClick={() => resetItemPrice(item.id)}
+                              className="text-[10px] font-bold text-blue-600"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
               {/* Order Calculation Summary Card */}
               <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-1.5 text-xs shadow-sm">
                 <div className="flex justify-between text-slate-500">
                   <span>Subtotal</span>
-                  <span>{formatCurrency(cartSummary.subtotal)}</span>
+                  <span className="tabular-nums">{formatCurrency(cartSummary.subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-slate-500">
                   <span>GST / Taxes</span>
-                  <span>{formatCurrency(cartSummary.totalTax)}</span>
+                  <span className="tabular-nums">{formatCurrency(cartSummary.totalTax)}</span>
                 </div>
                 {cartSummary.roundOff !== 0 && (
                   <div className="flex justify-between text-slate-500">
                     <span>Round-off</span>
-                    <span>{formatCurrency(cartSummary.roundOff)}</span>
+                    <span className="tabular-nums">{formatCurrency(cartSummary.roundOff)}</span>
                   </div>
                 )}
                 <div className="flex justify-between border-t pt-1.5 font-extrabold text-base text-slate-900">
                   <span>Grand Total</span>
-                  <span>{formatCurrency(cartSummary.grandTotal)}</span>
+                  <span className="tabular-nums">{formatCurrency(cartSummary.grandTotal)}</span>
                 </div>
               </div>
 
               {/* Proceed to Payment Action Button */}
               <button
-                onClick={() => setActiveTab("payment")}
+                type="button"
+                onClick={goToPaymentTab}
                 className="w-full rounded-xl bg-blue-600 py-3 text-center text-xs font-extrabold text-white shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
               >
-                <span>Proceed to Payment ({formatCurrency(cartSummary.grandTotal)})</span>
+                <span>Open Payment ({formatCurrency(cartSummary.grandTotal)})</span>
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>
@@ -722,19 +1021,20 @@ export default function MobilePOSPage() {
       )}
 
       {/* ============================================================== */}
-      {/* SCREEN C: MOBILE GUIDED PAYMENT WORKFLOW */}
+      {/* SCREEN C: DIRECT PAYMENT WORKFLOW */}
       {/* ============================================================== */}
       {activeTab === "payment" && (
         <div className="space-y-3.5 animate-in fade-in duration-150">
           <div className="flex items-center justify-between border-b pb-2">
             <button
+              type="button"
               onClick={() => setActiveTab("cart")}
               className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-900"
             >
               <ChevronLeft className="h-4 w-4" />
-              <span>Back to Cart</span>
+              <span>Back to Bill</span>
             </button>
-            <span className="text-xs font-extrabold text-slate-900">
+            <span className="text-xs font-extrabold text-slate-900 tabular-nums">
               Total Due: {formatCurrency(cartSummary.grandTotal)}
             </span>
           </div>
@@ -746,13 +1046,12 @@ export default function MobilePOSPage() {
             </div>
           )}
 
-          {/* Payment Method Selector Grid */}
+          {/* Direct Payment Options Grid */}
           <div>
             <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
-              Select Primary Payment Method
+              Select Payment Option
             </label>
             <div className="grid grid-cols-2 gap-2">
-              {/* Cash */}
               <button
                 type="button"
                 onClick={() => handleSelectPrimaryMethod("cash")}
@@ -771,7 +1070,6 @@ export default function MobilePOSPage() {
                 </div>
               </button>
 
-              {/* UPI */}
               <button
                 type="button"
                 onClick={() => handleSelectPrimaryMethod("upi")}
@@ -785,12 +1083,11 @@ export default function MobilePOSPage() {
                   <QrCode className="h-4 w-4" />
                 </div>
                 <div>
-                  <span className="text-xs font-bold block">UPI QR</span>
+                  <span className="text-xs font-bold block">UPI</span>
                   <span className="text-[10px] text-slate-400">GPay, PhonePe</span>
                 </div>
               </button>
 
-              {/* Card */}
               <button
                 type="button"
                 onClick={() => handleSelectPrimaryMethod("card")}
@@ -809,22 +1106,59 @@ export default function MobilePOSPage() {
                 </div>
               </button>
 
-              {/* Udhaar / Customer Credit */}
+              {creditSalesEnabled && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectPrimaryMethod("credit")}
+                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
+                    primaryMethod === "credit" && !isSplit
+                      ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
+                      : "border-slate-200 bg-white text-slate-700"
+                  }`}
+                >
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-700 shrink-0">
+                    <ClipboardList className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold block">Credit</span>
+                    <span className="text-[10px] text-slate-400">Customer Udhaar</span>
+                  </div>
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={() => handleSelectPrimaryMethod("credit")}
+                onClick={() => handleSelectPrimaryMethod("other")}
                 className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                  primaryMethod === "credit" && !isSplit
+                  primaryMethod === "other" && !isSplit
                     ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
                     : "border-slate-200 bg-white text-slate-700"
                 }`}
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-700 shrink-0">
-                  <ClipboardList className="h-4 w-4" />
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700 shrink-0">
+                  <Landmark className="h-4 w-4" />
                 </div>
                 <div>
-                  <span className="text-xs font-bold block">Udhaar</span>
-                  <span className="text-[10px] text-slate-400">Customer Credit</span>
+                  <span className="text-xs font-bold block">Other</span>
+                  <span className="text-[10px] text-slate-400">Bank / Cheque / Wallet</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSelectHybridMode}
+                className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
+                  isSplit
+                    ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
+                    : "border-slate-200 bg-white text-slate-700"
+                }`}
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 shrink-0">
+                  <Split className="h-4 w-4" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold block">Hybrid / Split</span>
+                  <span className="text-[10px] text-slate-400">Cash + UPI + Card</span>
                 </div>
               </button>
             </div>
@@ -835,25 +1169,30 @@ export default function MobilePOSPage() {
             <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5 shadow-sm">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800">Cash Tendered</span>
-                <span className="text-xs font-extrabold text-blue-600">
+                <span className="text-xs font-extrabold text-blue-600 tabular-nums">
                   {formatCurrency(cashTendered)}
                 </span>
               </div>
 
-              {/* Exact Amount & Quick Tender Pills */}
               <div className="flex flex-wrap gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setCashTendered(cartSummary.grandTotal)}
+                  onClick={() => {
+                    setCashTendered(cartSummary.grandTotal);
+                    setCashDraft(cartSummary.grandTotal.toFixed(2));
+                  }}
                   className="rounded-lg bg-blue-50 border border-blue-200 px-2.5 py-1 text-[11px] font-bold text-blue-700 active:scale-95 transition-all"
                 >
-                  ⚡ Exact (₹{cartSummary.grandTotal})
+                  Exact (₹{cartSummary.grandTotal})
                 </button>
                 {[100, 200, 500, 1000, 2000].map((denom) => (
                   <button
                     key={denom}
                     type="button"
-                    onClick={() => setCashTendered(denom)}
+                    onClick={() => {
+                      setCashTendered(denom);
+                      setCashDraft(String(denom));
+                    }}
                     className="rounded-lg bg-slate-100 border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-700 active:scale-95 transition-all"
                   >
                     ₹{denom}
@@ -861,21 +1200,27 @@ export default function MobilePOSPage() {
                 ))}
               </div>
 
-              {/* Custom Tendered Input */}
-              <div>
-                <input
-                  type="number"
-                  value={cashTendered || ""}
-                  onChange={(e) => setCashTendered(Number(e.target.value) || 0)}
-                  placeholder="Enter amount given by customer..."
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={cashDraft !== "" ? cashDraft : cashTendered || ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw.trim().startsWith("-")) return;
+                  setCashDraft(raw);
+                  const parsed = raw.trim() === "" ? 0 : Number(raw);
+                  if (Number.isFinite(parsed) && parsed >= 0) {
+                    setCashTendered(roundCurrency(parsed));
+                  }
+                }}
+                placeholder="Enter cash amount..."
+                className="w-full rounded-lg border border-slate-200 p-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100 tabular-nums"
+              />
 
-              {/* Change Return Live Computation */}
               <div className="flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs font-bold text-emerald-800">
                 <span>Change to Return:</span>
-                <span className="text-sm font-extrabold">{formatCurrency(cashChange)}</span>
+                <span className="text-sm font-extrabold tabular-nums">{formatCurrency(cashChange)}</span>
               </div>
             </div>
           )}
@@ -886,7 +1231,7 @@ export default function MobilePOSPage() {
               <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-xl bg-slate-100 border border-slate-200">
                 <QrCode className="h-16 w-16 text-slate-700" />
               </div>
-              <p className="text-[11px] text-slate-500">Scan QR Code on store counter or enter UPI UTR</p>
+              <p className="text-[11px] text-slate-500">Scan QR Code on counter or enter UPI UTR</p>
               <input
                 type="text"
                 value={electronicRef}
@@ -911,15 +1256,183 @@ export default function MobilePOSPage() {
             </div>
           )}
 
+          {/* Other Payment Methods */}
+          {primaryMethod === "other" && !isSplit && (
+            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 text-xs shadow-sm">
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: "netbanking" as const, label: "Net Banking", icon: Landmark },
+                  { id: "cheque" as const, label: "Cheque", icon: Receipt },
+                  { id: "wallet" as const, label: "Wallet", icon: Wallet },
+                ].map((om) => (
+                  <button
+                    key={om.id}
+                    type="button"
+                    onClick={() => setOtherMethod(om.id)}
+                    className={`flex items-center justify-center gap-1 rounded-lg border py-2 text-[11px] font-bold ${
+                      otherMethod === om.id
+                        ? "border-blue-600 bg-blue-50 text-blue-700"
+                        : "border-slate-200 text-slate-600"
+                    }`}
+                  >
+                    <om.icon className="h-3.5 w-3.5" />
+                    <span>{om.label}</span>
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={electronicRef}
+                onChange={(e) => setElectronicRef(e.target.value)}
+                placeholder="Reference / Cheque / Wallet Transaction ID..."
+                className="w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          )}
+
+          {/* Hybrid / Split Payment Breakdown */}
+          {isSplit && (
+            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5 text-xs shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
+                  Hybrid Payment Split
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSplitPayments((prev) => [
+                      ...prev,
+                      { payment_method: "netbanking", amount: splitRemaining },
+                    ])
+                  }
+                  className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-0.5"
+                >
+                  <Plus className="h-3 w-3" />
+                  Add Method
+                </button>
+              </div>
+
+              <div className="divide-y divide-slate-200 rounded-lg border border-slate-200 overflow-hidden">
+                {splitPayments.map((row, idx) => {
+                  const draft = splitDrafts[idx];
+                  return (
+                    <div key={idx} className="p-2 flex items-center gap-2 bg-white">
+                      <select
+                        value={row.payment_method}
+                        onChange={(e) => {
+                          const m = e.target.value;
+                          setSplitPayments((prev) =>
+                            prev.map((p, i) => (i === idx ? { ...p, payment_method: m } : p))
+                          );
+                        }}
+                        className="h-8 rounded border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold uppercase text-slate-800 w-24 shrink-0"
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="upi">UPI</option>
+                        <option value="card">Card</option>
+                        {creditSalesEnabled && <option value="credit">Credit</option>}
+                        <option value="netbanking">Bank</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="wallet">Wallet</option>
+                      </select>
+
+                      <div className="relative flex-1">
+                        <span className="absolute left-2 top-2 text-slate-400 font-bold">₹</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={draft !== undefined ? draft : row.amount || ""}
+                          placeholder="0.00"
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (raw.trim().startsWith("-")) return;
+                            setSplitDrafts((prev) => ({ ...prev, [idx]: raw }));
+                            const parsed = raw.trim() === "" ? 0 : Number(raw);
+                            if (!Number.isFinite(parsed) || parsed < 0) return;
+                            setSplitPayments((prev) =>
+                              prev.map((p, i) =>
+                                i === idx ? { ...p, amount: roundCurrency(parsed) } : p
+                              )
+                            );
+                          }}
+                          onBlur={() => {
+                            setSplitDrafts((prev) => {
+                              const next = { ...prev };
+                              delete next[idx];
+                              return next;
+                            });
+                          }}
+                          className="h-8 w-full rounded border border-slate-200 pl-5 pr-2 text-right font-bold text-slate-900 tabular-nums"
+                        />
+                      </div>
+
+                      {splitRemaining > 0.009 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const fill = Math.max(0, roundCurrency(cartSummary.grandTotal - (totalAllocated - row.amount)));
+                            setSplitPayments((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, amount: fill } : p))
+                            );
+                          }}
+                          className="rounded bg-blue-50 px-1.5 py-1 text-[10px] font-bold text-blue-700 border border-blue-200 shrink-0"
+                        >
+                          Fill
+                        </button>
+                      )}
+
+                      {splitPayments.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSplitDrafts({});
+                            setSplitPayments((prev) => prev.filter((_, i) => i !== idx));
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-600 shrink-0"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 space-y-1 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Total Bill</span>
+                  <span className="font-bold text-slate-900 tabular-nums">{formatCurrency(cartSummary.grandTotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Entered Total</span>
+                  <span className="font-bold text-emerald-700 tabular-nums">{formatCurrency(totalAllocated)}</span>
+                </div>
+                <div className="flex justify-between border-t pt-1 font-extrabold">
+                  <span className="text-slate-700">Remaining</span>
+                  <span className={splitRemaining > 0.009 ? "text-rose-600 tabular-nums" : "text-emerald-700 tabular-nums"}>
+                    {formatCurrency(splitRemaining)}
+                  </span>
+                </div>
+                {cashChange > 0 && (
+                  <div className="flex justify-between text-amber-700 font-bold">
+                    <span>Cash Change</span>
+                    <span className="tabular-nums">{formatCurrency(cashChange)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Customer Credit / Udhaar Notice */}
-          {primaryMethod === "credit" && !isSplit && (
+          {((primaryMethod === "credit" && !isSplit) || splitUsesCredit) && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1.5 text-xs text-amber-800">
               <span className="font-bold flex items-center gap-1">
                 <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
                 Customer Credit Policy
               </span>
               <p className="text-[11px]">
-                Credit sales are authorized only for registered customers. Currently selected:{" "}
+                Credit sales require a registered customer. Currently selected:{" "}
                 <span className="font-bold">{customer.name}</span>
               </p>
               {customer.is_walk_in && (
@@ -928,7 +1441,7 @@ export default function MobilePOSPage() {
                   onClick={() => setShowCustomerModal(true)}
                   className="rounded-lg bg-amber-600 text-white font-bold px-2.5 py-1 text-[10px] mt-1"
                 >
-                  Change to Registered Customer →
+                  Select Registered Customer →
                 </button>
               )}
             </div>
@@ -938,7 +1451,12 @@ export default function MobilePOSPage() {
           <button
             type="button"
             onClick={handleCompleteSale}
-            disabled={isSubmitting}
+            disabled={
+              isSubmitting ||
+              (splitUsesCredit && (customer.is_walk_in || !creditSalesEnabled)) ||
+              isElectronicOverpay ||
+              totalAllocated < cartSummary.grandTotal - 0.009
+            }
             className="w-full rounded-xl bg-blue-600 py-3.5 text-center text-sm font-extrabold text-white shadow-xl shadow-blue-500/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
@@ -1048,7 +1566,15 @@ export default function MobilePOSPage() {
               {confirmedSale.invoice_id && (
                 <button
                   type="button"
-                  onClick={() => downloadInvoicePdf(confirmedSale.invoice_id!, confirmedSale.invoice_number, "a4")}
+                  onClick={() => {
+                    void downloadInvoicePdf(
+                      confirmedSale.invoice_id!,
+                      confirmedSale.invoice_number,
+                      "a4"
+                    ).catch((err) => {
+                      alert(err instanceof Error ? err.message : "Failed to download invoice PDF.");
+                    });
+                  }}
                   className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white py-2.5 text-xs font-bold text-slate-800 shadow-sm active:bg-slate-50"
                 >
                   <Download className="h-3.5 w-3.5 text-emerald-600" />
@@ -1057,19 +1583,96 @@ export default function MobilePOSPage() {
               )}
             </div>
 
-            {confirmedSale.customer_phone && (
-              <button
-                type="button"
-                onClick={() => {
-                  const phone = confirmedSale.customer_phone!.replace(/\D/g, "");
-                  const msg = `Dear ${confirmedSale.customer_name || "Customer"}, thank you for shopping with us! Your invoice #${confirmedSale.invoice_number} of ${formatCurrency(confirmedSale.total)} is confirmed. View invoice: ${window.location.origin}/invoices/${confirmedSale.invoice_number}`;
-                  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
-                }}
-                className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 py-2.5 text-xs font-bold text-emerald-800 shadow-sm active:bg-emerald-100"
-              >
-                <Share2 className="h-3.5 w-3.5 text-emerald-700" />
-                <span>WhatsApp Bill to {confirmedSale.customer_phone}</span>
-              </button>
+            {confirmedSale.invoice_id && (
+              <div className="space-y-2 text-left">
+                {waStatus.state !== "idle" && (
+                  <div
+                    className={`rounded-xl border px-3 py-2 text-xs font-medium flex items-center gap-1.5 ${
+                      waStatus.state === "sent"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : waStatus.state === "failed"
+                        ? "border-amber-300 bg-amber-50 text-amber-900"
+                        : waStatus.state === "queued" || waStatus.state === "sending"
+                        ? "border-blue-200 bg-blue-50 text-blue-800"
+                        : "border-slate-200 bg-slate-50 text-slate-700"
+                    }`}
+                  >
+                    {(waStatus.state === "queued" || waStatus.state === "sending") && (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                    )}
+                    <span>{waStatus.message}</span>
+                  </div>
+                )}
+
+                {!confirmedSale.customer_phone && (
+                  <input
+                    type="tel"
+                    value={mobileWaPhone}
+                    onChange={(e) => setMobileWaPhone(e.target.value)}
+                    placeholder="Enter WhatsApp number (e.g. 9876543210)"
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                )}
+
+                <button
+                  type="button"
+                  disabled={
+                    waStatus.state === "sending" ||
+                    waStatus.state === "queued" ||
+                    (!confirmedSale.customer_phone && !mobileWaPhone.trim())
+                  }
+                  onClick={async () => {
+                    if (!confirmedSale.invoice_id || waStatus.state === "sending" || waStatus.state === "queued") return;
+                    const previousState = waStatus.state;
+                    setWaStatus({ state: "sending", message: "Sending Invoice PDF to WhatsApp..." });
+                    try {
+                      const res = await invoiceApi.sendWhatsApp(confirmedSale.invoice_id, {
+                        phone: !confirmedSale.customer_phone ? mobileWaPhone.trim() : undefined,
+                        force: previousState === "sent",
+                      });
+                      const data = res.data;
+                      if (data?.status === "sent" || data?.status === "already_sent") {
+                        setWaStatus({
+                          state: "sent",
+                          message: `✓ Invoice sent to WhatsApp${data?.filename ? ` (${data.filename})` : ""}`,
+                        });
+                      } else if (data?.status === "queued" || data?.status === "processing") {
+                        setWaStatus({
+                          state: "queued",
+                          message: "Sending invoice PDF via WhatsApp...",
+                        });
+                      } else {
+                        setWaStatus({
+                          state: "failed",
+                          message: `⚠ Invoice created successfully, but WhatsApp delivery failed${data?.error ? `: ${data.error}` : "."}`,
+                        });
+                      }
+                    } catch (err: unknown) {
+                      const msg = parseApiError(err, "WhatsApp delivery failed.");
+                      setWaStatus({
+                        state: "failed",
+                        message: `⚠ Invoice created successfully, but WhatsApp delivery failed: ${msg}`,
+                      });
+                    }
+                  }}
+                  className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 py-2.5 text-xs font-bold text-emerald-800 shadow-sm active:bg-emerald-100 disabled:opacity-50"
+                >
+                  {waStatus.state === "sending" || waStatus.state === "queued" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-700" />
+                  ) : (
+                    <Share2 className="h-3.5 w-3.5 text-emerald-700" />
+                  )}
+                  <span>
+                    {waStatus.state === "sending" || waStatus.state === "queued"
+                      ? "Sending Invoice PDF..."
+                      : waStatus.state === "sent"
+                      ? "Resend Invoice PDF on WhatsApp"
+                      : waStatus.state === "failed"
+                      ? "Retry WhatsApp Invoice PDF"
+                      : `Send Invoice PDF${confirmedSale.customer_phone ? ` to ${confirmedSale.customer_phone}` : " on WhatsApp"}`}
+                  </span>
+                </button>
+              </div>
             )}
 
             {confirmedSale.web_url && (

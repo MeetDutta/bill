@@ -8,5 +8,6 @@ urlpatterns = [
     path("config/test-connection/", views.WhatsAppConnectionTestView.as_view(), name="whatsapp-test-connection-alias"),
     path("templates/", views.WhatsAppTemplateListView.as_view(), name="whatsapp-template-list"),
     path("messages/", views.WhatsAppMessageListView.as_view(), name="whatsapp-message-list"),
+    path("messages/<uuid:pk>/retry/", views.WhatsAppMessageRetryView.as_view(), name="whatsapp-message-retry"),
     path("webhook/", views.WhatsAppWebhookView.as_view(), name="whatsapp-webhook"),
 ]

@@ -62,3 +62,11 @@ def process_webhook_task(data):
                 msg_id = msg.get("id")
                 # Can be extended for customer opt-out or inbound replies
                 pass
+
+
+from .service import (  # noqa: E402, F401
+    send_birthday_message_task,
+    send_coupon_task,
+    send_digital_bill_task,
+    send_loyalty_notification_task,
+)

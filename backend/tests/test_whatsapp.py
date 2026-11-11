@@ -53,9 +53,21 @@ class WhatsAppPipelineTests(TestCase):
         self.assertIn("error", res)
         self.assertEqual(res["error"], "WhatsApp not configured")
 
-    @patch("apps.whatsapp.service.WhatsAppService.send_text")
-    def test_whatsapp_send_success_records_message(self, mock_send):
-        mock_send.return_value = {"messages": [{"id": "wamid.TEST_12345"}]}
+    @patch("apps.whatsapp.service.requests.post")
+    def test_whatsapp_send_success_records_message(self, mock_post):
+        from unittest.mock import Mock
+
+        upload_resp = Mock()
+        upload_resp.ok = True
+        upload_resp.status_code = 200
+        upload_resp.json.return_value = {"id": "MEDIA_12345"}
+
+        send_resp = Mock()
+        send_resp.ok = True
+        send_resp.status_code = 200
+        send_resp.json.return_value = {"messages": [{"id": "wamid.TEST_12345"}]}
+
+        mock_post.side_effect = [upload_resp, send_resp]
 
         WhatsAppConfig.objects.create(
             organization=self.org,
@@ -67,11 +79,30 @@ class WhatsAppPipelineTests(TestCase):
 
         res = send_digital_bill_task(str(self.tx.id))
         self.assertEqual(res["status"], "sent")
+        self.assertEqual(res["media_id"], "MEDIA_12345")
+        self.assertEqual(res["mime_type"], "application/pdf")
+        self.assertIn(self.invoice.invoice_number, res["filename"])
 
         msg = WhatsAppMessage.objects.get(provider_message_id="wamid.TEST_12345")
         self.assertEqual(msg.customer, self.customer)
+        self.assertEqual(msg.message_type, "document")
         self.assertEqual(msg.status, "sent")
         self.assertIsNotNone(msg.sent_at)
+        self.assertEqual(msg.metadata["media_id"], "MEDIA_12345")
+
+        self.assertEqual(mock_post.call_count, 2)
+        upload_call = mock_post.call_args_list[0]
+        self.assertIn("/PNID_123/media", upload_call.args[0])
+        uploaded_file_tuple = upload_call.kwargs["files"]["file"]
+        self.assertEqual(uploaded_file_tuple[2], "application/pdf")
+        self.assertTrue(uploaded_file_tuple[1].startswith(b"%PDF-"))
+
+        send_call = mock_post.call_args_list[1]
+        self.assertIn("/PNID_123/messages", send_call.args[0])
+        payload = send_call.kwargs["json"]
+        self.assertEqual(payload["type"], "document")
+        self.assertEqual(payload["document"]["id"], "MEDIA_12345")
+        self.assertEqual(payload["document"]["caption"], "Thank you for your purchase. Your invoice is attached.")
 
     def test_webhook_processing_updates_delivered_and_read(self):
         msg = WhatsAppMessage.objects.create(

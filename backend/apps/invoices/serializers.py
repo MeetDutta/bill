@@ -18,6 +18,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
     origin_quotation_id = serializers.SerializerMethodField()
     origin_quotation_number = serializers.SerializerMethodField()
     seller_details = serializers.SerializerMethodField()
+    bill_sent = serializers.BooleanField(source="transaction.bill_sent", read_only=True)
+    whatsapp_delivery = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -28,8 +30,13 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "transaction_details", "organization_name", "store_name", "customer_name", "customer_phone",
             "subtotal", "discount", "tax", "total", "payment_status", "payment_method",
             "origin_quotation_id", "origin_quotation_number", "seller_details",
+            "bill_sent", "whatsapp_delivery",
         ]
         read_only_fields = ["id", "secure_token", "created_at", "organization"]
+
+    def get_whatsapp_delivery(self, obj):
+        from apps.whatsapp.service import get_invoice_whatsapp_status
+        return get_invoice_whatsapp_status(obj)
 
     def get_transaction_details(self, obj):
         from apps.transactions.serializers import TransactionSerializer
@@ -255,6 +262,8 @@ class InvoiceListSerializer(serializers.ModelSerializer):
     payment_status = serializers.CharField(source="transaction.payment_status", read_only=True)
     payment_method = serializers.CharField(source="transaction.payment_method", read_only=True)
     origin_quotation_id = serializers.SerializerMethodField()
+    bill_sent = serializers.SerializerMethodField()
+    whatsapp_delivery = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -264,7 +273,18 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             "customer_name", "customer_phone", "store_name", "transaction_date",
             "subtotal", "discount", "tax", "total",
             "payment_status", "payment_method", "origin_quotation_id",
+            "bill_sent", "whatsapp_delivery",
         ]
+
+    def get_bill_sent(self, obj):
+        return bool(obj.transaction.bill_sent) if obj.transaction else False
+
+    def get_whatsapp_delivery(self, obj):
+        whatsapp_map = self.context.get("whatsapp_map")
+        if isinstance(whatsapp_map, dict):
+            return whatsapp_map.get(f"invoice:{obj.id}")
+        from apps.whatsapp.service import get_invoice_whatsapp_status
+        return get_invoice_whatsapp_status(obj)
 
     def get_customer_name(self, obj):
         if not obj.transaction:

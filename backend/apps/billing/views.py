@@ -1,5 +1,6 @@
 from decimal import Decimal
 import secrets
+import uuid
 from django.db import transaction
 from django.db.models import Q
 from rest_framework import permissions, status, renderers, parsers
@@ -113,7 +114,7 @@ class POSProductSearchView(APIView):
 
     def get(self, request):
         org = request.user.organization
-        query = request.GET.get("q", "").strip()
+        query = (request.GET.get("q") or request.GET.get("search") or "").strip()
         category = request.GET.get("category", "").strip()
         low_stock_only = request.GET.get("low_stock") == "true"
 
@@ -290,13 +291,38 @@ class POSCalculateView(APIView):
         )
 
         items = request.data.get("items", [])
+        if not isinstance(items, list):
+            raise ValidationError("Items must be a list.")
+
+        # Resolve org products for items missing unit_price/tax_rate or recording catalog original price
+        product_ids = [it.get("product_id") for it in items if isinstance(it, dict) and it.get("product_id")]
+        product_map = {}
+        if product_ids:
+            for prod in Product.objects.filter(organization=org, id__in=product_ids):
+                product_map[str(prod.id)] = prod
+
+        normalized_items = []
+        for it in items:
+            if not isinstance(it, dict):
+                raise ValidationError("Each cart item must be an object.")
+            entry = dict(it)
+            prod = product_map.get(str(entry.get("product_id"))) if entry.get("product_id") else None
+            if prod:
+                if entry.get("unit_price") is None or str(entry.get("unit_price")).strip() == "":
+                    entry["unit_price"] = prod.selling_price
+                if entry.get("tax_rate") is None or str(entry.get("tax_rate")).strip() == "":
+                    entry["tax_rate"] = prod.tax_rate
+                if entry.get("original_unit_price") is None:
+                    entry["original_unit_price"] = str(prod.selling_price)
+            normalized_items.append(entry)
+
         overall_disc_type = request.data.get("overall_discount_type", "fixed")
-        overall_disc_val = Decimal(str(request.data.get("overall_discount_value") or 0))
-        coupon_discount = Decimal(str(request.data.get("coupon_discount") or 0))
+        overall_disc_val = request.data.get("overall_discount_value", 0)
+        coupon_discount = request.data.get("coupon_discount", 0)
         is_interstate = bool(request.data.get("is_interstate", False))
 
         result = CartEngine.calculate_cart(
-            items=items,
+            items=normalized_items,
             overall_discount_type=overall_disc_type,
             overall_discount_value=overall_disc_val,
             coupon_discount=coupon_discount,
@@ -1010,6 +1036,16 @@ class POSSalesReportView(APIView):
         return Response(result)
 
 
+def _parse_optional_uuid(raw_value, field_name: str):
+    cleaned = (str(raw_value).strip() if raw_value is not None else "") or None
+    if not cleaned:
+        return None
+    try:
+        return str(uuid.UUID(cleaned))
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid {field_name} parameter.")
+
+
 class POSTallyPreviewView(APIView):
     """
     Validates and previews Tally XML accounting voucher data before export.
@@ -1018,15 +1054,26 @@ class POSTallyPreviewView(APIView):
 
     def get(self, request):
         from .services.tally_export_service import TallyExportService
+        org = getattr(request.user, "organization", None)
+        if org is None:
+            return Response(
+                {"error": "No organization associated with this account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         include_prev = request.GET.get("include_previously_exported", "false").lower() in ["true", "1"]
-        preview = TallyExportService.validate_and_preview(
-            organization=request.user.organization,
-            store_id=request.GET.get("store_id"),
-            period=request.GET.get("period", "today"),
-            start_date=request.GET.get("start_date"),
-            end_date=request.GET.get("end_date"),
-            include_previously_exported=include_prev,
-        )
+        try:
+            store_id = _parse_optional_uuid(request.GET.get("store_id"), "store_id")
+            preview = TallyExportService.validate_and_preview(
+                organization=org,
+                store_id=store_id,
+                period=(request.GET.get("period") or "today").strip() or "today",
+                start_date=(request.GET.get("start_date") or "").strip() or None,
+                end_date=(request.GET.get("end_date") or "").strip() or None,
+                include_previously_exported=include_prev,
+            )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(preview)
 
 
@@ -1039,18 +1086,29 @@ class POSTallyExportView(APIView):
     def post(self, request):
         from django.http import HttpResponse
         from .services.tally_export_service import TallyExportService
+        org = getattr(request.user, "organization", None)
+        if org is None:
+            return Response(
+                {"error": "No organization associated with this account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         include_prev = request.data.get("include_previously_exported", False)
         if isinstance(include_prev, str):
             include_prev = include_prev.lower() in ["true", "1"]
 
         try:
+            store_id = _parse_optional_uuid(
+                request.data.get("store_id") or request.GET.get("store_id"),
+                "store_id",
+            )
             xml_content, filename, summary = TallyExportService.generate_tally_xml(
-                organization=request.user.organization,
+                organization=org,
                 user=request.user,
-                store_id=request.data.get("store_id") or request.GET.get("store_id"),
-                period=request.data.get("period") or request.GET.get("period", "today"),
-                start_date=request.data.get("start_date") or request.GET.get("start_date"),
-                end_date=request.data.get("end_date") or request.GET.get("end_date"),
+                store_id=store_id,
+                period=(request.data.get("period") or request.GET.get("period") or "today").strip() or "today",
+                start_date=(request.data.get("start_date") or request.GET.get("start_date") or "").strip() or None,
+                end_date=(request.data.get("end_date") or request.GET.get("end_date") or "").strip() or None,
                 include_previously_exported=include_prev,
             )
         except ValueError as e:
@@ -1078,7 +1136,13 @@ class POSTallyConfigView(APIView):
 
     def get(self, request):
         from .services.tally_export_service import TallyExportService
-        cfg = TallyExportService.get_or_create_config(request.user.organization)
+        org = getattr(request.user, "organization", None)
+        if org is None:
+            return Response(
+                {"error": "No organization associated with this account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        cfg = TallyExportService.get_or_create_config(org)
         return Response({
             "company_name": cfg.company_name,
             "sales_ledger": cfg.sales_ledger,
@@ -1098,7 +1162,13 @@ class POSTallyConfigView(APIView):
 
     def post(self, request):
         from .services.tally_export_service import TallyExportService
-        cfg = TallyExportService.get_or_create_config(request.user.organization)
+        org = getattr(request.user, "organization", None)
+        if org is None:
+            return Response(
+                {"error": "No organization associated with this account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        cfg = TallyExportService.get_or_create_config(org)
         data = request.data
         fields = [
             "company_name", "sales_ledger", "cgst_ledger", "sgst_ledger", "igst_ledger",

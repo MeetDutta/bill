@@ -5,7 +5,7 @@ from datetime import datetime, time
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
-from django.db import transaction as db_transaction
+from django.db import IntegrityError, transaction as db_transaction
 from django.db.models import Sum, Q
 from django.utils import timezone
 
@@ -79,26 +79,49 @@ class TallyExportService:
 
     @classmethod
     def get_or_create_config(cls, organization) -> TallyLedgerConfig:
-        config, _ = TallyLedgerConfig.objects.get_or_create(
-            organization=organization,
-            defaults={
-                "company_name": organization.legal_name or organization.name,
-                "sales_ledger": "Sales Account",
-                "cgst_ledger": "Output CGST",
-                "sgst_ledger": "Output SGST",
-                "igst_ledger": "Output IGST",
-                "cash_ledger": "Cash",
-                "bank_ledger": "Bank Account",
-                "upi_ledger": "UPI Collections",
-                "card_ledger": "Card Collections",
-                "debtor_ledger": "Sundry Debtors",
-                "discount_ledger": "Discount Allowed",
-                "round_off_ledger": "Round Off",
-                "credit_note_ledger": "Sales Returns",
-                "include_inventory_details": True,
-            },
+        if organization is None:
+            raise ValueError("Organization is required for Tally ledger configuration.")
+
+        existing = list(
+            TallyLedgerConfig.objects.filter(organization=organization).order_by(
+                "-updated_at", "created_at", "id"
+            )
         )
-        return config
+        if existing:
+            config = existing[0]
+            if len(existing) > 1:
+                extra_ids = [c.id for c in existing[1:]]
+                TallyLedgerConfig.objects.filter(id__in=extra_ids).delete()
+            return config
+
+        try:
+            with db_transaction.atomic():
+                return TallyLedgerConfig.objects.create(
+                    organization=organization,
+                    company_name=organization.legal_name or organization.name,
+                    sales_ledger="Sales Account",
+                    cgst_ledger="Output CGST",
+                    sgst_ledger="Output SGST",
+                    igst_ledger="Output IGST",
+                    cash_ledger="Cash",
+                    bank_ledger="Bank Account",
+                    upi_ledger="UPI Collections",
+                    card_ledger="Card Collections",
+                    debtor_ledger="Sundry Debtors",
+                    discount_ledger="Discount Allowed",
+                    round_off_ledger="Round Off",
+                    credit_note_ledger="Sales Returns",
+                    include_inventory_details=True,
+                )
+        except IntegrityError:
+            config = (
+                TallyLedgerConfig.objects.filter(organization=organization)
+                .order_by("-updated_at", "created_at", "id")
+                .first()
+            )
+            if config is None:
+                raise
+            return config
 
     @classmethod
     def normalize_state(cls, state_val: str, gstin_val: str = None) -> tuple[str, str]:

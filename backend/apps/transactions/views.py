@@ -293,24 +293,18 @@ class TransactionIngestView(APIView):
                     metadata={"invoice_number": tx.invoice_number, "total": str(tx.total)},
                 )
 
-        # 5. Background Pipeline
+        # 5. Background Pipeline (post-commit)
         try:
-            from apps.invoices.tasks import generate_invoice_task
-            generate_invoice_task.delay(str(tx.id))
+            from apps.whatsapp.service import prepare_and_dispatch_post_sale_invoice_whatsapp
+            prepare_and_dispatch_post_sale_invoice_whatsapp(str(tx.id), dispatch_whatsapp=True)
         except Exception as e:
-            logger.warning("Failed to enqueue generate_invoice_task: %s", e)
+            logger.warning("Failed to dispatch post-sale invoice WhatsApp pipeline: %s", e)
 
         try:
             from apps.loyalty.tasks import calculate_loyalty_task
             calculate_loyalty_task.delay(str(tx.id), str(org.id))
         except Exception as e:
             logger.warning("Failed to enqueue calculate_loyalty_task: %s", e)
-
-        try:
-            from apps.whatsapp.tasks import send_digital_bill_task
-            send_digital_bill_task.delay(str(tx.id))
-        except Exception as e:
-            logger.warning("Failed to enqueue send_digital_bill_task: %s", e)
 
         try:
             from apps.billing.services.realtime_service import RealtimeService

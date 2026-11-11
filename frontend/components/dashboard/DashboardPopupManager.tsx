@@ -290,8 +290,9 @@ export function DashboardPopupManager({
     setDownloadingPdf(true);
     try {
       await downloadInvoicePdf(id, num);
-    } catch {
-      window.open(`/api/v1/invoices/${id}/pdf/`, "_blank");
+    } catch (err) {
+      console.error("Failed to download invoice PDF:", err);
+      alert(err instanceof Error ? err.message : "Failed to download invoice PDF.");
     } finally {
       setDownloadingPdf(false);
     }

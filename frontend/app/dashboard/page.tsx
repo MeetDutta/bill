@@ -517,7 +517,7 @@ export default function DashboardPage() {
         </Link>
 
         <Link
-          href="/dashboard/quotations"
+          href="/dashboard/quotations?action=new"
           className="flex items-center gap-2.5 p-3 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors touch-target-min"
         >
           <div className="h-8 w-8 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-400 flex items-center justify-center shrink-0">

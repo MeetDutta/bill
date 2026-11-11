@@ -115,9 +115,14 @@ class CheckoutService:
             elif item.get("barcode") and item.get("barcode") in product_map:
                 p = product_map[item.get("barcode")]
 
-            qty = Decimal(str(item.get("quantity") or 1))
-            if qty <= Decimal("0.00"):
-                raise ValidationError(f"Invalid quantity {qty} for item {item.get('name')}.")
+            raw_qty = item.get("quantity")
+            qty = CartEngine.parse_decimal(
+                raw_qty if raw_qty is not None and str(raw_qty).strip() != "" else Decimal("1.00"),
+                "quantity",
+                min_value=Decimal("0.00"),
+                allow_zero=False,
+                item_label=str(item.get("name") or item.get("sku") or item.get("product_id") or ""),
+            )
 
             # If an explicit product identifier was passed, verify it is valid and active
             if not p:
@@ -139,22 +144,56 @@ class CheckoutService:
                     else:
                         raise ValidationError(f"Product '{ident}' not found.")
 
-            # Price from product or override
+            # Price from product or explicit per-bill override (never mutates master Product price)
+            raw_unit_price = item.get("unit_price")
+            has_custom_price = raw_unit_price is not None and str(raw_unit_price).strip() != ""
+            raw_tax_rate = item.get("tax_rate")
+            has_custom_tax = raw_tax_rate is not None and str(raw_tax_rate).strip() != ""
+            raw_discount = item.get("discount")
+            item_discount = (
+                CartEngine.parse_decimal(raw_discount, "discount", item_label=str(item.get("name") or ""))
+                if raw_discount is not None and str(raw_discount).strip() != ""
+                else Decimal("0.00")
+            )
+
             if p:
-                unit_price = Decimal(str(item.get("unit_price") or p.selling_price))
-                tax_rate = Decimal(str(item.get("tax_rate") if item.get("tax_rate") is not None else p.tax_rate))
+                unit_price = (
+                    CartEngine.parse_decimal(raw_unit_price, "unit_price", item_label=item.get("name") or p.name)
+                    if has_custom_price
+                    else p.selling_price
+                )
+                tax_rate = (
+                    CartEngine.parse_decimal(raw_tax_rate, "tax_rate", item_label=item.get("name") or p.name)
+                    if has_custom_tax
+                    else p.tax_rate
+                )
                 hsn_code = item.get("hsn_code") or p.hsn_code or ""
                 name = item.get("name") or p.name
                 product_id = p.id
             else:
                 # Custom line item / quick item
-                unit_price = Decimal(str(item.get("unit_price") or 0))
-                tax_rate = Decimal(str(item.get("tax_rate") or config.default_tax_rate))
+                unit_price = (
+                    CartEngine.parse_decimal(
+                        raw_unit_price, "unit_price", item_label=item.get("name") or "Custom Item"
+                    )
+                    if has_custom_price
+                    else Decimal("0.00")
+                )
+                tax_rate = (
+                    CartEngine.parse_decimal(
+                        raw_tax_rate, "tax_rate", item_label=item.get("name") or "Custom Item"
+                    )
+                    if has_custom_tax
+                    else config.default_tax_rate
+                )
                 hsn_code = item.get("hsn_code") or ""
                 name = item.get("name") or "Custom Item"
                 product_id = None
 
-            attributes = item.get("attributes") or (p.product_attributes if p else {})
+            raw_attrs = item.get("attributes")
+            attributes = dict(raw_attrs) if isinstance(raw_attrs, dict) else dict((p.product_attributes if p else {}) or {})
+            if p and round_decimal(unit_price) != round_decimal(p.selling_price):
+                attributes["original_unit_price"] = str(round_decimal(p.selling_price))
 
             prepared_items.append({
                 "product": p,
@@ -162,7 +201,8 @@ class CheckoutService:
                 "name": name,
                 "quantity": qty,
                 "unit_price": unit_price,
-                "discount": Decimal(str(item.get("discount") or 0)),
+                "original_unit_price": round_decimal(p.selling_price) if p else unit_price,
+                "discount": item_discount,
                 "discount_type": item.get("discount_type", "fixed"),
                 "tax_rate": tax_rate,
                 "hsn_code": hsn_code,
@@ -170,7 +210,12 @@ class CheckoutService:
             })
 
         # 4. Discount Permission Check
-        overall_disc_val = Decimal(str(cart_data.get("overall_discount_value") or 0))
+        raw_overall_disc = cart_data.get("overall_discount_value")
+        overall_disc_val = (
+            CartEngine.parse_decimal(raw_overall_disc, "overall_discount_value")
+            if raw_overall_disc is not None and str(raw_overall_disc).strip() != ""
+            else Decimal("0.00")
+        )
         overall_disc_type = cart_data.get("overall_discount_type", "fixed")
         # Check cashier limits if user is a cashier
         user_role = getattr(user, "role", "cashier") if user else "cashier"
@@ -215,7 +260,10 @@ class CheckoutService:
             items=prepared_items,
             overall_discount_type=overall_disc_type,
             overall_discount_value=overall_disc_val,
-            coupon_discount=Decimal(str(cart_data.get("coupon_discount") or 0)),
+            coupon_discount=CartEngine.parse_decimal(
+                cart_data.get("coupon_discount") if cart_data.get("coupon_discount") not in (None, "") else Decimal("0.00"),
+                "coupon_discount",
+            ),
             gst_enabled=gst_enabled,
             is_tax_inclusive=is_tax_inclusive,
             is_interstate=is_interstate,
@@ -658,10 +706,10 @@ class CheckoutService:
             logger.warning("Failed to evaluate notifications after checkout: %s", e)
 
         try:
-            from apps.invoices.tasks import generate_invoice_task
-            generate_invoice_task.delay(str(tx.id))
+            from apps.whatsapp.service import prepare_and_dispatch_post_sale_invoice_whatsapp
+            prepare_and_dispatch_post_sale_invoice_whatsapp(str(tx.id), dispatch_whatsapp=True)
         except Exception as e:
-            logger.warning("Failed to enqueue generate_invoice_task: %s", e)
+            logger.warning("Failed to dispatch post-sale invoice WhatsApp pipeline: %s", e)
 
         try:
             from apps.loyalty.tasks import calculate_loyalty_task
@@ -669,18 +717,22 @@ class CheckoutService:
         except Exception as e:
             logger.warning("Failed to enqueue calculate_loyalty_task: %s", e)
 
-        if config.auto_send_digital_bill:
-            try:
-                from apps.whatsapp.tasks import send_digital_bill_task
-                send_digital_bill_task.delay(str(tx.id))
-            except Exception as e:
-                logger.warning("Failed to enqueue send_digital_bill_task: %s", e)
-
         return cls._format_checkout_response(tx)
 
     @classmethod
     def _format_checkout_response(cls, tx: Transaction) -> dict:
-        invoice = getattr(tx, "invoice", None)
+        try:
+            tx.refresh_from_db(fields=["bill_sent", "bill_sent_at"])
+        except Exception:
+            pass
+        invoice = Invoice.objects.filter(transaction=tx).first() or getattr(tx, "invoice", None)
+        whatsapp_delivery = None
+        if invoice:
+            try:
+                from apps.whatsapp.service import get_invoice_whatsapp_status
+                whatsapp_delivery = get_invoice_whatsapp_status(invoice)
+            except Exception as e:
+                logger.warning("Failed to resolve whatsapp_delivery status: %s", e)
         config = BusinessConfig.objects.filter(organization=tx.organization).first()
         items_data = []
         for it in tx.items.select_related("product").all():
@@ -705,6 +757,11 @@ class CheckoutService:
                 "unit": item_unit,
                 "quantity": str(it.quantity),
                 "unit_price": str(it.unit_price),
+                "original_unit_price": (
+                    str(it.attributes["original_unit_price"])
+                    if isinstance(it.attributes, dict) and "original_unit_price" in it.attributes
+                    else (str(prod.selling_price) if prod else str(it.unit_price))
+                ),
                 "discount": str(it.discount),
                 "tax": str(it.tax),
                 "tax_rate": str(it.tax_rate),
@@ -774,6 +831,8 @@ class CheckoutService:
             "payment_status": tx.payment_status,
             "payment_method": tx.payment_method,
             "tax_breakup": tx.tax_breakup,
+            "bill_sent": tx.bill_sent,
+            "whatsapp_delivery": whatsapp_delivery,
             "items": items_data,
             "payments": payments_data,
             "invoice": {

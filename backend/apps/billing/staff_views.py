@@ -15,6 +15,7 @@ from apps.invoices.serializers import InvoiceListSerializer, QuotationListSerial
 from apps.stores.models import Store
 from apps.transactions.models import SalesReturn, Transaction, TransactionPayment
 from common.pagination import StandardPagination
+from common.permissions import IsCashierOrAbove
 
 ADMIN_ROLES = ("super_admin", "org_admin", "owner", "store_manager", "manager")
 
@@ -210,6 +211,7 @@ class StaffQuotationListView(StaffBaseView):
     Staff-scoped Quotation List API.
     Cashiers/staff can only view quotations created by themselves.
     """
+    permission_classes = [permissions.IsAuthenticated, IsCashierOrAbove]
 
     def get(self, request):
         self.check_active_staff(request)

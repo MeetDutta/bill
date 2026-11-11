@@ -1,3 +1,5 @@
+import api from "@/lib/api";
+import { parseApiError } from "@/lib/utils";
 import { indianNumberToWords } from "./numberToWords";
 
 /**
@@ -976,25 +978,138 @@ export function printA4TaxInvoice(data: PrintReceiptData) {
   printViaIsolatedIframe(html);
 }
 
+export function sanitizePdfFilename(invoiceNumber: string, formatType: "a4" | "thermal" = "a4"): string {
+  const safeBase =
+    String(invoiceNumber || "invoice")
+      .replace(/[^A-Za-z0-9._-]+/g, "_")
+      .replace(/^[._]+|[._]+$/g, "") || "invoice";
+  return `${safeBase}_${formatType}.pdf`;
+}
+
+async function hasPdfSignature(blob: Blob): Promise<boolean> {
+  if (!blob || blob.size < 5) return false;
+  const headerBuffer = await blob.slice(0, 5).arrayBuffer();
+  const bytes = new Uint8Array(headerBuffer);
+  // %PDF-
+  return (
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46 &&
+    bytes[4] === 0x2d
+  );
+}
+
+/**
+ * Fetch genuine binary PDF from authenticated Django endpoint.
+ */
+export async function fetchInvoicePdfBlob(
+  invoiceId: string,
+  formatType: "a4" | "thermal" = "a4",
+  mode: "download" | "raw" = "download"
+): Promise<Blob> {
+  try {
+    const res = await api.get<Blob>(`/invoices/${invoiceId}/pdf/`, {
+      params: {
+        [mode === "download" ? "download" : "raw"]: "true",
+        format_type: formatType,
+      },
+      responseType: "blob",
+    });
+
+    const rawBlob = res.data;
+    if (!(await hasPdfSignature(rawBlob))) {
+      let backendError = "The server did not return a valid PDF document.";
+      try {
+        const text = await rawBlob.text();
+        const parsed = JSON.parse(text);
+        if (parsed?.error || parsed?.detail) {
+          backendError = parsed.error || parsed.detail;
+        }
+      } catch {
+        // Response was not JSON
+      }
+      throw new Error(backendError);
+    }
+
+    return new Blob([rawBlob], { type: "application/pdf" });
+  } catch (err: any) {
+    if (err?.response?.data instanceof Blob) {
+      try {
+        const text = await err.response.data.text();
+        const parsed = JSON.parse(text);
+        if (parsed?.error || parsed?.detail) {
+          throw new Error(parsed.error || parsed.detail);
+        }
+      } catch (inner) {
+        if (inner instanceof Error && inner.message && !(inner instanceof SyntaxError)) {
+          throw inner;
+        }
+      }
+    }
+    if (err instanceof Error && !("response" in err)) {
+      throw err;
+    }
+    throw new Error(parseApiError(err, "Failed to retrieve invoice PDF."));
+  }
+}
+
 /**
  * 3. Stream or Open Pure ReportLab Binary PDF
  */
-export function streamInvoicePdf(invoiceId: string, formatType: "a4" | "thermal" = "a4") {
-  const url = `/api/v1/invoices/${invoiceId}/pdf/?raw=true&format_type=${formatType}`;
-  const win = window.open(url, "_blank");
+export async function streamInvoicePdf(invoiceId: string, formatType: "a4" | "thermal" = "a4") {
+  // Open blank tab synchronously inside the click handler so popup blockers do not block after await
+  const win = window.open("", "_blank");
   if (!win) {
     alert("Popup was blocked by your browser. Please allow popups for this site to view the PDF invoice.");
+    return;
+  }
+
+  try {
+    win.document.title = "Loading Invoice PDF...";
+    if (win.document.body) {
+      win.document.body.innerHTML =
+        '<div style="font-family:system-ui,sans-serif;padding:24px;color:#334155;font-size:14px;">Preparing invoice PDF...</div>';
+    }
+  } catch {
+    // Ignore cross-window DOM write issues
+  }
+
+  try {
+    const pdfBlob = await fetchInvoicePdfBlob(invoiceId, formatType, "raw");
+    const blobUrl = window.URL.createObjectURL(pdfBlob);
+    win.location.replace(blobUrl);
+    setTimeout(() => {
+      window.URL.revokeObjectURL(blobUrl);
+    }, 60_000);
+  } catch (err) {
+    try {
+      win.close();
+    } catch {
+      // Ignore close failure
+    }
+    throw err;
   }
 }
 
 /**
  * 4. Download Pure ReportLab Binary PDF
  */
-export function downloadInvoicePdf(invoiceId: string, invoiceNumber: string, formatType: "a4" | "thermal" = "a4") {
+export async function downloadInvoicePdf(
+  invoiceId: string,
+  invoiceNumber: string,
+  formatType: "a4" | "thermal" = "a4"
+) {
+  const pdfBlob = await fetchInvoicePdfBlob(invoiceId, formatType, "download");
+  const blobUrl = window.URL.createObjectURL(pdfBlob);
   const link = document.createElement("a");
-  link.href = `/api/v1/invoices/${invoiceId}/pdf/?download=true&format_type=${formatType}`;
-  link.download = `${invoiceNumber}_${formatType}.pdf`;
+  link.href = blobUrl;
+  link.download = sanitizePdfFilename(invoiceNumber, formatType);
+  link.rel = "noopener";
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  setTimeout(() => {
+    window.URL.revokeObjectURL(blobUrl);
+  }, 1500);
 }

@@ -430,7 +430,7 @@ export default function MobileDashboardPage() {
         </Link>
 
         <Link
-          href="/dashboard/quotations"
+          href="/m/quotations?action=new"
           className="flex items-center gap-2.5 p-2.5 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors touch-target-min"
         >
           <div className="h-7 w-7 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-400 flex items-center justify-center shrink-0">
@@ -671,7 +671,7 @@ export default function MobileDashboardPage() {
           </button>
 
           <Link
-            href="/dashboard/quotations"
+            href="/m/quotations"
             className="w-full py-2 flex items-center justify-between hover:bg-muted/30 px-1 rounded transition-colors text-xs text-left"
           >
             <div className="flex items-center gap-2">

@@ -97,6 +97,10 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   };
 
   const isAdmin = user && ADMIN_ROLES.includes(user.role);
+  const canAccessQuotations = user?.role !== "inventory";
+  const visibleStaffNavItems = staffNavItems.filter(
+    (item) => item.href !== "/staff/quotations" || canAccessQuotations
+  );
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -128,7 +132,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
           {/* Desktop Navigation Links */}
           <nav className="hidden md:flex items-center gap-1 lg:gap-2">
-            {staffNavItems.map((item) => {
+            {visibleStaffNavItems.map((item) => {
               const Icon = item.icon;
               const isBilling = item.href === "/staff/billing" && (pathname === "/staff/pos" || pathname === "/staff/invoices" || pathname?.startsWith("/staff/billing"));
               const isActive = pathname === item.href || isBilling || (item.href !== "/staff/dashboard" && item.href !== "/staff/billing" && pathname?.startsWith(item.href));
@@ -229,7 +233,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
               )}
             </div>
 
-            {staffNavItems.map((item) => {
+            {visibleStaffNavItems.map((item) => {
               const Icon = item.icon;
               const isBilling = item.href === "/staff/billing" && (pathname === "/staff/pos" || pathname === "/staff/invoices" || pathname?.startsWith("/staff/billing"));
               const isActive = pathname === item.href || isBilling;
@@ -281,7 +285,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
       {/* Mobile Bottom Navigation Bar for Staff */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-card/95 border-t border-border backdrop-blur-md safe-area-bottom shadow-lg">
-        <div className="grid grid-cols-5 h-14 items-center">
+        <div className={cn("grid h-14 items-center", canAccessQuotations ? "grid-cols-5" : "grid-cols-4")}>
           {/* 1. Overview */}
           <Link
             href="/staff/dashboard"
@@ -316,18 +320,20 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
           </Link>
 
           {/* 3. Quotations */}
-          <Link
-            href="/staff/quotations"
-            className={cn(
-              "flex flex-col items-center justify-center h-full transition-colors",
-              pathname === "/staff/quotations"
-                ? "text-primary font-bold"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <FileCheck className="h-4 w-4 sm:h-5 sm:w-5" />
-            <span className="text-[10px] leading-tight mt-0.5">Quotes</span>
-          </Link>
+          {canAccessQuotations && (
+            <Link
+              href="/staff/quotations"
+              className={cn(
+                "flex flex-col items-center justify-center h-full transition-colors",
+                pathname === "/staff/quotations"
+                  ? "text-primary font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <FileCheck className="h-4 w-4 sm:h-5 sm:w-5" />
+              <span className="text-[10px] leading-tight mt-0.5">Quotes</span>
+            </Link>
+          )}
 
           {/* 4. Notifications */}
           <Link

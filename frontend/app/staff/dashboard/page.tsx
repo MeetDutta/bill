@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { formatCurrency } from "@/lib/utils";
+import { downloadInvoicePdf, streamInvoicePdf } from "@/lib/receiptPrinter";
 import { staffApi } from "@/services/api";
 import { useRealtimeSubscription, type RealtimeEventPayload } from "@/services/realtime";
 import {
@@ -94,16 +95,21 @@ export default function StaffDashboardPage() {
 
   const { isConnected } = useRealtimeSubscription(handleRealtimeEvent);
 
-  const handleDownloadPdf = (billId: string, invoiceNum: string) => {
-    const downloadUrl = `/api/v1/invoices/${billId}/pdf/?download=true`;
-    window.open(downloadUrl, "_blank");
+  const handleDownloadPdf = async (billId: string, invoiceNum: string) => {
+    try {
+      await downloadInvoicePdf(billId, invoiceNum || "invoice", "a4");
+    } catch (err) {
+      console.error("Failed to download invoice PDF:", err);
+      alert(err instanceof Error ? err.message : "Failed to download invoice PDF.");
+    }
   };
 
-  const handlePrintPdf = (billId: string) => {
-    const printUrl = `/api/v1/invoices/${billId}/pdf/?raw=true`;
-    const printWindow = window.open(printUrl, "_blank");
-    if (printWindow) {
-      printWindow.focus();
+  const handlePrintPdf = async (billId: string) => {
+    try {
+      await streamInvoicePdf(billId, "a4");
+    } catch (err) {
+      console.error("Failed to preview invoice PDF:", err);
+      alert(err instanceof Error ? err.message : "Failed to open invoice PDF.");
     }
   };
 
@@ -246,16 +252,18 @@ export default function StaffDashboardPage() {
           </div>
           <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
         </Link>
-        <Link
-          href="/staff/quotations"
-          className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent text-foreground transition-colors group"
-        >
-          <div className="flex items-center gap-2">
-            <FileCheck className="h-4 w-4 text-foreground" />
-            <span className="text-xs font-bold">Quotations</span>
-          </div>
-          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
-        </Link>
+        {data?.staff?.role !== "inventory" && (
+          <Link
+            href="/staff/quotations"
+            className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent text-foreground transition-colors group"
+          >
+            <div className="flex items-center gap-2">
+              <FileCheck className="h-4 w-4 text-foreground" />
+              <span className="text-xs font-bold">Quotations</span>
+            </div>
+            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+          </Link>
+        )}
         <Link
           href="/staff/billing?view=history"
           className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent text-foreground transition-colors group"

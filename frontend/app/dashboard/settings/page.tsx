@@ -103,6 +103,7 @@ export default function SettingsPage() {
     max_cashier_discount_percent: 10,
     require_customer: false,
     auto_print_bill: false,
+    auto_send_digital_bill: false,
     low_stock_threshold: 5,
     invoice_elements: {
       show_logo: true,
@@ -440,7 +441,11 @@ export default function SettingsPage() {
       if (!whatsappData.access_token.trim() && hasSavedWhatsAppToken) {
         delete updatePayload.access_token;
       }
-      const res = await whatsappApi.updateConfig(updatePayload);
+      const autoSendEnabled = Boolean(posData.auto_send_digital_bill);
+      const [res, posRes] = await Promise.all([
+        whatsappApi.updateConfig(updatePayload),
+        posApi.updateConfig({ auto_send_digital_bill: autoSendEnabled }),
+      ]);
       if (res?.data?.has_access_token || res?.data?.access_token_configured || whatsappData.access_token.trim()) {
         setHasSavedWhatsAppToken(true);
       }
@@ -455,7 +460,16 @@ export default function SettingsPage() {
       } else {
         setWhatsappData((previous) => ({ ...previous, access_token: "" }));
       }
-      setMessage("WhatsApp API credentials updated and persisted successfully!");
+      if (posRes?.data) {
+        const persistedAutoSend = Boolean(posRes.data.auto_send_digital_bill);
+        setPosData((previous) => ({ ...previous, auto_send_digital_bill: persistedAutoSend }));
+        setInitialPosData((previous) => ({ ...previous, auto_send_digital_bill: persistedAutoSend }));
+      }
+      setMessage(
+        autoSendEnabled && (res?.data?.is_active ?? whatsappData.is_active)
+          ? "WhatsApp credentials & automatic invoice delivery saved and enabled!"
+          : "WhatsApp API credentials & delivery settings saved successfully!"
+      );
     } catch (err: any) {
       setError(parseApiError(err, "Failed to update WhatsApp configuration."));
     } finally {
@@ -1842,23 +1856,48 @@ export default function SettingsPage() {
                 )}
               </div>
 
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-                <div className="flex items-center gap-2">
+              <div className="space-y-3 rounded-lg border border-border/80 bg-muted/20 p-3">
+                <div className="flex items-start gap-2.5">
                   <input
                     type="checkbox"
                     id="whatsapp_active"
                     checked={whatsappData.is_active}
                     onChange={(e) => setWhatsappData({ ...whatsappData, is_active: e.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300 text-primary"
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary"
                   />
-                  <label htmlFor="whatsapp_active" className="text-xs font-medium cursor-pointer">
-                    Enable Automatic WhatsApp Bill Delivery
-                  </label>
+                  <div>
+                    <label htmlFor="whatsapp_active" className="text-xs font-semibold cursor-pointer block">
+                      Enable WhatsApp Cloud API Integration
+                    </label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Allows BillMeet to send invoice PDF attachments using your connected Meta Business number.
+                    </p>
+                  </div>
                 </div>
 
+                <div className="flex items-start gap-2.5 border-t border-border/60 pt-2.5">
+                  <input
+                    type="checkbox"
+                    id="whatsapp_auto_send"
+                    checked={Boolean(posData.auto_send_digital_bill)}
+                    onChange={(e) => setPosData({ ...posData, auto_send_digital_bill: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary"
+                  />
+                  <div>
+                    <label htmlFor="whatsapp_auto_send" className="text-xs font-semibold cursor-pointer block">
+                      Automatically send invoice on WhatsApp after purchase
+                    </label>
+                    <p className="text-[11px] text-muted-foreground">
+                      When enabled and WhatsApp is active, every completed POS checkout and converted quotation automatically sends the PDF invoice in the background when the customer has a valid WhatsApp phone number.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-3 pt-1">
                 <Button type="submit" disabled={savingWhatsApp} className="w-full sm:w-auto h-10 sm:h-9 gap-1.5 text-xs touch-target-min">
                   <Save className="h-3.5 w-3.5" />
-                  {savingWhatsApp ? "Saving..." : "Save WhatsApp Credentials"}
+                  {savingWhatsApp ? "Saving..." : "Save WhatsApp Settings"}
                 </Button>
               </div>
             </form>

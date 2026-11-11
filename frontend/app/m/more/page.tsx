@@ -120,7 +120,7 @@ export default function MobileMorePage() {
             </div>
             <div>
               <span className="font-bold text-slate-900 block">Quotations & Estimates</span>
-              <span className="text-[10px] text-slate-400">Convert estimates to POS orders</span>
+              <span className="text-[10px] text-slate-400">Create quotes &amp; convert to POS bills</span>
             </div>
           </div>
           <ChevronRight className="h-4 w-4 text-slate-400" />

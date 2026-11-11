@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Printer,
   FileText,
   Download,
   Share2,
   CheckCircle2,
+  AlertCircle,
+  Loader2,
   X,
   ExternalLink,
   Receipt,
@@ -21,7 +23,9 @@ import {
   PrintReceiptData,
 } from "@/lib/receiptPrinter";
 import { indianNumberToWords } from "@/lib/numberToWords";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, parseApiError } from "@/lib/utils";
+import { resolveWhatsAppPresentation, WhatsAppUiStatus } from "@/lib/whatsappStatus";
+import { invoiceApi } from "@/services/api";
 
 interface IsolatedReceiptModalProps {
   saleData: any;
@@ -29,6 +33,7 @@ interface IsolatedReceiptModalProps {
   basePath: string;
   onClose: () => void;
   onNewSale: () => void;
+  onWhatsAppUpdated?: (invoiceId: string, delivery: any, billSent?: boolean) => void;
 }
 
 export function IsolatedReceiptModal({
@@ -37,13 +42,70 @@ export function IsolatedReceiptModal({
   basePath,
   onClose,
   onNewSale,
+  onWhatsAppUpdated,
 }: IsolatedReceiptModalProps) {
   const [activeFormat, setActiveFormat] = useState<"thermal" | "a4">("thermal");
+  const [waState, setWaState] = useState<{
+    status: WhatsAppUiStatus;
+    message: string;
+  }>({ status: "idle", message: "" });
+  const [customWaPhone, setCustomWaPhone] = useState("");
+  const [showPhonePrompt, setShowPhonePrompt] = useState(false);
+
+  const invoiceId = saleData ? saleData.invoice?.id || saleData.invoice_id || saleData.id : undefined;
+
+  useEffect(() => {
+    if (!saleData) {
+      setWaState({ status: "idle", message: "" });
+      setCustomWaPhone("");
+      setShowPhonePrompt(false);
+      return;
+    }
+    const presentation = resolveWhatsAppPresentation(saleData.whatsapp_delivery, saleData.bill_sent);
+    setWaState({ status: presentation.status, message: presentation.message });
+    setCustomWaPhone("");
+    setShowPhonePrompt(false);
+  }, [saleData]);
+
+  // Live non-blocking background status polling while WhatsApp auto-delivery is queued/processing
+  useEffect(() => {
+    if (!invoiceId || waState.status !== "queued") return;
+    let cancelled = false;
+    let attempts = 0;
+
+    const pollStatus = async () => {
+      attempts += 1;
+      try {
+        const res = await invoiceApi.getWhatsAppStatus(invoiceId);
+        if (cancelled) return;
+        const delivery = res.data?.whatsapp_delivery;
+        const billSent = Boolean(res.data?.bill_sent);
+        if (delivery || billSent) {
+          const next = resolveWhatsAppPresentation(delivery, billSent);
+          if (next.status !== "queued" && next.status !== "idle") {
+            setWaState({ status: next.status, message: next.message });
+            onWhatsAppUpdated?.(invoiceId, delivery, billSent);
+            return;
+          }
+        }
+      } catch {
+        // Ignore transient poll failure; retry until max attempts
+      }
+      if (!cancelled && attempts < 20) {
+        timer = window.setTimeout(pollStatus, 1500);
+      }
+    };
+
+    let timer = window.setTimeout(pollStatus, 1200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [invoiceId, waState.status, onWhatsAppUpdated]);
 
   if (!saleData) return null;
 
   // Normalize data for printing
-  const invoiceId = saleData.invoice?.id || saleData.invoice_id || saleData.id;
   const invoiceNumber = saleData.invoice_number || saleData.invoice?.invoice_number || "INV-000";
   const customerName = saleData.customer?.name || saleData.customer?.full_name || "Walk-in Customer";
   const customerPhone = saleData.customer?.phone || "";
@@ -162,26 +224,78 @@ export function IsolatedReceiptModal({
     }
   };
 
-  const handleOpenPdf = () => {
-    if (invoiceId) {
-      streamInvoicePdf(invoiceId, activeFormat);
+  const handleOpenPdf = async () => {
+    if (!invoiceId) return;
+    try {
+      await streamInvoicePdf(invoiceId, activeFormat);
+    } catch (err) {
+      console.error("Failed to preview invoice PDF:", err);
+      alert(err instanceof Error ? err.message : "Failed to open invoice PDF.");
     }
   };
 
-  const handleDownloadPdf = () => {
-    if (invoiceId) {
-      downloadInvoicePdf(invoiceId, invoiceNumber, activeFormat);
+  const handleDownloadPdf = async () => {
+    if (!invoiceId) return;
+    try {
+      await downloadInvoicePdf(invoiceId, invoiceNumber, activeFormat);
+    } catch (err) {
+      console.error("Failed to download invoice PDF:", err);
+      alert(err instanceof Error ? err.message : "Failed to download invoice PDF.");
     }
   };
 
-  const handleWhatsApp = () => {
-    if (!customerPhone) return;
-    const cleanPhone = customerPhone.replace(/\D/g, "");
-    const viewUrl = saleData.invoice?.web_url
-      ? `${window.location.origin}${saleData.invoice.web_url}`
-      : `${window.location.origin}/bills/${saleData.invoice?.secure_token || invoiceNumber}`;
-    const msg = `Dear ${customerName}, thank you for your purchase of ₹${total.toFixed(2)} at ${printPayload.seller?.trade_name}. View your digital invoice here: ${viewUrl}`;
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
+  const handleWhatsApp = async (overridePhone?: string) => {
+    if (!invoiceId || waState.status === "sending" || waState.status === "queued") return;
+    const phoneToUse = (overridePhone ?? customWaPhone).trim() || (!saleData.customer?.is_walk_in ? customerPhone : "");
+    if (!phoneToUse || phoneToUse.toLowerCase().startsWith("walkin")) {
+      setShowPhonePrompt(true);
+      setWaState({
+        status: "skipped",
+        message: "Enter a customer WhatsApp phone number below to send the invoice PDF manually.",
+      });
+      return;
+    }
+
+    const previousStatus = waState.status;
+    setWaState({ status: "sending", message: "Preparing & sending invoice PDF to WhatsApp..." });
+    try {
+      const shouldForce = previousStatus === "sent";
+      const res = await invoiceApi.sendWhatsApp(invoiceId, {
+        phone: (overridePhone ?? customWaPhone).trim() || undefined,
+        format_type: activeFormat,
+        force: shouldForce,
+      });
+      const data = res.data;
+      if (data?.status === "sent" || data?.status === "already_sent") {
+        setShowPhonePrompt(false);
+        const delivery = data?.whatsapp_delivery || {
+          status: "sent",
+          filename: data?.filename,
+          phone_number: data?.phone_number,
+        };
+        setWaState({
+          status: "sent",
+          message: `✓ Invoice sent to WhatsApp${data?.filename ? ` (${data.filename})` : ""}`,
+        });
+        onWhatsAppUpdated?.(invoiceId, delivery, true);
+      } else if (data?.status === "queued" || data?.status === "processing") {
+        setWaState({ status: "queued", message: "Sending invoice PDF via WhatsApp..." });
+        onWhatsAppUpdated?.(invoiceId, data?.whatsapp_delivery || { status: data.status }, false);
+      } else {
+        setWaState({
+          status: "failed",
+          message: data?.error
+            ? `⚠ Invoice created successfully, but WhatsApp delivery failed: ${data.error}`
+            : "⚠ Invoice created successfully, but WhatsApp delivery failed.",
+        });
+      }
+    } catch (err: unknown) {
+      const msg = parseApiError(err, "WhatsApp delivery failed.");
+      setWaState({
+        status: "failed",
+        message: `⚠ Invoice created successfully, but WhatsApp delivery failed: ${msg}`,
+      });
+    }
   };
 
   return (
@@ -652,6 +766,82 @@ export function IsolatedReceiptModal({
           )}
         </div>
 
+        {/* Post-Sale Completion & Non-Blocking WhatsApp Delivery Status */}
+        <div
+          className={`rounded-lg border px-3 py-2 text-xs flex flex-col gap-2 ${
+            waState.status === "sent"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : waState.status === "failed"
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              : waState.status === "queued" || waState.status === "sending"
+              ? "border-blue-500/30 bg-blue-500/10 text-blue-800 dark:text-blue-300"
+              : "border-border bg-muted/40 text-foreground"
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-2 text-[11px] opacity-90">
+            <span className="inline-flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="h-3 w-3" /> Payment completed
+            </span>
+            <span>•</span>
+            <span className="inline-flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="h-3 w-3" /> Invoice #{invoiceNumber} created
+            </span>
+          </div>
+
+          {(waState.status !== "idle" || showPhonePrompt) && (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-medium">
+                {(waState.status === "sending" || waState.status === "queued") && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                )}
+                {waState.status === "sent" && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                {(waState.status === "failed" || waState.status === "skipped") && (
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                )}
+                <span>{waState.message || "Enter WhatsApp phone number"}</span>
+              </div>
+              {waState.status === "failed" && !showPhonePrompt && (
+                <button
+                  type="button"
+                  onClick={() => handleWhatsApp()}
+                  className="text-[11px] font-bold underline shrink-0 hover:opacity-80"
+                >
+                  Retry
+                </button>
+              )}
+              {waState.status === "skipped" && !showPhonePrompt && (
+                <button
+                  type="button"
+                  onClick={() => setShowPhonePrompt(true)}
+                  className="text-[11px] font-bold underline shrink-0 hover:opacity-80"
+                >
+                  Send to Phone
+                </button>
+              )}
+            </div>
+          )}
+
+          {showPhonePrompt && (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="tel"
+                value={customWaPhone}
+                onChange={(e) => setCustomWaPhone(e.target.value)}
+                placeholder="Enter customer WhatsApp mobile (e.g. 9876543210)"
+                className="flex-1 rounded border bg-background px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+              <button
+                type="button"
+                onClick={() => handleWhatsApp(customWaPhone)}
+                disabled={waState.status === "sending" || waState.status === "queued" || !customWaPhone.trim()}
+                className="rounded bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Send PDF
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Primary Action Buttons */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -688,15 +878,29 @@ export function IsolatedReceiptModal({
               </button>
             )}
 
-            {/* WhatsApp Bill */}
-            {customerPhone && (
+            {/* WhatsApp PDF Attachment */}
+            {invoiceId && (
               <button
-                onClick={handleWhatsApp}
-                className="flex items-center gap-1 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-semibold text-xs hover:bg-emerald-500/20 transition-colors"
-                title="Send digital bill link via WhatsApp"
+                type="button"
+                onClick={() => handleWhatsApp()}
+                disabled={waState.status === "sending" || waState.status === "queued"}
+                className="flex items-center gap-1 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-semibold text-xs hover:bg-emerald-500/20 transition-colors disabled:opacity-60"
+                title="Send official Invoice PDF attachment via WhatsApp"
               >
-                <Share2 className="h-3.5 w-3.5" />
-                <span>WhatsApp</span>
+                {waState.status === "sending" || waState.status === "queued" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Share2 className="h-3.5 w-3.5" />
+                )}
+                <span>
+                  {waState.status === "sending" || waState.status === "queued"
+                    ? "Sending PDF..."
+                    : waState.status === "sent"
+                    ? "Resend PDF"
+                    : waState.status === "failed"
+                    ? "Retry WhatsApp"
+                    : "WhatsApp PDF"}
+                </span>
               </button>
             )}
           </div>

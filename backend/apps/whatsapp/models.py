@@ -48,11 +48,14 @@ class WhatsAppMessage(UUIDModel, TenantModel, TimeStampedModel):
         ("delivered", "Delivered"),
         ("read", "Read"),
         ("failed", "Failed"),
+        ("skipped", "Skipped"),
     ]
 
     customer = models.ForeignKey(
         "customers.Customer",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="whatsapp_messages",
     )
     phone_number = models.CharField(max_length=20)

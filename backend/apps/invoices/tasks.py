@@ -5,20 +5,14 @@ from celery import shared_task
 logger = logging.getLogger(__name__)
 
 
-@shared_task(name="apps.invoices.tasks.generate_invoice_task")
-def generate_invoice_task(transaction_id):
-    from apps.transactions.models import Transaction
+def ensure_invoice_for_transaction(tx, generate_file=True):
+    """
+    Create or retrieve the canonical Invoice for a Transaction, optionally persisting its ReportLab PDF.
+    Reused across invoice tasks and WhatsApp PDF delivery without duplicating invoice logic.
+    """
     from apps.invoices.models import Invoice
     from apps.invoices.pdf import generate_invoice_pdf
-    from apps.billing.models import BusinessConfig
 
-    try:
-        tx = Transaction.objects.select_related("organization", "store", "customer").prefetch_related("items").get(id=transaction_id)
-    except Transaction.DoesNotExist:
-        logger.error("Transaction %s not found in generate_invoice_task", transaction_id)
-        return {"error": "Transaction not found"}
-
-    # Check if invoice already exists for this transaction
     invoice = Invoice.objects.filter(transaction=tx).first()
     if not invoice:
         secure_token = secrets.token_urlsafe(24)
@@ -45,17 +39,33 @@ def generate_invoice_task(transaction_id):
             if not invoice:
                 raise
 
-    if not invoice.pdf_url:
+    if generate_file and not invoice.pdf_url:
         try:
-            pdf_url = generate_invoice_pdf(invoice)
+            pdf_url = generate_invoice_pdf(invoice, format_type=getattr(invoice, "template_format", "a4") or "a4")
             if pdf_url:
                 invoice.pdf_url = pdf_url
                 invoice.save(update_fields=["pdf_url"])
         except Exception as e:
             logger.error("PDF generation failed for invoice %s: %s", invoice.invoice_number, e)
 
+    return invoice
+
+
+@shared_task(name="apps.invoices.tasks.generate_invoice_task")
+def generate_invoice_task(transaction_id, dispatch_whatsapp=True):
+    from apps.transactions.models import Transaction
+    from apps.billing.models import BusinessConfig
+
+    try:
+        tx = Transaction.objects.select_related("organization", "store", "customer").prefetch_related("items").get(id=transaction_id)
+    except Transaction.DoesNotExist:
+        logger.error("Transaction %s not found in generate_invoice_task", transaction_id)
+        return {"error": "Transaction not found"}
+
+    invoice = ensure_invoice_for_transaction(tx, generate_file=True)
+
     config = BusinessConfig.objects.filter(organization=tx.organization).first()
-    if config and config.auto_send_whatsapp:
+    if dispatch_whatsapp and config and config.auto_send_whatsapp:
         try:
             from apps.whatsapp.tasks import send_digital_bill_task
             send_digital_bill_task.delay(str(tx.id))

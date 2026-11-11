@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { formatCurrency } from "@/lib/utils";
+import { downloadInvoicePdf, streamInvoicePdf } from "@/lib/receiptPrinter";
 import { staffApi } from "@/services/api";
 import {
   UserCheck,
@@ -75,14 +76,21 @@ export default function StaffSalesProfilePage() {
     fetchProfile();
   }, [fetchProfile]);
 
-  const handleDownloadPdf = (invoiceId: string) => {
-    window.open(`/api/v1/invoices/${invoiceId}/pdf/?download=true`, "_blank");
+  const handleDownloadPdf = async (invoiceId: string) => {
+    try {
+      await downloadInvoicePdf(invoiceId, "invoice", "a4");
+    } catch (err) {
+      console.error("Failed to download invoice PDF:", err);
+      alert(err instanceof Error ? err.message : "Failed to download invoice PDF.");
+    }
   };
 
-  const handlePrintPdf = (invoiceId: string) => {
-    const printWindow = window.open(`/api/v1/invoices/${invoiceId}/pdf/?raw=true`, "_blank");
-    if (printWindow) {
-      printWindow.focus();
+  const handlePrintPdf = async (invoiceId: string) => {
+    try {
+      await streamInvoicePdf(invoiceId, "a4");
+    } catch (err) {
+      console.error("Failed to open invoice PDF:", err);
+      alert(err instanceof Error ? err.message : "Failed to open invoice PDF.");
     }
   };
 

@@ -2,8 +2,10 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { quotationApi, customerApi, posApi } from "@/services/api";
-import type { Quotation, QuotationItem, Customer, Product } from "@/types";
+import { quotationApi } from "@/services/api";
+import type { Quotation, WhatsAppDeliverySummary } from "@/types";
+import { QuotationCreateModal } from "@/components/quotations/QuotationCreateModal";
+import { WhatsAppDeliveryBadge } from "@/components/whatsapp/WhatsAppDeliveryBadge";
 import {
   FileCheck,
   Search,
@@ -46,6 +48,7 @@ export default function QuotationsPage() {
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [listError, setListError] = useState("");
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [quotationToConvert, setQuotationToConvert] = useState<Quotation | null>(null);
@@ -54,28 +57,18 @@ export default function QuotationsPage() {
   const [splitPayments, setSplitPayments] = useState<{ payment_method: string; amount: number }[]>([]);
   const [converting, setConverting] = useState(false);
   const [convertError, setConvertError] = useState<string | null>(null);
-  const [convertSuccess, setConvertSuccess] = useState<{ invoice_number: string; invoice_id: string } | null>(null);
-
-  // Create form state
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState("");
-  const [customCustomerName, setCustomCustomerName] = useState("");
-  const [customCustomerPhone, setCustomCustomerPhone] = useState("");
-  const [validUntil, setValidUntil] = useState("");
-  const [notes, setNotes] = useState("");
-  const [terms, setTerms] = useState("Prices valid for 15 days from quote date. Standard warranty applies.");
-  const [items, setItems] = useState<QuotationItem[]>([
-    { name: "", quantity: 1, unit_price: 0, discount: 0, tax_rate: 18, total: 0 },
-  ]);
-  const [creating, setCreating] = useState(false);
-  const [formError, setFormError] = useState("");
-
-  // Available products for dropdown
-  const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
+  const [convertSuccess, setConvertSuccess] = useState<{
+    invoice_number: string;
+    invoice_id: string;
+    bill_sent?: boolean;
+    whatsapp_delivery?: WhatsAppDeliverySummary | null;
+    customer_phone?: string;
+  } | null>(null);
 
   // Fetch Quotations
   const fetchQuotations = useCallback(async () => {
     setLoading(true);
+    setListError("");
     try {
       const res = await quotationApi.list({
         search: searchTerm || undefined,
@@ -96,7 +89,7 @@ export default function QuotationsPage() {
         setTotalCount(0);
       }
     } catch (err) {
-      console.error("Failed to load quotations:", err);
+      setListError(parseApiError(err, "Failed to load quotations."));
       setQuotations([]);
     } finally {
       setLoading(false);
@@ -107,133 +100,18 @@ export default function QuotationsPage() {
     fetchQuotations();
   }, [fetchQuotations]);
 
-  // Load auxiliary data for Create Quotation modal
-  const loadAuxiliaryData = async () => {
-    try {
-      const [custRes, prodRes] = await Promise.all([
-        customerApi.list(),
-        posApi.searchProducts({ page_size: 50 }),
-      ]);
-      if (Array.isArray(custRes.data)) setCustomers(custRes.data);
-      else if (custRes.data?.results) setCustomers(custRes.data.results);
-
-      if (Array.isArray(prodRes.data)) setAvailableProducts(prodRes.data);
-      else if (prodRes.data?.results) setAvailableProducts(prodRes.data.results);
-    } catch (err) {
-      console.error("Failed to load customer/product options:", err);
+  // Open quotation creation modal automatically when navigated with ?action=new or ?create=1
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("action") === "new" || params.get("create") === "1") {
+        setShowCreateModal(true);
+      }
     }
-  };
+  }, []);
 
   const handleOpenCreate = () => {
-    loadAuxiliaryData();
-    // Default valid until 15 days ahead
-    const d = new Date();
-    d.setDate(d.getDate() + 15);
-    setValidUntil(d.toISOString().split("T")[0]);
-    setItems([{ name: "", quantity: 1, unit_price: 0, discount: 0, tax_rate: 18, total: 0 }]);
-    setSelectedCustomerId("");
-    setCustomCustomerName("");
-    setCustomCustomerPhone("");
-    setNotes("");
-    setFormError("");
     setShowCreateModal(true);
-  };
-
-  // Item calculations
-  const updateItem = (index: number, field: keyof QuotationItem, value: any) => {
-    const updated = [...items];
-    const item = { ...updated[index], [field]: value };
-
-    // Calculate line total
-    const qty = parseFloat(String(item.quantity)) || 0;
-    const price = parseFloat(String(item.unit_price)) || 0;
-    const disc = parseFloat(String(item.discount)) || 0;
-    const rate = parseFloat(String(item.tax_rate)) || 0;
-
-    const sub = Math.max(0, qty * price - disc);
-    const tax = sub * (rate / 100);
-    item.total = Math.round((sub + tax) * 100) / 100;
-    item.tax = Math.round(tax * 100) / 100;
-
-    updated[index] = item;
-    setItems(updated);
-  };
-
-  const addItemRow = () => {
-    setItems([...items, { name: "", quantity: 1, unit_price: 0, discount: 0, tax_rate: 18, total: 0 }]);
-  };
-
-  const removeItemRow = (index: number) => {
-    if (items.length <= 1) return;
-    setItems(items.filter((_, i) => i !== index));
-  };
-
-  const handleSelectProduct = (index: number, productId: string) => {
-    const prod = availableProducts.find((p) => p.id === productId);
-    if (!prod) return;
-    const updated = [...items];
-    const qty = updated[index].quantity || 1;
-    const authoritativePrice = Number(prod.selling_price ?? (prod as any).unit_price) || 0;
-    const disc = updated[index].discount || 0;
-    const rate = Number(prod.tax_rate ?? 18);
-
-    const sub = Math.max(0, Number(qty) * authoritativePrice - Number(disc));
-    const tax = sub * (Number(rate) / 100);
-
-    updated[index] = {
-      product_id: prod.id,
-      name: prod.name,
-      unit_price: authoritativePrice,
-      original_price: authoritativePrice,
-      quantity: qty,
-      discount: disc,
-      tax_rate: rate,
-      tax: Math.round(tax * 100) / 100,
-      total: Math.round((sub + tax) * 100) / 100,
-      hsn_code: prod.hsn_code || "",
-      unit: prod.unit || "pcs",
-    };
-    setItems(updated);
-  };
-
-  // Summary totals for modal
-  const calcSubtotal = items.reduce(
-    (sum, it) => sum + (parseFloat(String(it.quantity)) || 0) * (parseFloat(String(it.unit_price)) || 0),
-    0
-  );
-  const calcDiscount = items.reduce((sum, it) => sum + (parseFloat(String(it.discount)) || 0), 0);
-  const calcTax = items.reduce((sum, it) => sum + (parseFloat(String(it.tax)) || 0), 0);
-  const calcGrandTotal = items.reduce((sum, it) => sum + (parseFloat(String(it.total)) || 0), 0);
-
-  // Submit Create Quotation
-  const handleCreateQuotation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError("");
-
-    const validItems = items.filter((it) => it.name.trim() && (parseFloat(String(it.quantity)) || 0) > 0);
-    if (validItems.length === 0) {
-      setFormError("Please add at least one line item with a name and quantity.");
-      return;
-    }
-
-    setCreating(true);
-    try {
-      await quotationApi.create({
-        customer_id: selectedCustomerId || undefined,
-        customer_name: customCustomerName || undefined,
-        customer_phone: customCustomerPhone || undefined,
-        valid_until: validUntil || undefined,
-        notes,
-        terms_and_conditions: terms,
-        items: validItems,
-      });
-      setShowCreateModal(false);
-      fetchQuotations();
-    } catch (err: any) {
-      setFormError(err.response?.data?.error || err.response?.data?.items || "Failed to create quotation.");
-    } finally {
-      setCreating(false);
-    }
   };
 
   // Convert Quotation to Invoice / Pay
@@ -265,6 +143,9 @@ export default function QuotationsPage() {
       setConvertSuccess({
         invoice_number: res.data.invoice_number,
         invoice_id: res.data.invoice_id,
+        bill_sent: res.data.bill_sent,
+        whatsapp_delivery: res.data.whatsapp_delivery,
+        customer_phone: quotationToConvert.customer_phone,
       });
       fetchQuotations();
     } catch (err: unknown) {
@@ -374,14 +255,22 @@ export default function QuotationsPage() {
             <span>Refresh</span>
           </button>
           <button
+            type="button"
             onClick={handleOpenCreate}
             className="flex items-center gap-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 text-xs font-semibold shadow-sm transition-all"
           >
             <Plus className="h-4 w-4" />
-            <span>+ New Quotation</span>
+            <span>New Quotation</span>
           </button>
         </div>
       </div>
+
+      {listError && (
+        <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{listError}</span>
+        </div>
+      )}
 
       {/* Filter Toolbar */}
       <div className="rounded-xl border bg-card p-4 shadow-sm space-y-3">
@@ -733,258 +622,11 @@ export default function QuotationsPage() {
       </div>
 
       {/* CREATE QUOTATION MODAL */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="relative w-full max-w-3xl rounded-2xl border bg-card p-6 shadow-2xl text-foreground max-h-[90vh] flex flex-col">
-            <div className="flex items-start justify-between border-b pb-4">
-              <div>
-                <h3 className="text-lg font-bold text-foreground">Create New Quotation</h3>
-                <p className="text-xs text-muted-foreground">
-                  Build and calculate a formal price estimate for customer approval
-                </p>
-              </div>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateQuotation} className="flex-1 overflow-y-auto py-4 space-y-5 text-xs">
-              {formError && (
-                <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-xs text-destructive">
-                  {formError}
-                </div>
-              )}
-
-              {/* Customer Selector & Dates */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block font-semibold mb-1">Select Customer</label>
-                  <select
-                    value={selectedCustomerId}
-                    onChange={(e) => {
-                      setSelectedCustomerId(e.target.value);
-                      const c = customers.find((cust) => cust.id === e.target.value);
-                      if (c) {
-                        setCustomCustomerName(c.full_name);
-                        setCustomCustomerPhone(c.phone || "");
-                      }
-                    }}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-xs focus:ring-2 focus:ring-primary/20"
-                  >
-                    <option value="">-- Choose Existing or Enter Details Below --</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.full_name} ({c.phone || "No phone"})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1">Customer Name</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Rahul Sharma"
-                    value={customCustomerName}
-                    onChange={(e) => setCustomCustomerName(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-xs focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1">Customer Mobile</label>
-                  <input
-                    type="text"
-                    placeholder="10-digit mobile"
-                    value={customCustomerPhone}
-                    onChange={(e) => setCustomCustomerPhone(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-xs focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-semibold mb-1">Quotation Valid Until</label>
-                  <input
-                    type="date"
-                    value={validUntil}
-                    onChange={(e) => setValidUntil(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-xs focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1">Internal Notes</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Client requested 5% discount on bulk"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-xs focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-              </div>
-
-              {/* Line Items Builder */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-bold uppercase tracking-wider text-[11px] text-muted-foreground">
-                    Items & Pricing Breakdown
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={addItemRow}
-                    className="text-primary hover:underline font-semibold text-xs flex items-center gap-1"
-                  >
-                    <Plus className="h-3 w-3" />
-                    <span>Add Item</span>
-                  </button>
-                </div>
-
-                <div className="space-y-2 border rounded-xl p-3 bg-muted/20">
-                  {items.map((item, idx) => (
-                    <div key={idx} className="grid grid-cols-12 gap-2 items-center bg-card p-2 rounded-lg border">
-                      <div className="col-span-12 sm:col-span-4">
-                        {availableProducts.length > 0 && (
-                          <select
-                            onChange={(e) => handleSelectProduct(idx, e.target.value)}
-                            className="w-full mb-1 text-[11px] border rounded px-1.5 py-1 bg-background text-muted-foreground"
-                          >
-                            <option value="">-- Choose Product Preset --</option>
-                            {availableProducts.map((p) => {
-                              const pPrice = Number(p.selling_price ?? (p as any).unit_price) || 0;
-                              return (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} {p.sku ? `(${p.sku})` : ""} - ₹{pPrice} | Stock: {p.current_stock || 0}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        )}
-                        <input
-                          type="text"
-                          required
-                          placeholder="Item Name"
-                          value={item.name}
-                          onChange={(e) => updateItem(idx, "name", e.target.value)}
-                          className="w-full border rounded px-2 py-1 text-xs bg-background"
-                        />
-                      </div>
-
-                      <div className="col-span-3 sm:col-span-2">
-                        <label className="block text-[10px] text-muted-foreground">Qty</label>
-                        <input
-                          type="number"
-                          min="0.1"
-                          step="any"
-                          required
-                          value={item.quantity}
-                          onChange={(e) => updateItem(idx, "quantity", e.target.value)}
-                          className="w-full border rounded px-2 py-1 text-xs bg-background text-center"
-                        />
-                      </div>
-
-                      <div className="col-span-3 sm:col-span-2">
-                        <label className="block text-[10px] text-muted-foreground">Unit Price (₹)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          required
-                          value={item.unit_price}
-                          onChange={(e) => updateItem(idx, "unit_price", e.target.value)}
-                          className="w-full border rounded px-2 py-1 text-xs bg-background text-right"
-                        />
-                      </div>
-
-                      <div className="col-span-2 sm:col-span-1">
-                        <label className="block text-[10px] text-muted-foreground">Tax %</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.tax_rate}
-                          onChange={(e) => updateItem(idx, "tax_rate", e.target.value)}
-                          className="w-full border rounded px-1.5 py-1 text-xs bg-background text-center"
-                        />
-                      </div>
-
-                      <div className="col-span-3 sm:col-span-2 text-right">
-                        <label className="block text-[10px] text-muted-foreground">Line Total</label>
-                        <span className="font-bold text-foreground">₹{Number(item.total || 0).toFixed(2)}</span>
-                      </div>
-
-                      <div className="col-span-1 text-right">
-                        <button
-                          type="button"
-                          onClick={() => removeItemRow(idx)}
-                          className="p-1 text-muted-foreground hover:text-destructive"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Financial Calculation Summary */}
-              <div className="rounded-xl bg-muted/40 p-4 space-y-1.5 border">
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Subtotal</span>
-                  <span className="font-mono">₹{calcSubtotal.toFixed(2)}</span>
-                </div>
-                {calcDiscount > 0 && (
-                  <div className="flex justify-between text-emerald-600">
-                    <span>Total Discount</span>
-                    <span className="font-mono">- ₹{calcDiscount.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Estimated Tax (GST)</span>
-                  <span className="font-mono">₹{calcTax.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-base font-bold text-foreground border-t pt-2 mt-1">
-                  <span>Quotation Grand Total</span>
-                  <span className="font-mono text-primary">₹{calcGrandTotal.toFixed(2)}</span>
-                </div>
-              </div>
-
-              {/* Terms and conditions */}
-              <div>
-                <label className="block font-semibold mb-1">Terms & Conditions</label>
-                <textarea
-                  rows={2}
-                  value={terms}
-                  onChange={(e) => setTerms(e.target.value)}
-                  className="w-full rounded-lg border bg-background p-2 text-xs focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-
-              <div className="border-t pt-4 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="rounded-lg border px-4 py-2 font-semibold hover:bg-accent"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="rounded-lg bg-primary text-primary-foreground px-5 py-2 font-semibold shadow-sm hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {creating ? "Saving Quotation..." : "Create Quotation"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <QuotationCreateModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={() => fetchQuotations()}
+      />
 
       {/* CONVERT TO INVOICE MODAL */}
       {showConvertModal && quotationToConvert && (
@@ -1018,6 +660,15 @@ export default function QuotationsPage() {
                     Invoice <span className="font-mono font-bold text-foreground">#{convertSuccess.invoice_number}</span> has been issued and inventory deducted.
                   </p>
                 </div>
+
+                {convertSuccess.invoice_id && (
+                  <WhatsAppDeliveryBadge
+                    invoiceId={convertSuccess.invoice_id}
+                    initialDelivery={convertSuccess.whatsapp_delivery}
+                    initialBillSent={convertSuccess.bill_sent}
+                    customerPhone={convertSuccess.customer_phone}
+                  />
+                )}
 
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <Link

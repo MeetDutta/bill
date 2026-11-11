@@ -578,6 +578,7 @@ export interface POSCartItem {
   name: string;
   quantity: number;
   unit_price: number;
+  original_unit_price?: number;
   discount: number;
   discount_type?: "fixed" | "percentage";
   tax_rate: number;
@@ -679,6 +680,8 @@ export interface POSCheckoutResponse {
   payment_status: "paid" | "partial" | "credit";
   payment_method: string;
   tax_breakup: any;
+  bill_sent?: boolean;
+  whatsapp_delivery?: WhatsAppDeliverySummary | null;
   items: any[];
   payments: any[];
   invoice: {
@@ -690,6 +693,32 @@ export interface POSCheckoutResponse {
     pdf_url: string;
     secure_token: string;
   } | null;
+}
+
+export interface WhatsAppDeliverySummary {
+  message_id?: string | null;
+  status:
+    | "queued"
+    | "processing"
+    | "sent"
+    | "delivered"
+    | "read"
+    | "failed"
+    | "skipped"
+    | "already_sent"
+    | "error";
+  provider_message_id?: string;
+  phone_number?: string;
+  filename?: string;
+  failure_reason?: string;
+  skip_reason?: string;
+  trigger?: string;
+  retry_count?: number;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  read_at?: string | null;
+  failed_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface HeldCart {
@@ -876,6 +905,8 @@ export interface Invoice {
   seller_details?: any;
   transaction?: any;
   transaction_details?: any;
+  bill_sent?: boolean;
+  whatsapp_delivery?: WhatsAppDeliverySummary | null;
 }
 
 export interface QuotationItem {

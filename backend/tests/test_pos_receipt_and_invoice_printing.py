@@ -229,3 +229,53 @@ class TestPOSReceiptAndInvoicePrinting:
         # Org B attempts to access Org A's invoice PDF
         unauth_res = other_client.get(f"/api/v1/invoices/{invoice_id}/pdf/")
         assert unauth_res.status_code in [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND]
+
+    def test_invoice_pdf_download_and_slash_filename_sanitization(self, receipt_printing_setup):
+        """
+        Regression test for PDF download reliability:
+        - Slash-containing invoice numbers must sanitize safely in Content-Disposition & disk generation
+        - Unauthenticated requests must return 401
+        - Download returns valid %PDF- bytes with strict headers
+        """
+        setup = receipt_printing_setup
+        client = setup["client"]
+        product = setup["product"]
+
+        payload = {
+            "items": [{"product_id": str(product.id), "quantity": 1, "unit_price": 450.00, "tax_rate": 5.00}],
+            "payments": [{"payment_method": "cash", "amount": 473.00}],
+            "idempotency_key": f"TEST-SLASH-{uuid.uuid4().hex[:8]}",
+        }
+        res = client.post("/api/v1/billing/checkout/", payload, format="json")
+        assert res.status_code == status.HTTP_201_CREATED
+        invoice_id = res.data["invoice"]["id"]
+
+        from apps.invoices.models import Invoice
+        inv = Invoice.objects.get(id=invoice_id)
+        inv.invoice_number = f"INV/2026/{uuid.uuid4().hex[:4]}"
+        inv.save(update_fields=["invoice_number"])
+
+        unauth_client = APIClient()
+        unauth_dl = unauth_client.get(f"/api/v1/invoices/{invoice_id}/pdf/?download=true&format_type=a4")
+        assert unauth_dl.status_code == status.HTTP_401_UNAUTHORIZED
+
+        dl_res = client.get(f"/api/v1/invoices/{invoice_id}/pdf/?download=true&format_type=a4")
+        assert dl_res.status_code == status.HTTP_200_OK
+        assert dl_res["Content-Type"] == "application/pdf"
+        assert dl_res["X-Content-Type-Options"] == "nosniff"
+        assert "no-store" in dl_res["Cache-Control"]
+        assert 'attachment; filename="INV_2026_' in dl_res["Content-Disposition"]
+        assert "/" not in dl_res["Content-Disposition"]
+        assert int(dl_res["Content-Length"]) == len(dl_res.content)
+        assert dl_res.content.startswith(b"%PDF-")
+
+        # Thermal filename suffix
+        th_res = client.get(f"/api/v1/invoices/{invoice_id}/pdf/?download=true&format_type=thermal")
+        assert th_res.status_code == status.HTTP_200_OK
+        assert '_thermal.pdf"' in th_res["Content-Disposition"]
+        assert th_res.content.startswith(b"%PDF-")
+
+        # Disk PDF helper also works without FileNotFoundError on slashed invoice numbers
+        meta_res = client.post(f"/api/v1/invoices/{invoice_id}/pdf/")
+        assert meta_res.status_code == status.HTTP_200_OK
+        assert meta_res.data["pdf_url"].endswith(".pdf")

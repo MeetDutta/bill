@@ -1,5 +1,6 @@
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Dict, Any, List
+from rest_framework.exceptions import ValidationError
 from .tax_engine import TaxEngine, round_decimal
 
 
@@ -10,6 +11,31 @@ class CartEngine:
     coupon application, tax calculations, and round-offs.
     All calculations use Decimal arithmetic.
     """
+
+    @staticmethod
+    def parse_decimal(
+        value: Any,
+        field_name: str,
+        min_value: Decimal = Decimal("0.00"),
+        allow_zero: bool = True,
+        item_label: str = "",
+    ) -> Decimal:
+        target = f" for '{item_label}'" if item_label else ""
+        try:
+            dec = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValidationError(f"Invalid {field_name}{target}: '{value}'.")
+
+        if not dec.is_finite():
+            raise ValidationError(f"Invalid {field_name}{target}: must be a finite number.")
+
+        if allow_zero:
+            if dec < min_value:
+                raise ValidationError(f"Invalid {field_name.replace('_', ' ')}{target}: cannot be less than {min_value}.")
+        else:
+            if dec <= min_value:
+                raise ValidationError(f"Invalid {field_name.replace('_', ' ')}{target}: must be greater than {min_value}.")
+        return dec
 
     @classmethod
     def calculate_cart(
@@ -22,8 +48,14 @@ class CartEngine:
         is_tax_inclusive: bool = False,
         is_interstate: bool = False,
     ) -> Dict[str, Any]:
-        overall_discount_value = Decimal(str(overall_discount_value or 0))
-        coupon_discount = Decimal(str(coupon_discount or 0))
+        overall_discount_value = cls.parse_decimal(
+            overall_discount_value if overall_discount_value not in (None, "") else Decimal("0.00"),
+            "overall_discount_value",
+        )
+        coupon_discount = cls.parse_decimal(
+            coupon_discount if coupon_discount not in (None, "") else Decimal("0.00"),
+            "coupon_discount",
+        )
 
         calculated_items = []
         raw_subtotal = Decimal("0.00")
@@ -31,14 +63,30 @@ class CartEngine:
 
         # Step 1: Compute item line subtotal and line item discounts
         for item in items:
-            unit_price = Decimal(str(item.get("unit_price") or 0))
-            quantity = Decimal(str(item.get("quantity") or 1))
+            label = str(item.get("name") or item.get("sku") or item.get("product_id") or "")
+            raw_price = item.get("unit_price")
+            unit_price = (
+                cls.parse_decimal(raw_price, "unit_price", item_label=label)
+                if raw_price is not None and str(raw_price).strip() != ""
+                else Decimal("0.00")
+            )
+            raw_qty = item.get("quantity")
+            quantity = (
+                cls.parse_decimal(raw_qty, "quantity", min_value=Decimal("0.00"), allow_zero=False, item_label=label)
+                if raw_qty is not None and str(raw_qty).strip() != ""
+                else Decimal("1.00")
+            )
             line_base = unit_price * quantity
             raw_subtotal += line_base
 
             # Item discount: can be fixed or percentage
             disc_type = item.get("discount_type", "fixed")
-            disc_val = Decimal(str(item.get("discount") or 0))
+            raw_disc = item.get("discount")
+            disc_val = (
+                cls.parse_decimal(raw_disc, "discount", item_label=label)
+                if raw_disc is not None and str(raw_disc).strip() != ""
+                else Decimal("0.00")
+            )
             if disc_type == "percentage":
                 item_discount = round_decimal(line_base * (disc_val / Decimal("100.00")))
             else:
@@ -46,7 +94,12 @@ class CartEngine:
             item_discount = min(item_discount, line_base)
             total_item_discount += item_discount
 
-            tax_rate = Decimal(str(item.get("tax_rate") or 0))
+            raw_tax_rate = item.get("tax_rate")
+            tax_rate = (
+                cls.parse_decimal(raw_tax_rate, "tax_rate", item_label=label)
+                if raw_tax_rate is not None and str(raw_tax_rate).strip() != ""
+                else Decimal("0.00")
+            )
             hsn_code = str(item.get("hsn_code") or "")
 
             item_tax_calc = TaxEngine.calculate_item_tax(

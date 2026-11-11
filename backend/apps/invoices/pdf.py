@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import re
 from decimal import Decimal
 from xml.sax.saxutils import escape as xml_escape
 
@@ -1185,6 +1186,13 @@ def _render_thermal_pdf(buffer, invoice, tx, org, store, customer, items, paymen
     doc.build(story)
 
 
+def sanitize_invoice_pdf_filename(invoice_number: str, format_type: str = "a4") -> str:
+    """Build a filesystem-safe and Content-Disposition-safe PDF filename."""
+    clean_num = re.sub(r"[^A-Za-z0-9._-]+", "_", str(invoice_number or "invoice")).strip("._") or "invoice"
+    suffix = f"_{format_type}" if format_type in ("thermal", "receipt") else ""
+    return f"{clean_num}{suffix}.pdf"
+
+
 def generate_invoice_pdf(invoice, format_type: str = "a4") -> str:
     """
     Renders and saves a verified binary PDF for the given Invoice instance using ReportLab.
@@ -1195,8 +1203,7 @@ def generate_invoice_pdf(invoice, format_type: str = "a4") -> str:
     invoices_dir = os.path.join(settings.MEDIA_ROOT, "invoices")
     os.makedirs(invoices_dir, exist_ok=True)
 
-    suffix = f"_{format_type}" if format_type in ("thermal", "receipt") else ""
-    pdf_filename = f"{invoice.invoice_number}{suffix}.pdf"
+    pdf_filename = sanitize_invoice_pdf_filename(invoice.invoice_number, format_type=format_type)
     pdf_filepath = os.path.join(invoices_dir, pdf_filename)
 
     pdf_bytes = generate_invoice_pdf_bytes(invoice, format_type=format_type)

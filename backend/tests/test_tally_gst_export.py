@@ -535,4 +535,78 @@ class TestTallyGSTAccountingExport:
         assert abs(net_balance) <= Decimal("0.01"), f"Voucher net balance must be zero, got {net_balance}"
         assert sales_amt == Decimal("100.00"), f"Sales ledger should record net taxable 100.00, got {sales_amt}"
 
+    def test_preview_and_config_endpoints_tolerate_periods_empty_store_and_unique_config(self, tally_setup):
+        """
+        Regression test for Tally GST preview failure:
+        - Enforce single TallyLedgerConfig per organization
+        - Ensure preview/config/history/export endpoints handle period='this_month', period='all',
+          empty store_id='', and reject invalid store_id UUIDs with 400 instead of 500.
+        """
+        from django.db import IntegrityError, transaction
+        org = tally_setup["org"]
+        store = tally_setup["store"]
+        admin = tally_setup["admin"]
+
+        # DB UniqueConstraint prevents duplicate TallyLedgerConfig per organization
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                TallyLedgerConfig.objects.create(organization=org, sales_ledger="Duplicate")
+
+        # Past transaction (40 days ago) should show up under period='all'
+        past_date = timezone.now() - timezone.timedelta(days=40)
+        tx = Transaction.objects.create(
+            organization=org,
+            store=store,
+            invoice_number="INV-OLD-ALL-01",
+            transaction_date=past_date,
+            subtotal=Decimal("500.00"),
+            tax=Decimal("90.00"),
+            total=Decimal("590.00"),
+            amount_paid=Decimal("590.00"),
+            payment_status="paid",
+            payment_method="upi",
+        )
+        TransactionItem.objects.create(
+            transaction=tx,
+            name="Archival Product",
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("500.00"),
+            tax=Decimal("90.00"),
+            tax_rate=Decimal("18.00"),
+            cgst_amount=Decimal("45.00"),
+            sgst_amount=Decimal("45.00"),
+            total=Decimal("590.00"),
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+
+        res_month = client.get(
+            "/api/v1/pos/reports/sales/tally-preview/?period=this_month&include_previously_exported=false&store_id="
+        )
+        assert res_month.status_code == 200
+        assert res_month.data["summary"]["sales_vouchers_count"] == 0
+
+        res_all = client.get("/api/v1/pos/reports/sales/tally-preview/?period=all&include_previously_exported=false")
+        assert res_all.status_code == 200
+        assert res_all.data["summary"]["sales_vouchers_count"] == 1
+        assert res_all.data["validation"]["can_export"] is True
+
+        res_cfg = client.get("/api/v1/pos/reports/sales/tally-config/")
+        assert res_cfg.status_code == 200
+        assert res_cfg.data["sales_ledger"] == "Sales Account"
+
+        res_bad_store = client.get("/api/v1/pos/reports/sales/tally-preview/?period=this_month&store_id=not-a-uuid")
+        assert res_bad_store.status_code == 400
+
+        res_export = client.post(
+            "/api/v1/pos/reports/sales/tally-export/?download=true",
+            {"period": "all", "include_previously_exported": False},
+            format="json",
+        )
+        assert res_export.status_code == 200
+        assert "application/xml" in res_export["Content-Type"]
+        assert b"INV-OLD-ALL-01" in res_export.content
+
+
 

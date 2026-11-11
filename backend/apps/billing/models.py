@@ -446,6 +446,12 @@ class TallyLedgerConfig(UUIDModel, TenantModel, TimeStampedModel):
     class Meta:
         verbose_name = "Tally Ledger Configuration"
         verbose_name_plural = "Tally Ledger Configurations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization"],
+                name="unique_tally_ledger_config_per_org",
+            )
+        ]
 
     def __str__(self):
         return f"Tally Config for {self.organization.name}"

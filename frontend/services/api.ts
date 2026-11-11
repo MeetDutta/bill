@@ -24,6 +24,7 @@ import type {
   TallyPreviewData,
   TallyLedgerConfigData,
   TallyExportHistoryItem,
+  WhatsAppDeliverySummary,
 } from "@/types";
 
 // Auth
@@ -51,7 +52,8 @@ export const storeApi = {
 
 // Customers
 export const customerApi = {
-  list: () => api.get<PaginatedResponse<Customer>>("/customers/"),
+  list: (params?: { search?: string; page?: number; page_size?: number }) =>
+    api.get<PaginatedResponse<Customer>>("/customers/", { params }),
   get: (id: string) => api.get<Customer>(`/customers/${id}/`),
   create: (data: Partial<Customer>) => api.post<Customer>("/customers/", data),
   update: (id: string, data: Partial<Customer>) => api.patch<Customer>(`/customers/${id}/`, data),
@@ -136,6 +138,15 @@ export const whatsappApi = {
       reason?: string;
     }>("/whatsapp/test-connection/", data || {}),
   getMessages: () => api.get("/whatsapp/messages/"),
+  retryMessage: (id: string) =>
+    api.post<{
+      status: string;
+      message_id?: string;
+      provider_message_id?: string;
+      filename?: string;
+      error?: string;
+      whatsapp_delivery?: any;
+    }>(`/whatsapp/messages/${id}/retry/`),
   getTemplates: () => api.get("/whatsapp/templates/"),
 };
 
@@ -214,7 +225,7 @@ export const posApi = {
     });
   },
   getBusinessTypes: () => api.get("/pos/business-types/"),
-  searchProducts: (params?: { search?: string; category?: string; low_stock?: boolean; page?: number; page_size?: number }) =>
+  searchProducts: (params?: { q?: string; search?: string; category?: string; low_stock?: boolean; page?: number; page_size?: number }) =>
     api.get("/pos/products/", { params }),
   quickCreateProduct: (data: unknown) => api.post("/pos/products/quick-create/", data),
   calculateCart: (data: unknown) => api.post("/pos/cart/calculate/", data),
@@ -276,6 +287,36 @@ export const invoiceApi = {
   get: (id: string) => api.get<Invoice>(`/invoices/${id}/`),
   getPublic: (token: string) => api.get(`/invoices/view/${token}/`),
   generatePdf: (id: string) => api.post<{ id: string; invoice_number: string; pdf_url: string; web_url: string }>(`/invoices/${id}/pdf/`),
+  getWhatsAppStatus: (id: string) =>
+    api.get<{
+      invoice_id: string;
+      invoice_number: string;
+      bill_sent: boolean;
+      whatsapp_delivery: any;
+    }>(`/invoices/${id}/send-whatsapp/`),
+  sendWhatsApp: (
+    id: string,
+    data?: {
+      phone?: string;
+      force?: boolean;
+      format_type?: "a4" | "thermal";
+      async?: boolean;
+    }
+  ) =>
+    api.post<{
+      status: string;
+      message?: string;
+      message_id?: string | null;
+      provider_message_id?: string;
+      media_id?: string;
+      filename?: string;
+      mime_type?: string;
+      invoice_id?: string;
+      invoice_number?: string;
+      phone_number?: string;
+      error?: string;
+      whatsapp_delivery?: any;
+    }>(`/invoices/${id}/send-whatsapp/`, data || {}),
 };
 
 // Quotation Management
@@ -304,6 +345,7 @@ export const quotationApi = {
   ) =>
     api.post<{
       message: string;
+      transaction_id?: string;
       invoice_id: string;
       invoice_number: string;
       quotation_id: string;
@@ -311,6 +353,8 @@ export const quotationApi = {
       pdf_url: string;
       web_url: string;
       total: string;
+      bill_sent?: boolean;
+      whatsapp_delivery?: WhatsAppDeliverySummary | null;
     }>(`/quotations/${id}/convert/`, data),
 };
 

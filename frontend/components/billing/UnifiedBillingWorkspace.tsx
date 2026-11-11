@@ -38,6 +38,9 @@ import {
   FileCheck,
   Loader2,
   History,
+  Wallet,
+  Landmark,
+  Split,
 } from "lucide-react";
 import {
   posApi,
@@ -60,7 +63,10 @@ import {
   Store,
   CashRegister,
   Invoice,
+  Quotation,
+  QuotationItem,
 } from "@/types";
+import { QuotationCreateModal } from "@/components/quotations/QuotationCreateModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -71,7 +77,17 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { cn, parseApiError } from "@/lib/utils";
+import {
+  advanceBarcodeBuffer,
+  extractSafeKey,
+  isEditableEventTarget,
+} from "@/lib/keyboardUtils";
 import { IsolatedReceiptModal } from "@/components/pos/IsolatedReceiptModal";
+import {
+  resolveWhatsAppPresentation,
+  isWhatsAppDelivered,
+  isWhatsAppDeliveryActive,
+} from "@/lib/whatsappStatus";
 import {
   printA4TaxInvoice,
   printThermalReceipt,
@@ -168,11 +184,14 @@ export default function UnifiedBillingWorkspace({
   // 4. POS CART STATE
   // ==========================================
   const [cart, setCart] = useState<POSCartItem[]>([]);
+  const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
   const [overallDiscountType, setOverallDiscountType] = useState<"fixed" | "percentage">("fixed");
   const [overallDiscountValue, setOverallDiscountValue] = useState<number>(0);
   const [isInterstate, setIsInterstate] = useState<boolean>(false);
   const [calcSummary, setCalcSummary] = useState<POSCalculateResponse | null>(null);
+  const [calcSyncedSignature, setCalcSyncedSignature] = useState<string>("");
   const [calcLoading, setCalcLoading] = useState(false);
+  const calcRequestSeqRef = useRef(0);
 
   // ==========================================
   // 5. CUSTOMER STATE
@@ -213,24 +232,44 @@ export default function UnifiedBillingWorkspace({
   const [heldModalOpen, setHeldModalOpen] = useState(false);
 
   // ==========================================
-  // 8. CHECKOUT & PAYMENT MODAL
+  // 8. PAYMENT & SETTLEMENT DIALOG
   // ==========================================
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
-  const [payments, setPayments] = useState<{ method: string; amount: number; reference?: string }[]>([]);
+  const [paymentMode, setPaymentMode] = useState<"CASH" | "UPI" | "CARD" | "CREDIT" | "OTHER" | "HYBRID">("CASH");
+  const [otherPaymentMethod, setOtherPaymentMethod] = useState<"NETBANKING" | "CHEQUE" | "WALLET">("NETBANKING");
+  const [singlePaymentReference, setSinglePaymentReference] = useState("");
+  const [hybridPayments, setHybridPayments] = useState<{ method: string; amount: number; reference?: string }[]>([
+    { method: "CASH", amount: 0 },
+    { method: "UPI", amount: 0 },
+    { method: "CARD", amount: 0 },
+  ]);
+  const [hybridDrafts, setHybridDrafts] = useState<Record<number, string>>({});
+  const [cashAmountDraft, setCashAmountDraft] = useState<string>("");
   const [payingCashAmount, setPayingCashAmount] = useState<number>(0);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const [mobileTab, setMobileTab] = useState<"catalog" | "cart">("catalog");
   const inFlightCheckoutRef = useRef(false);
+  const checkoutIdempotencyKeyRef = useRef<string>("");
 
   // Post-Sale Modal
   const [completedSale, setCompletedSale] = useState<any | null>(null);
   const [printFormat, setPrintFormat] = useState<"thermal_80mm" | "thermal_58mm" | "a4">("thermal_80mm");
 
-  // Quotation Load State
+  // Quotation Load & Create State
   const [quoteInput, setQuoteInput] = useState("");
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [loadedQuoteBanner, setLoadedQuoteBanner] = useState<{ number: string; total: string; count: number } | null>(null);
+  const [quoteModalOpen, setQuoteModalOpen] = useState(false);
+  const [quoteModalSeed, setQuoteModalSeed] = useState<{
+    title?: string;
+    initialCustomer?: { id?: string; name?: string; phone?: string; email?: string } | null;
+    initialItems?: QuotationItem[];
+  }>({});
+  const [savedQuoteBanner, setSavedQuoteBanner] = useState<{
+    quotation_number: string;
+    total: string;
+  } | null>(null);
 
   // Barcode / Keyboard input refs
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -257,83 +296,156 @@ export default function UnifiedBillingWorkspace({
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [sendingWhatsAppId, setSendingWhatsAppId] = useState<string | null>(null);
+  const [whatsappFeedback, setWhatsappFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+    invoiceId?: string;
+  } | null>(null);
 
   // ==========================================
-  // QUOTATION LOADER HANDLER
+  // QUOTATION LOADER & CREATE HANDLERS
   // ==========================================
+  const applyQuotationToCart = useCallback((q: Quotation) => {
+    if (q.status === "converted") {
+      alert(`Notice: Quotation #${q.quotation_number} was already converted into invoice #${q.converted_invoice_number || ""}.`);
+    }
+    if (!q.items || q.items.length === 0) {
+      alert(`Quotation #${q.quotation_number} has no items.`);
+      return;
+    }
+    const cartItems: POSCartItem[] = q.items.map((it: any) => ({
+      product_id: it.product || it.product_id || it.id,
+      sku: it.sku || "",
+      name: it.name,
+      unit_price: Number(it.unit_price) || 0,
+      original_unit_price: Number(it.original_unit_price ?? it.unit_price) || 0,
+      quantity: Number(it.quantity) || 1,
+      discount: Number(it.discount) || 0,
+      discount_type: "fixed",
+      tax_rate: Number(it.tax_rate) || 0,
+      unit: it.unit || "pcs",
+      hsn_code: it.hsn_code || "",
+      current_stock: 999,
+      track_inventory: true,
+    }));
+    setPriceDrafts({});
+    setCart(cartItems);
+
+    if (q.customer) {
+      setIsWalkIn(false);
+      const cId = typeof q.customer === "string" ? q.customer : (q.customer as any).id;
+      setSelectedCustomer({
+        id: cId,
+        customer_id: cId,
+        full_name: q.customer_name || "Customer",
+        phone: q.customer_phone || "",
+        email: q.customer_email || "",
+        outstanding_credit: 0,
+        total_purchases: 0,
+        total_spend: 0,
+        segment: "Standard",
+        last_purchase_at: "",
+      });
+    } else if (q.customer_name && q.customer_name !== "Walk-in Customer") {
+      setIsWalkIn(false);
+      setSelectedCustomer({
+        id: "",
+        customer_id: "",
+        full_name: q.customer_name,
+        phone: q.customer_phone || "",
+        email: q.customer_email || "",
+        outstanding_credit: 0,
+        total_purchases: 0,
+        total_spend: 0,
+        segment: "Standard",
+        last_purchase_at: "",
+      });
+    }
+
+    setLoadedQuoteBanner({
+      number: q.quotation_number,
+      total: String(q.total),
+      count: cartItems.length,
+    });
+    setQuoteInput("");
+    setActiveView("new");
+  }, []);
+
   const handleLoadQuotation = useCallback(async (quoteNumberToLoad?: string) => {
     const qNum = (quoteNumberToLoad || quoteInput).trim();
     if (!qNum) return;
     setLoadingQuote(true);
     try {
       const res = await quotationApi.lookupByNumber(qNum);
-      const q = res.data;
-      if (q.status === "converted") {
-        alert(`Notice: Quotation #${q.quotation_number} was already converted into invoice #${q.converted_invoice_number || ""}.`);
-      }
-      if (!q.items || q.items.length === 0) {
-        alert(`Quotation #${q.quotation_number} has no items.`);
-        return;
-      }
-      const cartItems: POSCartItem[] = q.items.map((it: any) => ({
-        product_id: it.product || it.product_id || it.id,
-        name: it.name,
-        unit_price: Number(it.unit_price) || 0,
-        quantity: Number(it.quantity) || 1,
-        discount: Number(it.discount) || 0,
-        discount_type: "fixed",
-        tax_rate: Number(it.tax_rate) || 0,
-        unit: it.unit || "pcs",
-        hsn_code: it.hsn_code || "",
-        current_stock: 999,
-        track_inventory: true,
-      }));
-      setCart(cartItems);
-
-      if (q.customer) {
-        setIsWalkIn(false);
-        const cId = typeof q.customer === "string" ? q.customer : (q.customer as any).id;
-        setSelectedCustomer({
-          id: cId,
-          customer_id: cId,
-          full_name: q.customer_name || "Customer",
-          phone: q.customer_phone || "",
-          email: q.customer_email || "",
-          outstanding_credit: 0,
-          total_purchases: 0,
-          total_spend: 0,
-          segment: "Standard",
-          last_purchase_at: "",
-        });
-      } else if (q.customer_name && q.customer_name !== "Walk-in Customer") {
-        setIsWalkIn(false);
-        setSelectedCustomer({
-          id: "",
-          customer_id: "",
-          full_name: q.customer_name,
-          phone: q.customer_phone || "",
-          email: q.customer_email || "",
-          outstanding_credit: 0,
-          total_purchases: 0,
-          total_spend: 0,
-          segment: "Standard",
-          last_purchase_at: "",
-        });
-      }
-
-      setLoadedQuoteBanner({
-        number: q.quotation_number,
-        total: String(q.total),
-        count: cartItems.length,
-      });
-      setQuoteInput("");
-      setActiveView("new");
+      applyQuotationToCart(res.data);
     } catch {
       alert(`Quotation "${qNum}" not found or failed to load.`);
     } finally {
       setLoadingQuote(false);
     }
-  }, [quoteInput]);
+  }, [quoteInput, applyQuotationToCart]);
+
+  const handleLoadQuotationById = useCallback(async (quotationId: string) => {
+    const qId = quotationId.trim();
+    if (!qId) return;
+    setLoadingQuote(true);
+    try {
+      const res = await quotationApi.get(qId);
+      applyQuotationToCart(res.data);
+    } catch {
+      alert("Selected quotation could not be loaded.");
+    } finally {
+      setLoadingQuote(false);
+    }
+  }, [applyQuotationToCart]);
+
+  const openQuoteModal = useCallback(
+    (fromCart: boolean) => {
+      if (fromCart && cart.length > 0) {
+        const mappedItems: QuotationItem[] = cart.map((item) => {
+          const qty = Number(item.quantity) || 1;
+          const unitPrice = Number(item.unit_price) || 0;
+          const discount =
+            item.discount_type === "percentage"
+              ? Math.round(((qty * unitPrice * (Number(item.discount) || 0)) / 100) * 100) / 100
+              : Number(item.discount) || 0;
+          return {
+            product_id: item.product_id || undefined,
+            name: item.name,
+            quantity: qty,
+            unit_price: unitPrice,
+            original_price: Number(item.original_unit_price ?? item.unit_price) || unitPrice,
+            discount,
+            tax_rate: Number(item.tax_rate) || 0,
+            hsn_code: item.hsn_code || "",
+            unit: item.unit || "pcs",
+          };
+        });
+        setQuoteModalSeed({
+          title: "Save Cart as Quotation",
+          initialCustomer:
+            !isWalkIn && selectedCustomer
+              ? {
+                  id: selectedCustomer.id || undefined,
+                  name: selectedCustomer.full_name,
+                  phone: selectedCustomer.phone || "",
+                  email: selectedCustomer.email || "",
+                }
+              : null,
+          initialItems: mappedItems,
+        });
+      } else {
+        setQuoteModalSeed({
+          title: "Create New Quotation",
+          initialCustomer: null,
+          initialItems: undefined,
+        });
+      }
+      setQuoteModalOpen(true);
+    },
+    [cart, isWalkIn, selectedCustomer]
+  );
 
   // ==========================================
   // INITIAL POS CONFIG & QUOTATION PARAM
@@ -363,8 +475,11 @@ export default function UnifiedBillingWorkspace({
         if (typeof window !== "undefined") {
           const params = new URLSearchParams(window.location.search);
           const qParam = params.get("quote") || params.get("quotation");
+          const qIdParam = params.get("quotation_id");
           if (qParam) {
             handleLoadQuotation(qParam);
+          } else if (qIdParam) {
+            handleLoadQuotationById(qIdParam);
           }
 
           // Also initialize history filters from URL if present
@@ -391,7 +506,7 @@ export default function UnifiedBillingWorkspace({
       }
     }
     init();
-  }, [handleLoadQuotation]);
+  }, [handleLoadQuotation, handleLoadQuotationById]);
 
   // ==========================================
   // PRODUCT CATALOG & REALTIME REFRESH
@@ -458,6 +573,57 @@ export default function UnifiedBillingWorkspace({
   );
   useRealtimeSubscription(handleCatalogRealtimeEvent, POS_CATALOG_EVENT_FILTER);
 
+  const syncWhatsAppDeliveryState = useCallback(
+    (invoiceId: string, delivery: any, billSent?: boolean) => {
+      if (!invoiceId) return;
+      const delivered = isWhatsAppDelivered(delivery, billSent);
+      setInvoices((prev) =>
+        prev.map((row) =>
+          row.id === invoiceId
+            ? {
+                ...row,
+                bill_sent: delivered || row.bill_sent,
+                whatsapp_delivery: delivery || row.whatsapp_delivery,
+              }
+            : row
+        )
+      );
+      setSelectedInvoice((prev) =>
+        prev && prev.id === invoiceId
+          ? {
+              ...prev,
+              bill_sent: delivered || prev.bill_sent,
+              whatsapp_delivery: delivery || prev.whatsapp_delivery,
+            }
+          : prev
+      );
+      setCompletedSale((prev: any) => {
+        if (!prev) return prev;
+        const prevInvId = prev.invoice?.id || prev.invoice_id || prev.id;
+        if (prevInvId !== invoiceId) return prev;
+        return {
+          ...prev,
+          bill_sent: delivered || prev.bill_sent,
+          whatsapp_delivery: delivery || prev.whatsapp_delivery,
+        };
+      });
+    },
+    []
+  );
+
+  const handleWhatsAppRealtimeEvent = useCallback(
+    (event: { event_type: string; payload?: Record<string, any> }) => {
+      if (event.event_type !== "invoice_whatsapp_updated" || !event.payload?.invoice_id) return;
+      syncWhatsAppDeliveryState(
+        String(event.payload.invoice_id),
+        event.payload.whatsapp_delivery,
+        Boolean(event.payload.bill_sent)
+      );
+    },
+    [syncWhatsAppDeliveryState]
+  );
+  useRealtimeSubscription(handleWhatsAppRealtimeEvent, ["invoice_whatsapp_updated"]);
+
   useEffect(() => {
     const interval = window.setInterval(() => {
       fetchProducts(searchTerm, selectedCategory);
@@ -469,33 +635,68 @@ export default function UnifiedBillingWorkspace({
   // ==========================================
   // CART CALCULATION & KEYBOARD SHORTCUTS
   // ==========================================
+  const currentCartSignature = JSON.stringify({
+    items: cart.map((it) => ({
+      product_id: it.product_id,
+      unit_price: it.unit_price,
+      quantity: it.quantity,
+      discount: it.discount,
+      discount_type: it.discount_type || "fixed",
+      tax_rate: it.tax_rate,
+    })),
+    overallDiscountType,
+    overallDiscountValue: Number(overallDiscountValue) || 0,
+    isInterstate,
+  });
+
+  const calculateCartImmediate = useCallback(async () => {
+    if (cart.length === 0) {
+      setCalcSummary(null);
+      setCalcSyncedSignature("");
+      return null;
+    }
+
+    const seq = ++calcRequestSeqRef.current;
+    const sig = currentCartSignature;
+    setCalcLoading(true);
+    try {
+      const res = await posApi.calculateCart({
+        items: cart,
+        overall_discount_type: overallDiscountType,
+        overall_discount_value: Number(overallDiscountValue) || 0,
+        is_interstate: isInterstate,
+      });
+      if (seq === calcRequestSeqRef.current) {
+        setCalcSummary(res.data);
+        setCalcSyncedSignature(sig);
+      }
+      return res.data as POSCalculateResponse;
+    } catch (err) {
+      console.error("Cart calculation error", err);
+      return null;
+    } finally {
+      if (seq === calcRequestSeqRef.current) {
+        setCalcLoading(false);
+      }
+    }
+  }, [cart, overallDiscountType, overallDiscountValue, isInterstate, currentCartSignature]);
+
   useEffect(() => {
     if (cart.length === 0) {
       setCalcSummary(null);
+      setCalcSyncedSignature("");
       return;
     }
 
-    const timer = setTimeout(async () => {
-      setCalcLoading(true);
-      try {
-        const res = await posApi.calculateCart({
-          items: cart,
-          overall_discount_type: overallDiscountType,
-          overall_discount_value: Number(overallDiscountValue) || 0,
-          is_interstate: isInterstate,
-        });
-        setCalcSummary(res.data);
-      } catch (err) {
-        console.error("Cart calculation error", err);
-      } finally {
-        setCalcLoading(false);
-      }
-    }, 200);
+    const timer = setTimeout(() => {
+      calculateCartImmediate();
+    }, 80);
 
     return () => clearTimeout(timer);
-  }, [cart, overallDiscountType, overallDiscountValue, isInterstate]);
+  }, [cart, calculateCartImmediate]);
 
   const addToCart = (product: POSProduct) => {
+    checkoutIdempotencyKeyRef.current = "";
     setCart((prev) => {
       const idx = prev.findIndex((item) => item.product_id === product.id);
       if (idx >= 0) {
@@ -507,13 +708,15 @@ export default function UnifiedBillingWorkspace({
         return updated;
       }
 
+      const defaultPrice = Math.max(0, Number(product.selling_price ?? (product as any).unit_price) || 0);
       const newItem: POSCartItem = {
         product_id: product.id,
         sku: product.sku,
         barcode: product.barcode,
         name: product.name,
         quantity: 1,
-        unit_price: Number(product.selling_price ?? (product as any).unit_price) || 0,
+        unit_price: defaultPrice,
+        original_unit_price: defaultPrice,
         discount: 0,
         discount_type: "fixed",
         tax_rate: Number(product.tax_rate) || 0,
@@ -528,22 +731,90 @@ export default function UnifiedBillingWorkspace({
   };
 
   const updateCartItemQuantity = (index: number, delta: number) => {
+    checkoutIdempotencyKeyRef.current = "";
+    const targetItem = cart[index];
+    if (!targetItem) return;
+    const nextQty = targetItem.quantity + delta;
+    if (nextQty <= 0) {
+      removeFromCart(index);
+      return;
+    }
     setCart((prev) => {
       const updated = [...prev];
-      const newQty = updated[index].quantity + delta;
-      if (newQty <= 0) {
-        return updated.filter((_, i) => i !== index);
+      if (!updated[index]) return prev;
+      updated[index] = { ...updated[index], quantity: nextQty };
+      return updated;
+    });
+  };
+
+  const updateCartItemPrice = (index: number, rawValue: string) => {
+    checkoutIdempotencyKeyRef.current = "";
+    // Reject negative signs immediately while preserving typing flow (e.g. "", "99.")
+    if (rawValue.trim().startsWith("-")) {
+      return;
+    }
+    setPriceDrafts((prev) => ({ ...prev, [index]: rawValue }));
+    if (rawValue.trim() === "") {
+      return;
+    }
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return;
+    }
+    setCart((prev) => {
+      const updated = [...prev];
+      if (!updated[index]) return prev;
+      updated[index] = { ...updated[index], unit_price: parsed };
+      return updated;
+    });
+  };
+
+  const commitCartItemPrice = (index: number) => {
+    const draft = priceDrafts[index];
+    setPriceDrafts((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+    if (draft !== undefined) {
+      const parsed = Number(draft);
+      const validPrice = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) / 100 : undefined;
+      if (validPrice !== undefined) {
+        setCart((prev) => {
+          const updated = [...prev];
+          if (!updated[index]) return prev;
+          updated[index] = { ...updated[index], unit_price: validPrice };
+          return updated;
+        });
       }
-      updated[index] = { ...updated[index], quantity: newQty };
+    }
+  };
+
+  const resetCartItemPrice = (index: number) => {
+    checkoutIdempotencyKeyRef.current = "";
+    setPriceDrafts((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+    setCart((prev) => {
+      const updated = [...prev];
+      const item = updated[index];
+      if (!item || item.original_unit_price === undefined) return prev;
+      updated[index] = { ...item, unit_price: item.original_unit_price };
       return updated;
     });
   };
 
   const removeFromCart = (index: number) => {
+    checkoutIdempotencyKeyRef.current = "";
+    setPriceDrafts({});
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
   const clearCart = () => {
+    checkoutIdempotencyKeyRef.current = "";
+    setPriceDrafts({});
     setCart([]);
     setOverallDiscountValue(0);
     setIsWalkIn(true);
@@ -565,7 +836,7 @@ export default function UnifiedBillingWorkspace({
         customer_name: selectedCustomer?.full_name || (isWalkIn ? "Walk-in Customer" : ""),
         customer_phone: selectedCustomer?.phone || "",
         cart_data: { cart, isInterstate, overallDiscountType, overallDiscountValue, selectedCustomer, isWalkIn },
-        subtotal: Number(calcSummary?.subtotal) || 0,
+        subtotal: Number(calcSummary?.subtotal) || localCartSubtotal,
         item_count: cart.reduce((acc, c) => acc + c.quantity, 0),
         notes: "Held from billing workspace",
       });
@@ -580,9 +851,17 @@ export default function UnifiedBillingWorkspace({
     if (cart.length > 0 && !confirm("Current cart will be replaced. Continue?")) {
       return;
     }
+    checkoutIdempotencyKeyRef.current = "";
+    setPriceDrafts({});
     const data = held.cart_data;
     if (data?.cart) {
-      setCart(data.cart);
+      setCart(
+        data.cart.map((it: any) => ({
+          ...it,
+          unit_price: Number(it.unit_price) || 0,
+          original_unit_price: Number(it.original_unit_price ?? it.unit_price) || 0,
+        }))
+      );
       setIsInterstate(!!data.isInterstate);
       setOverallDiscountType(data.overallDiscountType || "fixed");
       setOverallDiscountValue(data.overallDiscountValue || 0);
@@ -595,74 +874,152 @@ export default function UnifiedBillingWorkspace({
     setHeldModalOpen(false);
   };
 
+  const openPaymentModalRef = useRef<() => void>(() => {});
+  const handleBarcodeScannedRef = useRef<
+    (code: string, options?: { exactOnly?: boolean; clearSearchOnMatch?: boolean }) => Promise<void>
+  >(async () => {});
+  const handleHoldCartRef = useRef<() => void>(() => {});
+  const keyboardStateRef = useRef({
+    activeView,
+    cartLength: 0,
+    hasOpenModal: false,
+  });
+  keyboardStateRef.current = {
+    activeView,
+    cartLength: cart.length,
+    hasOpenModal:
+      paymentModalOpen ||
+      customerModalOpen ||
+      quickAddModalOpen ||
+      heldModalOpen ||
+      Boolean(selectedInvoice) ||
+      Boolean(completedSale),
+  };
+
   // Keyboard Shortcuts & Barcode reader
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if user is in history view unless Escape
-      if (activeView !== "new" && e.key !== "Escape") return;
-
-      const now = Date.now();
-      const diff = now - lastKeyTimeRef.current;
-      lastKeyTimeRef.current = now;
-
-      if (e.key === "Enter" && barcodeBufferRef.current.length >= 3 && diff < 80) {
-        const scannedCode = barcodeBufferRef.current.trim();
+      const key = extractSafeKey(e);
+      if (!key) {
         barcodeBufferRef.current = "";
-        handleBarcodeScanned(scannedCode);
         return;
       }
 
-      if (e.key.length === 1 && diff < 80) {
-        barcodeBufferRef.current += e.key;
-      } else if (diff >= 80) {
-        barcodeBufferRef.current = e.key.length === 1 ? e.key : "";
-      }
-
-      if (e.key === "F2") {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      } else if (e.key === "F4") {
-        e.preventDefault();
-        setCustomerModalOpen(true);
-      } else if (e.key === "F6") {
-        e.preventDefault();
-        if (cart.length > 0) {
-          handleHoldCart();
-        } else {
-          setHeldModalOpen(true);
-        }
-      } else if (e.key === "F8") {
-        e.preventDefault();
-        if (cart.length > 0) {
-          openPaymentModal();
-        }
-      } else if (e.key === "Escape") {
+      if (key === "Escape") {
+        barcodeBufferRef.current = "";
         setPaymentModalOpen(false);
         setCustomerModalOpen(false);
         setQuickAddModalOpen(false);
         setHeldModalOpen(false);
         setSelectedInvoice(null);
+        return;
+      }
+
+      const state = keyboardStateRef.current;
+      if (state.activeView !== "new") {
+        barcodeBufferRef.current = "";
+        return;
+      }
+
+      const target = e.target;
+      const isEditableTarget = isEditableEventTarget(target);
+      const isSearchInput = Boolean(searchInputRef.current && target === searchInputRef.current);
+      const hasModifier = Boolean(e.ctrlKey || e.metaKey || e.altKey);
+
+      // Function shortcuts only when no modal is open and no modifier is held
+      if (!hasModifier && !state.hasOpenModal) {
+        if (key === "F2") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+          return;
+        }
+        if (key === "F4") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          setCustomerModalOpen(true);
+          return;
+        }
+        if (key === "F6") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          if (state.cartLength > 0) {
+            handleHoldCartRef.current();
+          } else {
+            setHeldModalOpen(true);
+          }
+          return;
+        }
+        if (key === "F8") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          if (document.activeElement instanceof HTMLElement && isEditableEventTarget(document.activeElement)) {
+            document.activeElement.blur();
+          }
+          if (state.cartLength > 0) {
+            openPaymentModalRef.current();
+          }
+          return;
+        }
+      }
+
+      // Never capture or hijack typing inside price/quantity/discount/payment/modal inputs
+      if (state.hasOpenModal || e.isComposing || hasModifier || (isEditableTarget && !isSearchInput)) {
+        barcodeBufferRef.current = "";
+        return;
+      }
+
+      const step = advanceBarcodeBuffer({
+        key,
+        nowMs: Date.now(),
+        lastKeyTimeMs: lastKeyTimeRef.current,
+        buffer: barcodeBufferRef.current,
+      });
+      barcodeBufferRef.current = step.nextBuffer;
+      lastKeyTimeRef.current = step.nextLastKeyTimeMs;
+
+      if (step.submittedCode) {
+        e.preventDefault();
+        void handleBarcodeScannedRef.current(step.submittedCode, {
+          exactOnly: isSearchInput,
+          clearSearchOnMatch: isSearchInput,
+        });
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, activeView]);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
-  const handleBarcodeScanned = async (code: string) => {
+  const handleBarcodeScanned = async (
+    code: string,
+    options?: { exactOnly?: boolean; clearSearchOnMatch?: boolean }
+  ) => {
     try {
+      const normalized = code.trim().toLowerCase();
       const res = await posApi.searchProducts({ search: code, page_size: 5 });
       const items: POSProduct[] = Array.isArray(res.data) ? res.data : res.data.results || [];
-      const match = items.find((p) => p.barcode === code || p.sku === code) || items[0];
+      const exactMatch = items.find(
+        (p) =>
+          (p.barcode && p.barcode.trim().toLowerCase() === normalized) ||
+          (p.sku && p.sku.trim().toLowerCase() === normalized)
+      );
+      const match = options?.exactOnly ? exactMatch : exactMatch || items[0];
       if (match) {
         addToCart(match);
+        if (options?.clearSearchOnMatch) {
+          setSearchTerm("");
+        }
       }
     } catch (err) {
       console.error("Barcode scan lookup failed", err);
     }
   };
+  handleBarcodeScannedRef.current = handleBarcodeScanned;
+  handleHoldCartRef.current = handleHoldCart;
 
   // ==========================================
   // CUSTOMER LOOKUP & QUICK CREATE
@@ -747,72 +1104,167 @@ export default function UnifiedBillingWorkspace({
   // ==========================================
   // PAYMENT CALCULATION & SETTLEMENT FLOW
   // ==========================================
+  const roundCurrency = (val: number) => Math.round((val + Number.EPSILON) * 100) / 100;
+  const creditSalesEnabled = config ? config.allow_credit_sales !== false : true;
+  const isCalcSynced = cart.length === 0 || (calcSummary !== null && calcSyncedSignature === currentCartSignature);
+
   const localCartSubtotal = cart.reduce(
     (acc, item) => acc + Math.max(0, item.quantity * item.unit_price - (item.discount || 0)),
     0
   );
+  const displayedSubtotal = isCalcSynced && calcSummary ? Number(calcSummary.subtotal) : localCartSubtotal;
+  const displayedDiscount = isCalcSynced && calcSummary ? Number(calcSummary.total_discount) : 0;
+  const displayedTax = isCalcSynced && calcSummary ? Number(calcSummary.tax) : 0;
+  const displayedRoundOff = isCalcSynced && calcSummary ? Number(calcSummary.round_off) : 0;
   const grandTotalNum =
-    calcSummary && Number(calcSummary.grand_total) > 0
+    calcSummary !== null && calcSummary.grand_total !== undefined && isCalcSynced
+      ? Number(calcSummary.grand_total)
+      : calcSummary !== null && calcSummary.grand_total !== undefined && cart.length > 0
       ? Number(calcSummary.grand_total)
       : localCartSubtotal;
 
-  const openPaymentModal = () => {
+  // Derived active payment allocations for validation & checkout payload
+  const activePaymentLines: { method: string; amount: number; reference?: string }[] =
+    paymentMode === "HYBRID"
+      ? hybridPayments
+          .filter((p) => Number(p.amount) > 0)
+          .map((p) => ({ method: p.method, amount: roundCurrency(Number(p.amount)), reference: p.reference }))
+      : paymentMode === "CASH"
+      ? [{ method: "CASH", amount: roundCurrency(Number(payingCashAmount) || 0), reference: singlePaymentReference || undefined }]
+      : paymentMode === "OTHER"
+      ? [{ method: otherPaymentMethod, amount: roundCurrency(grandTotalNum), reference: singlePaymentReference || undefined }]
+      : [{ method: paymentMode, amount: roundCurrency(grandTotalNum), reference: singlePaymentReference || undefined }];
+
+  const totalPaidSoFar = roundCurrency(
+    activePaymentLines.reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+  );
+  const cashPaidTotal = roundCurrency(
+    activePaymentLines
+      .filter((p) => p.method === "CASH")
+      .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+  );
+  const usesCredit = activePaymentLines.some((p) => p.method === "CREDIT" && p.amount > 0);
+  const remainingDue = Math.max(0, roundCurrency(grandTotalNum - totalPaidSoFar));
+  const rawOverpayment = totalPaidSoFar > grandTotalNum ? roundCurrency(totalPaidSoFar - grandTotalNum) : 0;
+  const isElectronicOverpay = rawOverpayment > 0.009 && cashPaidTotal < rawOverpayment - 0.009;
+  const cashChange = rawOverpayment > 0 && !isElectronicOverpay ? rawOverpayment : 0;
+
+  const openPaymentModal = async () => {
     if (cart.length === 0) return;
-    const payable = grandTotalNum > 0 ? grandTotalNum : localCartSubtotal;
     setCheckoutError("");
-    setPayments([{ method: "CASH", amount: payable }]);
+    setSinglePaymentReference("");
+    setHybridDrafts({});
+    setPaymentMode("CASH");
+    checkoutIdempotencyKeyRef.current = `pos-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    let payable = grandTotalNum;
+    if (!isCalcSynced) {
+      const synced = await calculateCartImmediate();
+      if (synced && synced.grand_total !== undefined) {
+        payable = Number(synced.grand_total);
+      } else {
+        payable = localCartSubtotal;
+      }
+    }
+
     setPayingCashAmount(payable);
+    setCashAmountDraft(payable > 0 ? payable.toFixed(2) : "0");
+    setHybridPayments([
+      { method: "CASH", amount: payable },
+      { method: "UPI", amount: 0 },
+      { method: "CARD", amount: 0 },
+    ]);
     setPaymentModalOpen(true);
   };
+  openPaymentModalRef.current = openPaymentModal;
 
-  const totalPaidSoFar = payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
-  const remainingDue = Math.max(0, grandTotalNum - totalPaidSoFar);
-  const cashChange = totalPaidSoFar > grandTotalNum ? totalPaidSoFar - grandTotalNum : 0;
+  // Keep single-mode cash default synced if calc finishes right after opening
+  useEffect(() => {
+    if (paymentModalOpen && paymentMode === "CASH" && isCalcSynced && calcSummary?.grand_total !== undefined) {
+      const syncedPayable = Number(calcSummary.grand_total);
+      if (cashAmountDraft === "" || Math.abs((Number(cashAmountDraft) || 0) - payingCashAmount) < 0.01) {
+        setPayingCashAmount((prev) => (prev === grandTotalNum || prev === 0 ? syncedPayable : prev));
+      }
+    }
+  }, [isCalcSynced, calcSummary, paymentModalOpen, paymentMode, cashAmountDraft, payingCashAmount, grandTotalNum]);
 
-  const setPrimaryPaymentMethod = (method: string) => {
-    const payable = grandTotalNum > 0 ? grandTotalNum : localCartSubtotal;
-    setPayments([{ method, amount: payable }]);
-    setPayingCashAmount(payable);
+  const selectPaymentMode = (mode: "CASH" | "UPI" | "CARD" | "CREDIT" | "OTHER" | "HYBRID") => {
     setCheckoutError("");
+    setPaymentMode(mode);
+    if (mode === "CASH") {
+      setPayingCashAmount(grandTotalNum);
+      setCashAmountDraft(grandTotalNum.toFixed(2));
+    } else if (mode === "HYBRID") {
+      setHybridDrafts({});
+      setHybridPayments((prev) => {
+        const hasPositive = prev.some((p) => p.amount > 0);
+        if (hasPositive) return prev;
+        return [
+          { method: "CASH", amount: grandTotalNum },
+          { method: "UPI", amount: 0 },
+          { method: "CARD", amount: 0 },
+        ];
+      });
+    }
   };
 
-  const addSplitPaymentMethod = (method: string) => {
-    const amt = remainingDue > 0 ? remainingDue : 0;
-    setPayments((prev) => [...prev, { method, amount: amt }]);
-    setCheckoutError("");
-  };
-
-  const updatePaymentMethod = (index: number, newMethod: string) => {
-    setPayments((prev) => {
+  const updateHybridPaymentMethod = (index: number, newMethod: string) => {
+    setHybridPayments((prev) => {
       const updated = [...prev];
       updated[index] = { ...updated[index], method: newMethod };
       return updated;
     });
+    setCheckoutError("");
   };
 
-  const updatePaymentAmount = (index: number, val: number) => {
-    setPayments((prev) => {
+  const updateHybridPaymentAmount = (index: number, raw: string) => {
+    if (raw.trim().startsWith("-")) return;
+    setHybridDrafts((prev) => ({ ...prev, [index]: raw }));
+    const parsed = raw.trim() === "" ? 0 : Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) return;
+    setHybridPayments((prev) => {
       const updated = [...prev];
-      updated[index] = { ...updated[index], amount: Math.max(0, val) };
+      if (!updated[index]) return prev;
+      updated[index] = { ...updated[index], amount: roundCurrency(parsed) };
       return updated;
     });
+    setCheckoutError("");
   };
 
-  const removePaymentLine = (index: number) => {
-    setPayments((prev) => prev.filter((_, i) => i !== index));
+  const fillHybridRemaining = (index: number) => {
+    const currentLineAmt = Number(hybridPayments[index]?.amount) || 0;
+    const otherPaid = totalPaidSoFar - currentLineAmt;
+    const fillAmt = Math.max(0, roundCurrency(grandTotalNum - otherPaid));
+    setHybridDrafts((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+    setHybridPayments((prev) => {
+      const updated = [...prev];
+      if (!updated[index]) return prev;
+      updated[index] = { ...updated[index], amount: fillAmt };
+      return updated;
+    });
+    setCheckoutError("");
+  };
+
+  const addHybridPaymentRow = (method = "NETBANKING") => {
+    setHybridPayments((prev) => [...prev, { method, amount: remainingDue > 0 ? remainingDue : 0 }]);
+    setCheckoutError("");
+  };
+
+  const removeHybridPaymentRow = (index: number) => {
+    setHybridDrafts({});
+    setHybridPayments((prev) => prev.filter((_, i) => i !== index));
+    setCheckoutError("");
   };
 
   const setQuickCashTender = (tenderedAmount: number) => {
-    setPayments((prev) => {
-      const cashIdx = prev.findIndex((p) => p.method === "CASH");
-      if (cashIdx >= 0) {
-        const updated = [...prev];
-        updated[cashIdx] = { ...updated[cashIdx], amount: tenderedAmount };
-        return updated;
-      }
-      return [{ method: "CASH", amount: tenderedAmount }];
-    });
-    setPayingCashAmount(tenderedAmount);
+    const rounded = roundCurrency(tenderedAmount);
+    setPayingCashAmount(rounded);
+    setCashAmountDraft(rounded.toFixed(2));
+    setCheckoutError("");
   };
 
   // Checkout Execution with Idempotency Protection
@@ -820,19 +1272,41 @@ export default function UnifiedBillingWorkspace({
     // Synchronous lock to prevent duplicate concurrent submissions
     if (inFlightCheckoutRef.current || checkoutLoading) return;
 
-    if (payments.length === 0) {
-      setCheckoutError("Please specify at least one payment method.");
+    if (!isCalcSynced) {
+      await calculateCartImmediate();
+    }
+
+    if (grandTotalNum > 0 && activePaymentLines.length === 0) {
+      setCheckoutError("Please enter a valid payment amount.");
       return;
     }
 
-    if (totalPaidSoFar < grandTotalNum) {
-      const hasCredit = payments.some((p) => p.method === "CREDIT");
-      if (!hasCredit) {
-        setCheckoutError(
-          `Tendered amount (₹${totalPaidSoFar.toFixed(2)}) is less than total (₹${grandTotalNum.toFixed(2)}). Add Credit or adjust payment.`
-        );
-        return;
-      }
+    if (usesCredit && !creditSalesEnabled) {
+      setCheckoutError("Credit / Udhaar sales are disabled in business settings.");
+      return;
+    }
+
+    if (usesCredit && isWalkIn) {
+      setCheckoutError("Walk-in customers cannot take Credit sales. Please select or register a customer first.");
+      return;
+    }
+
+    if (isElectronicOverpay) {
+      setCheckoutError(
+        `Overpayment of ₹${rawOverpayment.toFixed(2)} is only permitted in Cash. Electronic payments cannot exceed ₹${grandTotalNum.toFixed(2)}.`
+      );
+      return;
+    }
+
+    if (totalPaidSoFar < grandTotalNum - 0.009) {
+      setCheckoutError(
+        `Paid amount (₹${totalPaidSoFar.toFixed(2)}) is less than bill total (₹${grandTotalNum.toFixed(2)}). Remaining due: ₹${remainingDue.toFixed(2)}.`
+      );
+      return;
+    }
+
+    if (!checkoutIdempotencyKeyRef.current) {
+      checkoutIdempotencyKeyRef.current = `pos-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     }
 
     inFlightCheckoutRef.current = true;
@@ -840,6 +1314,15 @@ export default function UnifiedBillingWorkspace({
     setCheckoutError("");
 
     try {
+      const payloadPayments =
+        activePaymentLines.length > 0
+          ? activePaymentLines.map((p) => ({
+              payment_method: p.method.toLowerCase(),
+              amount: p.amount,
+              reference: p.reference,
+            }))
+          : [{ payment_method: "cash", amount: 0 }];
+
       const payload: any = {
         store_id: selectedStoreId || undefined,
         quotation_number: loadedQuoteBanner?.number || undefined,
@@ -857,15 +1340,12 @@ export default function UnifiedBillingWorkspace({
                 email: selectedCustomer.email,
               }
             : undefined,
-        payments: payments.map((p) => ({
-          payment_method: p.method,
-          amount: p.amount,
-          reference: p.reference,
-        })),
-        idempotency_key: `pos-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        payments: payloadPayments,
+        idempotency_key: checkoutIdempotencyKeyRef.current,
       };
 
       const res = await posApi.checkout(payload);
+      checkoutIdempotencyKeyRef.current = "";
       setCompletedSale(res.data);
       setPaymentModalOpen(false);
       clearCart();
@@ -1059,20 +1539,72 @@ export default function UnifiedBillingWorkspace({
   };
 
   const handleDownloadInvoicePdf = async (inv: Invoice) => {
-    downloadInvoicePdf(inv.id, inv.invoice_number, "a4");
+    if (!inv?.id || pdfGenerating) return;
+    setPdfGenerating(true);
+    try {
+      await downloadInvoicePdf(inv.id, inv.invoice_number, "a4");
+    } catch (err) {
+      console.error("Failed to download invoice PDF:", err);
+      const errMsg = parseApiError(err, "Failed to download invoice PDF.");
+      setWhatsappFeedback({
+        type: "error",
+        invoiceId: inv.id,
+        message: `⚠ ${errMsg}`,
+      });
+    } finally {
+      setPdfGenerating(false);
+    }
   };
 
-  const handleShareWhatsApp = (inv: Invoice) => {
-    const phone = inv.customer_phone?.replace(/\D/g, "");
-    const webUrl =
-      typeof window !== "undefined"
-        ? `${window.location.origin}${inv.web_url || `/bills/${inv.id}`}`
-        : "";
-    const text = encodeURIComponent(
-      `Hello ${inv.customer_name || "Valued Customer"}, thank you for your purchase! Your invoice #${inv.invoice_number} of ₹${inv.total} is ready. View it here: ${webUrl}`
-    );
-    const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
-    window.open(url, "_blank");
+  const handleShareWhatsApp = async (inv: Invoice, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!inv?.id || sendingWhatsAppId === inv.id) return;
+
+    setSendingWhatsAppId(inv.id);
+    setWhatsappFeedback(null);
+    try {
+      const priorStatus = inv.whatsapp_delivery?.status;
+      const shouldForce = Boolean(
+        inv.bill_sent || priorStatus === "sent" || priorStatus === "delivered" || priorStatus === "read"
+      );
+      const res = await invoiceApi.sendWhatsApp(inv.id, {
+        format_type: inv.template_format === "thermal" ? "thermal" : "a4",
+        force: shouldForce,
+      });
+      const data = res.data;
+      if (data?.status === "sent" || data?.status === "already_sent") {
+        const updatedDelivery = data.whatsapp_delivery || inv.whatsapp_delivery || { status: "sent" as const };
+        syncWhatsAppDeliveryState(inv.id, updatedDelivery, true);
+        setWhatsappFeedback({
+          type: "success",
+          invoiceId: inv.id,
+          message: `✓ Invoice #${inv.invoice_number} PDF sent to WhatsApp${data.filename ? ` (${data.filename})` : ""}.`,
+        });
+      } else if (data?.status === "queued" || data?.status === "processing") {
+        const updatedDelivery = data.whatsapp_delivery || { status: data.status };
+        syncWhatsAppDeliveryState(inv.id, updatedDelivery, false);
+        setWhatsappFeedback({
+          type: "success",
+          invoiceId: inv.id,
+          message: `Sending Invoice #${inv.invoice_number} PDF via WhatsApp...`,
+        });
+      } else {
+        setWhatsappFeedback({
+          type: "error",
+          invoiceId: inv.id,
+          message: `⚠ Invoice #${inv.invoice_number} is valid, but WhatsApp delivery failed${data?.error ? `: ${data.error}` : "."}`,
+        });
+      }
+    } catch (err: unknown) {
+      const msg = parseApiError(err, "WhatsApp PDF delivery failed.");
+      setWhatsappFeedback({
+        type: "error",
+        invoiceId: inv.id,
+        message: `⚠ Invoice #${inv.invoice_number} is valid, but WhatsApp delivery failed: ${msg}`,
+      });
+    } finally {
+      setSendingWhatsAppId(null);
+    }
   };
 
   // Business Type Helper
@@ -1085,10 +1617,16 @@ export default function UnifiedBillingWorkspace({
   };
 
   // Dynamic UPI URL for QR Code
-  const upiId = config?.gstin
-    ? `${config.trade_name || "shop"}@upi`
-    : "billfree.business@okhdfcbank";
-  const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(config?.trade_name || "BillFree Store")}&am=${remainingDue > 0 ? remainingDue.toFixed(2) : grandTotalNum.toFixed(2)}&cu=INR&tn=Invoice%20Bill`;
+  const upiId =
+    config?.bank_upi_id?.trim() ||
+    (config?.gstin
+      ? `${(config.trade_name || "shop").replace(/\s+/g, "").toLowerCase()}@upi`
+      : "billmeet@upi");
+  const upiQrAmount =
+    paymentMode === "HYBRID"
+      ? hybridPayments.filter((p) => p.method === "UPI").reduce((s, p) => s + (Number(p.amount) || 0), 0) || grandTotalNum
+      : grandTotalNum;
+  const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(config?.trade_name || "BillMeet Store")}&am=${upiQrAmount.toFixed(2)}&cu=INR&tn=Invoice%20Bill`;
 
   // History KPI metrics
   const historyTotalAmountSum = invoices.reduce(
@@ -1178,33 +1716,52 @@ export default function UnifiedBillingWorkspace({
             </select>
           )}
 
-          {/* Quotation Loader (when in New Bill view) */}
+          {/* Quotation Loader & Quick Quote Actions (when in New Bill view) */}
           {activeView === "new" && (
-            <div className="hidden sm:flex items-center gap-1.5 border-l pl-3 ml-1">
-              <div className="relative">
-                <FileCheck className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Quotation #..."
-                  value={quoteInput}
-                  onChange={(e) => setQuoteInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleLoadQuotation();
-                    }
-                  }}
-                  className="h-8 pl-8 pr-2 w-36 lg:w-44 text-xs font-mono uppercase"
-                />
+            <div className="flex items-center gap-1.5 border-l pl-2 sm:pl-3 ml-1">
+              <div className="hidden sm:flex items-center gap-1.5">
+                <div className="relative">
+                  <FileCheck className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Quotation #..."
+                    value={quoteInput}
+                    onChange={(e) => setQuoteInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleLoadQuotation();
+                      }
+                    }}
+                    className="h-8 pl-8 pr-2 w-32 lg:w-40 text-xs font-mono uppercase"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={loadingQuote || !quoteInput.trim()}
+                  onClick={() => handleLoadQuotation()}
+                  className="h-8 text-xs font-semibold px-2.5"
+                >
+                  {loadingQuote ? "Loading..." : "Load"}
+                </Button>
               </div>
               <Button
+                type="button"
                 size="sm"
-                variant="secondary"
-                disabled={loadingQuote || !quoteInput.trim()}
-                onClick={() => handleLoadQuotation()}
-                className="h-8 text-xs font-semibold px-2.5"
+                variant="outline"
+                onClick={() => openQuoteModal(false)}
+                className="h-8 text-xs font-semibold gap-1 px-2.5"
               >
-                {loadingQuote ? "Loading..." : "Load"}
+                <Plus className="h-3.5 w-3.5" />
+                <span>New Quote</span>
               </Button>
+              <Link
+                href={`${basePath}/quotations`}
+                className="hidden md:inline-flex items-center gap-1 h-8 px-2.5 rounded-md border border-border bg-card hover:bg-accent text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <FileCheck className="h-3.5 w-3.5" />
+                <span>Quotes</span>
+              </Link>
             </div>
           )}
         </div>
@@ -1319,7 +1876,7 @@ export default function UnifiedBillingWorkspace({
               )}
             >
               <Receipt className="h-4 w-4 text-emerald-600" />
-              <span>Cart & Checkout</span>
+              <span>Bill & Payment</span>
               {cart.length > 0 && (
                 <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground leading-none">
                   {cart.length}
@@ -1339,7 +1896,7 @@ export default function UnifiedBillingWorkspace({
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
                 <span>
-                  <strong>Quotation #{loadedQuoteBanner.number}</strong> loaded into cart ({loadedQuoteBanner.count} items, Total: ₹{loadedQuoteBanner.total}). Ready for billing & checkout!
+                  <strong>Quotation #{loadedQuoteBanner.number}</strong> loaded into cart ({loadedQuoteBanner.count} items, Total: ₹{loadedQuoteBanner.total}). Ready for billing & payment!
                 </span>
               </div>
               <button
@@ -1351,12 +1908,37 @@ export default function UnifiedBillingWorkspace({
             </div>
           )}
 
+          {/* Quotation Created Notification Banner */}
+          {savedQuoteBanner && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2 shadow-2xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <FileCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>
+                  <strong>Quotation #{savedQuoteBanner.quotation_number}</strong> created (Total: ₹{savedQuoteBanner.total}). Stock was not deducted.{" "}
+                  <Link
+                    href={`${basePath}/quotations`}
+                    className="underline font-bold hover:text-emerald-700 dark:hover:text-emerald-100"
+                  >
+                    View Quotations
+                  </Link>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSavedQuoteBanner(null)}
+                className="text-xs text-emerald-700 hover:text-emerald-900 font-bold ml-2 px-1.5 py-0.5 rounded hover:bg-emerald-200/50"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
           {/* Main Work Area: Left Catalog & Right Cart */}
           <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-12 min-h-0">
             {/* Left Side: Product Search, Category Pills, Grid */}
             <div
               className={cn(
-                "flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-xs lg:col-span-7 xl:col-span-8 overflow-hidden min-h-0",
+                "flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-xs lg:col-span-7 xl:col-span-7 overflow-hidden min-h-0",
                 mobileTab === "cart" ? "hidden lg:flex" : "flex"
               )}
             >
@@ -1498,23 +2080,23 @@ export default function UnifiedBillingWorkspace({
               </div>
             </div>
 
-            {/* Right Side: Cart, Customer, Calculations, and Actions */}
+            {/* Right Side: Compact Billing List, Customer, Calculations, and Payment CTA */}
             <div
               className={cn(
-                "flex flex-col rounded-lg border bg-card p-3 shadow-xs lg:col-span-5 xl:col-span-4 overflow-hidden min-h-0",
+                "flex flex-col rounded-lg border bg-card p-3 shadow-xs lg:col-span-5 xl:col-span-5 overflow-hidden min-h-0",
                 mobileTab === "catalog" ? "hidden lg:flex" : "flex"
               )}
             >
               {/* Customer Selection Header */}
               <div className="flex items-center justify-between border-b pb-2.5 shrink-0">
-                <div className="flex items-center gap-2">
-                  <User className="h-4 w-4 text-primary" />
-                  <div>
-                    <p className="text-xs font-semibold">
+                <div className="flex items-center gap-2 min-w-0">
+                  <User className="h-4 w-4 text-primary shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold truncate">
                       {isWalkIn ? "Walk-in Customer" : selectedCustomer?.full_name || "Customer Selected"}
                     </p>
                     {!isWalkIn && selectedCustomer && (
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-[11px] text-muted-foreground truncate">
                         Ph: {selectedCustomer.phone} • Limit: ₹{Number(selectedCustomer.credit_limit || 5000)}
                       </p>
                     )}
@@ -1524,80 +2106,253 @@ export default function UnifiedBillingWorkspace({
                   variant="outline"
                   size="sm"
                   onClick={() => setCustomerModalOpen(true)}
-                  className="h-7 text-xs font-medium gap-1"
+                  className="h-7 text-xs font-medium gap-1 shrink-0"
                 >
                   <Users className="h-3 w-3" />
                   {isWalkIn ? "Select (F4)" : "Change"}
                 </Button>
               </div>
 
-              {/* Cart Items Table */}
-              <div className="flex-1 overflow-y-auto py-2 min-h-0">
+              {/* Compact Billing List / Table (Desktop Table + Intelligent Mobile List) */}
+              <div className="flex-1 overflow-y-auto my-2 min-h-0 rounded-md border bg-background">
                 {cart.length === 0 ? (
-                  <div className="flex h-48 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                  <div className="flex h-48 flex-col items-center justify-center gap-2 text-center text-muted-foreground px-4">
                     <Receipt className="h-8 w-8 text-muted-foreground/40" />
-                    <p className="text-xs font-medium">Cart is empty</p>
+                    <p className="text-xs font-medium">Bill is empty</p>
                     <p className="text-[11px]">Scan barcode or click items on the left to add.</p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {cart.map((item, idx) => {
-                      const lineTotal = item.quantity * item.unit_price - (item.discount || 0);
-                      return (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between gap-2 rounded-md border bg-background p-2 text-xs"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold truncate">{item.name}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              ₹{item.unit_price} × {item.quantity} {item.unit || "pcs"}
-                              {item.tax_rate > 0 && ` (${item.tax_rate}% GST)`}
-                            </p>
-                            {item.discount > 0 && (
-                              <p className="text-[10px] text-emerald-600 font-medium">
-                                -₹{item.discount} item discount
-                              </p>
-                            )}
-                          </div>
+                  <>
+                    {/* Desktop Compact Cashier Table */}
+                    <table className="hidden sm:table w-full text-xs border-collapse">
+                      <thead className="sticky top-0 z-10 bg-muted/95 backdrop-blur-xs border-b text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <tr>
+                          <th className="py-1.5 px-2 text-left">Item</th>
+                          <th className="py-1.5 px-1.5 text-center w-[92px]">Qty</th>
+                          <th className="py-1.5 px-1.5 text-right w-[94px]">Unit Price</th>
+                          <th className="py-1.5 px-2 text-right w-[78px]">Total</th>
+                          <th className="py-1.5 px-1.5 text-center w-[34px]"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/70">
+                        {cart.map((item, idx) => {
+                          const lineTotal = Math.max(0, item.quantity * item.unit_price - (item.discount || 0));
+                          const variantEntries = item.attributes ? Object.entries(item.attributes).slice(0, 2) : [];
+                          const isPriceModified =
+                            item.original_unit_price !== undefined &&
+                            Math.abs(item.unit_price - item.original_unit_price) > 0.001;
+                          const stockExceeded =
+                            !config?.allow_negative_stock &&
+                            item.track_inventory &&
+                            typeof item.current_stock === "number" &&
+                            item.quantity > item.current_stock;
+                          const draftVal = priceDrafts[idx];
 
-                          {/* Quantity Controls */}
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => updateCartItemQuantity(idx, -1)}
-                              className="flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border bg-muted hover:bg-muted/80 active:bg-muted/60 transition-colors"
-                              aria-label="Decrease quantity"
-                            >
-                              <Minus className="h-3.5 w-3.5" />
-                            </button>
-                            <span className="w-7 text-center font-bold text-xs">{item.quantity}</span>
-                            <button
-                              type="button"
-                              onClick={() => updateCartItemQuantity(idx, 1)}
-                              className="flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border bg-muted hover:bg-muted/80 active:bg-muted/60 transition-colors"
-                              aria-label="Increase quantity"
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
+                          return (
+                            <tr key={`${item.product_id || item.name}-${idx}`} className="hover:bg-muted/30 transition-colors">
+                              {/* ITEM */}
+                              <td className="py-1.5 px-2 align-middle max-w-[170px]">
+                                <div className="font-semibold text-foreground truncate" title={item.name}>
+                                  {item.name}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground leading-tight mt-0.5">
+                                  {item.sku && <span className="font-mono">{item.sku}</span>}
+                                  {variantEntries.map(([k, v]) => (
+                                    <span key={k} className="truncate">
+                                      {k}: {String(v)}
+                                    </span>
+                                  ))}
+                                  {item.tax_rate > 0 && <span>GST {item.tax_rate}%</span>}
+                                  {item.discount > 0 && (
+                                    <span className="text-emerald-600 font-medium">-₹{item.discount} disc</span>
+                                  )}
+                                  {stockExceeded && (
+                                    <span className="text-amber-600 font-semibold">
+                                      (Stock: {item.current_stock})
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
 
-                          {/* Line Total & Remove */}
-                          <div className="text-right shrink-0">
-                            <p className="font-bold text-foreground">₹{lineTotal.toFixed(2)}</p>
-                            <button
-                              type="button"
-                              onClick={() => removeFromCart(idx)}
-                              className="p-1 text-destructive hover:bg-destructive/10 rounded-md inline-flex items-center justify-center transition-colors"
-                              aria-label="Remove item"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                              {/* QTY */}
+                              <td className="py-1.5 px-1 align-middle">
+                                <div className="inline-flex items-center justify-center rounded border bg-muted/30">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateCartItemQuantity(idx, -1)}
+                                    className="flex h-6 w-6 items-center justify-center hover:bg-muted text-foreground transition-colors"
+                                    aria-label={`Decrease ${item.name} quantity`}
+                                  >
+                                    <Minus className="h-3 w-3" />
+                                  </button>
+                                  <span className="w-7 text-center font-bold tabular-nums text-[11px]">
+                                    {item.quantity}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateCartItemQuantity(idx, 1)}
+                                    className="flex h-6 w-6 items-center justify-center hover:bg-muted text-foreground transition-colors"
+                                    aria-label={`Increase ${item.name} quantity`}
+                                  >
+                                    <Plus className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              </td>
+
+                              {/* EDITABLE UNIT PRICE */}
+                              <td className="py-1.5 px-1 align-middle text-right">
+                                <div className="relative inline-flex items-center w-[84px]">
+                                  <span className="pointer-events-none absolute left-1.5 text-[11px] text-muted-foreground">
+                                    ₹
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    aria-label={`Unit price for ${item.name}`}
+                                    value={draftVal !== undefined ? draftVal : item.unit_price}
+                                    onChange={(e) => updateCartItemPrice(idx, e.target.value)}
+                                    onBlur={() => commitCartItemPrice(idx)}
+                                    onFocus={(e) => e.currentTarget.select()}
+                                    className={cn(
+                                      "h-7 w-full rounded border bg-background pl-4 pr-1 text-right font-mono text-xs font-semibold tabular-nums focus:outline-none focus:ring-1 focus:ring-primary",
+                                      isPriceModified && "border-amber-500/60 bg-amber-50/40 dark:bg-amber-950/20"
+                                    )}
+                                  />
+                                </div>
+                                {isPriceModified && (
+                                  <div className="mt-0.5 flex items-center justify-end gap-1 text-[9px] text-muted-foreground">
+                                    <span className="line-through">₹{item.original_unit_price}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => resetCartItemPrice(idx)}
+                                      className="text-primary hover:underline font-medium"
+                                      title="Reset to default product price"
+                                    >
+                                      Reset
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* LINE TOTAL */}
+                              <td className="py-1.5 px-2 align-middle text-right font-bold tabular-nums text-foreground whitespace-nowrap">
+                                ₹{lineTotal.toFixed(2)}
+                              </td>
+
+                              {/* ACTION */}
+                              <td className="py-1.5 px-1 align-middle text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => removeFromCart(idx)}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                  aria-label={`Remove ${item.name}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    {/* Mobile Responsive Compact List (No Cards, Clean Two-Row Split) */}
+                    <div className="sm:hidden divide-y divide-border/70">
+                      {cart.map((item, idx) => {
+                        const lineTotal = Math.max(0, item.quantity * item.unit_price - (item.discount || 0));
+                        const variantEntries = item.attributes ? Object.entries(item.attributes).slice(0, 2) : [];
+                        const isPriceModified =
+                          item.original_unit_price !== undefined &&
+                          Math.abs(item.unit_price - item.original_unit_price) > 0.001;
+                        const draftVal = priceDrafts[idx];
+
+                        return (
+                          <div key={`m-${item.product_id || item.name}-${idx}`} className="p-2.5 space-y-2 text-xs">
+                            {/* Top Row: Name + Line Total + Delete */}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-semibold text-foreground truncate">{item.name}</p>
+                                <div className="flex flex-wrap items-center gap-x-1.5 text-[10px] text-muted-foreground">
+                                  {item.sku && <span className="font-mono">{item.sku}</span>}
+                                  {variantEntries.map(([k, v]) => (
+                                    <span key={k}>
+                                      {k}: {String(v)}
+                                    </span>
+                                  ))}
+                                  {item.tax_rate > 0 && <span>GST {item.tax_rate}%</span>}
+                                  {item.discount > 0 && (
+                                    <span className="text-emerald-600">-₹{item.discount}</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="font-bold tabular-nums text-foreground">₹{lineTotal.toFixed(2)}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeFromCart(idx)}
+                                  className="p-1 text-muted-foreground hover:text-destructive rounded hover:bg-destructive/10"
+                                  aria-label={`Remove ${item.name}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Bottom Row: Qty Stepper + Editable Unit Price */}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="inline-flex items-center rounded-md border bg-muted/30">
+                                <button
+                                  type="button"
+                                  onClick={() => updateCartItemQuantity(idx, -1)}
+                                  className="flex h-8 w-8 items-center justify-center hover:bg-muted active:bg-muted/80"
+                                  aria-label={`Decrease ${item.name} quantity`}
+                                >
+                                  <Minus className="h-3.5 w-3.5" />
+                                </button>
+                                <span className="w-8 text-center font-bold tabular-nums">{item.quantity}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateCartItemQuantity(idx, 1)}
+                                  className="flex h-8 w-8 items-center justify-center hover:bg-muted active:bg-muted/80"
+                                  aria-label={`Increase ${item.name} quantity`}
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] text-muted-foreground">Unit ₹</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  aria-label={`Mobile unit price for ${item.name}`}
+                                  value={draftVal !== undefined ? draftVal : item.unit_price}
+                                  onChange={(e) => updateCartItemPrice(idx, e.target.value)}
+                                  onBlur={() => commitCartItemPrice(idx)}
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  className={cn(
+                                    "h-8 w-24 rounded-md border bg-background px-2 text-right font-mono text-xs font-semibold tabular-nums focus:outline-none focus:ring-1 focus:ring-primary",
+                                    isPriceModified && "border-amber-500/60 bg-amber-50/40 dark:bg-amber-950/20"
+                                  )}
+                                />
+                                {isPriceModified && (
+                                  <button
+                                    type="button"
+                                    onClick={() => resetCartItemPrice(idx)}
+                                    className="text-[10px] text-primary font-semibold px-1"
+                                  >
+                                    Reset
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -1612,10 +2367,14 @@ export default function UnifiedBillingWorkspace({
                       min="0"
                       placeholder="0"
                       value={overallDiscountValue || ""}
-                      onChange={(e) => setOverallDiscountValue(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setOverallDiscountValue(Number.isFinite(v) && v >= 0 ? v : 0);
+                      }}
                       className="w-16 rounded border px-1.5 py-0.5 text-right text-xs"
                     />
                     <button
+                      type="button"
                       onClick={() =>
                         setOverallDiscountType(overallDiscountType === "fixed" ? "percentage" : "fixed")
                       }
@@ -1640,29 +2399,33 @@ export default function UnifiedBillingWorkspace({
                 <div className="space-y-1 rounded bg-muted/40 p-2">
                   <div className="flex justify-between text-muted-foreground">
                     <span>Subtotal:</span>
-                    <span>₹{calcSummary ? Number(calcSummary.subtotal).toFixed(2) : localCartSubtotal.toFixed(2)}</span>
+                    <span className="tabular-nums">₹{displayedSubtotal.toFixed(2)}</span>
                   </div>
-                  {calcSummary && Number(calcSummary.total_discount) > 0 && (
+                  {displayedDiscount > 0 && (
                     <div className="flex justify-between text-emerald-600 font-medium">
                       <span>Total Discount:</span>
-                      <span>-₹{Number(calcSummary.total_discount).toFixed(2)}</span>
+                      <span className="tabular-nums">-₹{displayedDiscount.toFixed(2)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-muted-foreground">
                     <span>Tax ({isInterstate ? "IGST" : "CGST + SGST"}):</span>
-                    <span>₹{calcSummary ? Number(calcSummary.tax).toFixed(2) : "0.00"}</span>
+                    <span className="tabular-nums">
+                      {calcLoading && !isCalcSynced ? "..." : `₹${displayedTax.toFixed(2)}`}
+                    </span>
                   </div>
-                  {calcSummary && Number(calcSummary.round_off) !== 0 && (
+                  {displayedRoundOff !== 0 && (
                     <div className="flex justify-between text-muted-foreground text-[11px]">
                       <span>Round Off:</span>
-                      <span>
-                        {Number(calcSummary.round_off) > 0 ? "+" : ""}₹{Number(calcSummary.round_off).toFixed(2)}
+                      <span className="tabular-nums">
+                        {displayedRoundOff > 0 ? "+" : ""}₹{displayedRoundOff.toFixed(2)}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between border-t pt-1 text-sm font-black text-foreground">
                     <span>Grand Total:</span>
-                    <span className="text-primary text-base">₹{grandTotalNum.toFixed(2)}</span>
+                    <span className="text-primary text-base tabular-nums">
+                      ₹{grandTotalNum.toFixed(2)}
+                    </span>
                   </div>
                 </div>
 
@@ -1698,14 +2461,27 @@ export default function UnifiedBillingWorkspace({
                     className="text-xs h-9 font-bold bg-primary text-primary-foreground gap-1 hover:bg-primary/90 shadow-sm cursor-pointer"
                   >
                     <CreditCard className="h-3.5 w-3.5" />
-                    Pay (F8)
+                    Payment (F8)
                   </Button>
                 </div>
+
+                {cart.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openQuoteModal(true)}
+                    className="w-full text-xs h-8 gap-1.5 border-dashed font-semibold text-foreground hover:bg-accent"
+                  >
+                    <FileCheck className="h-3.5 w-3.5 text-blue-600" />
+                    <span>Save Cart as Quotation</span>
+                  </Button>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Sticky Floating Mobile Checkout Bar (Sits safely above mobile bottom navigation) */}
+          {/* Sticky Floating Mobile Bar */}
           {mobileTab === "catalog" && cart.length > 0 && (
             <div className="lg:hidden fixed bottom-[calc(3.75rem+env(safe-area-inset-bottom,0px))] left-2.5 right-2.5 sm:left-4 sm:right-4 z-30 flex items-center justify-between rounded-xl bg-slate-900/95 text-white p-2.5 sm:p-3 shadow-2xl border border-slate-700/80 backdrop-blur-md animate-in slide-in-from-bottom-2">
               <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
@@ -1729,7 +2505,7 @@ export default function UnifiedBillingWorkspace({
                   onClick={() => setMobileTab("cart")}
                   className="text-xs h-9 px-2.5 font-medium border-slate-600 bg-slate-800 text-white hover:bg-slate-700 active:bg-slate-600"
                 >
-                  View Cart
+                  Review Bill
                 </Button>
                 <Button
                   size="sm"
@@ -1737,7 +2513,7 @@ export default function UnifiedBillingWorkspace({
                   className="text-xs h-9 px-3 font-bold bg-emerald-600 hover:bg-emerald-500 text-white gap-1 shadow-sm active:bg-emerald-700"
                 >
                   <CreditCard className="h-3.5 w-3.5" />
-                  <span>Pay</span>
+                  <span>Payment</span>
                 </Button>
               </div>
             </div>
@@ -1750,6 +2526,26 @@ export default function UnifiedBillingWorkspace({
       {/* ========================================================================= */}
       {activeView === "history" && (
         <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
+          {whatsappFeedback && (
+            <div
+              className={cn(
+                "shrink-0 flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-medium",
+                whatsappFeedback.type === "success"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              )}
+            >
+              <span>{whatsappFeedback.message}</span>
+              <button
+                type="button"
+                onClick={() => setWhatsappFeedback(null)}
+                className="rounded p-0.5 hover:bg-black/5 dark:hover:bg-white/10"
+                aria-label="Dismiss WhatsApp notice"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           {/* Top History KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 shrink-0">
             <div className="rounded-lg border bg-card p-3 shadow-2xs">
@@ -2061,11 +2857,37 @@ export default function UnifiedBillingWorkspace({
                                 <Download className="h-3.5 w-3.5" />
                               </button>
                               <button
-                                onClick={() => handleShareWhatsApp(inv)}
-                                className="rounded p-1 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
-                                title="Share on WhatsApp"
+                                onClick={(e) => handleShareWhatsApp(inv, e)}
+                                disabled={sendingWhatsAppId === inv.id || isWhatsAppDeliveryActive(inv.whatsapp_delivery?.status)}
+                                className={cn(
+                                  "rounded p-1 transition-colors disabled:opacity-60",
+                                  inv.whatsapp_delivery?.status === "failed"
+                                    ? "text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                                    : inv.whatsapp_delivery?.status === "skipped"
+                                    ? "text-muted-foreground hover:bg-muted"
+                                    : isWhatsAppDeliveryActive(inv.whatsapp_delivery?.status)
+                                    ? "text-blue-600"
+                                    : "text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                                )}
+                                title={
+                                  isWhatsAppDelivered(inv.whatsapp_delivery, inv.bill_sent)
+                                    ? "Resend Invoice PDF on WhatsApp"
+                                    : isWhatsAppDeliveryActive(inv.whatsapp_delivery?.status)
+                                    ? "Sending Invoice PDF on WhatsApp..."
+                                    : inv.whatsapp_delivery?.status === "failed"
+                                    ? `Retry WhatsApp PDF (${inv.whatsapp_delivery.failure_reason || "failed"})`
+                                    : inv.whatsapp_delivery?.status === "skipped"
+                                    ? `WhatsApp Skipped (${inv.whatsapp_delivery.skip_reason || inv.whatsapp_delivery.failure_reason || "skipped"})`
+                                    : "Send Invoice PDF on WhatsApp"
+                                }
                               >
-                                <Share2 className="h-3.5 w-3.5" />
+                                {sendingWhatsAppId === inv.id || isWhatsAppDeliveryActive(inv.whatsapp_delivery?.status) ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : isWhatsAppDelivered(inv.whatsapp_delivery, inv.bill_sent) ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Share2 className="h-3.5 w-3.5" />
+                                )}
                               </button>
                             </div>
                           </td>
@@ -2108,7 +2930,8 @@ export default function UnifiedBillingWorkspace({
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 1: CHECKOUT & PAYMENT DIALOG                                        */}
+      {/* ========================================================================= */}
+      {/* MODAL 1: DIRECT PAYMENT OPTIONS DIALOG                                    */}
       {/* ========================================================================= */}
       <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
         <DialogContent className="max-w-2xl w-[96vw] sm:w-full max-h-[92vh] flex flex-col p-4 sm:p-6 overflow-hidden rounded-xl">
@@ -2116,34 +2939,59 @@ export default function UnifiedBillingWorkspace({
             <DialogTitle className="flex items-center justify-between text-base sm:text-lg">
               <div className="flex items-center gap-2">
                 <CreditCard className="h-5 w-5 text-primary" />
-                <span>Checkout & Settlement</span>
+                <span>Payment</span>
               </div>
               <div className="text-right">
                 <span className="text-xs font-normal text-muted-foreground block">Payable Amount</span>
-                <span className="text-xl font-black text-primary">₹{grandTotalNum.toFixed(2)}</span>
+                <span className="text-xl font-black text-primary tabular-nums">
+                  ₹{grandTotalNum.toFixed(2)}
+                </span>
               </div>
             </DialogTitle>
+            {/* Compact Bill Review Strip */}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              <span>
+                {cart.reduce((acc, c) => acc + c.quantity, 0)} items •{" "}
+                {isWalkIn ? "Walk-in Customer" : selectedCustomer?.full_name || "Customer"}
+              </span>
+              <div className="flex items-center gap-3 tabular-nums">
+                <span>Sub: ₹{displayedSubtotal.toFixed(2)}</span>
+                {displayedDiscount > 0 && (
+                  <span className="text-emerald-600 font-medium">Disc: -₹{displayedDiscount.toFixed(2)}</span>
+                )}
+                <span>Tax: ₹{displayedTax.toFixed(2)}</span>
+              </div>
+            </div>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto pr-1 py-2 space-y-4 min-h-0">
-            {/* Primary Payment Selector with Instant Single-Click Switch */}
+            {/* Direct Payment Method Selector */}
             <div>
               <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                Select Payment Method
+                Select Payment Option
               </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div
+                className={cn(
+                  "grid gap-2",
+                  creditSalesEnabled ? "grid-cols-3 sm:grid-cols-6" : "grid-cols-3 sm:grid-cols-5"
+                )}
+              >
                 {[
-                  { id: "CASH", label: "Cash", icon: Banknote },
-                  { id: "UPI", label: "UPI QR", icon: QrCode },
-                  { id: "CARD", label: "Card", icon: CreditCard },
-                  { id: "CREDIT", label: "Udhaar / Credit", icon: Receipt },
+                  { id: "CASH" as const, label: "Cash", icon: Banknote },
+                  { id: "UPI" as const, label: "UPI", icon: QrCode },
+                  { id: "CARD" as const, label: "Card", icon: CreditCard },
+                  ...(creditSalesEnabled
+                    ? [{ id: "CREDIT" as const, label: "Credit", icon: Receipt }]
+                    : []),
+                  { id: "OTHER" as const, label: "Other", icon: Landmark },
+                  { id: "HYBRID" as const, label: "Hybrid / Split", icon: Split },
                 ].map((m) => {
-                  const isSelected = payments.length === 1 && payments[0].method === m.id;
+                  const isSelected = paymentMode === m.id;
                   return (
                     <button
                       key={m.id}
                       type="button"
-                      onClick={() => setPrimaryPaymentMethod(m.id)}
+                      onClick={() => selectPaymentMode(m.id)}
                       className={cn(
                         "flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs font-semibold transition-all gap-1 text-center cursor-pointer",
                         isSelected
@@ -2152,140 +3000,328 @@ export default function UnifiedBillingWorkspace({
                       )}
                     >
                       <m.icon className={cn("h-4 w-4", isSelected ? "text-primary" : "text-muted-foreground")} />
-                      <span>{m.label}</span>
-                      {isSelected && <span className="text-[10px] text-primary font-bold">✓ Active</span>}
+                      <span className="leading-tight">{m.label}</span>
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Fast Cash Tender Shortcuts */}
-            {payments.some((p) => p.method === "CASH") && (
-              <div className="rounded-lg border bg-emerald-500/5 border-emerald-500/25 p-2.5 space-y-1.5">
-                <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 block">
-                  ⚡ Fast Cash Tender Shortcuts:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setQuickCashTender(grandTotalNum)}
-                    className="h-7 text-xs bg-emerald-100/60 hover:bg-emerald-200/70 border-emerald-300 text-emerald-900 font-bold"
-                  >
-                    Exact ₹{grandTotalNum.toFixed(2)}
-                  </Button>
-                  {(() => {
-                    const presets = [100, 200, 500, 1000, 2000].filter((n) => n >= grandTotalNum);
-                    const noteButtons = presets.slice(0, 4);
-                    return noteButtons.map((amt) => (
-                      <Button
-                        key={amt}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setQuickCashTender(amt)}
-                        className="h-7 text-xs bg-white dark:bg-card border-border hover:bg-muted font-semibold"
-                      >
-                        ₹{amt} Note
-                      </Button>
-                    ));
-                  })()}
+            {/* CASH PAYMENT DETAILS */}
+            {paymentMode === "CASH" && (
+              <div className="rounded-lg border bg-emerald-500/5 border-emerald-500/25 p-3 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                    Cash Tendered
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setQuickCashTender(grandTotalNum)}
+                      className="h-7 text-xs bg-emerald-100/60 hover:bg-emerald-200/70 border-emerald-300 text-emerald-900 font-bold"
+                    >
+                      Exact ₹{grandTotalNum.toFixed(2)}
+                    </Button>
+                    {[100, 200, 500, 1000, 2000]
+                      .filter((n) => n >= grandTotalNum)
+                      .slice(0, 4)
+                      .map((amt) => (
+                        <Button
+                          key={amt}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setQuickCashTender(amt)}
+                          className="h-7 text-xs bg-white dark:bg-card border-border hover:bg-muted font-semibold"
+                        >
+                          ₹{amt}
+                        </Button>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center">
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-muted-foreground font-bold text-xs">₹</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      aria-label="Cash tendered amount"
+                      value={cashAmountDraft !== "" ? cashAmountDraft : payingCashAmount}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw.trim().startsWith("-")) return;
+                        setCashAmountDraft(raw);
+                        const num = raw.trim() === "" ? 0 : Number(raw);
+                        if (Number.isFinite(num) && num >= 0) {
+                          setPayingCashAmount(roundCurrency(num));
+                        }
+                        setCheckoutError("");
+                      }}
+                      onBlur={() => {
+                        setCashAmountDraft(payingCashAmount.toFixed(2));
+                      }}
+                      className="h-9 pl-7 font-mono text-sm font-bold tabular-nums"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2 text-xs">
+                    <span className="text-muted-foreground font-medium">Cash Change Return:</span>
+                    <span className="font-bold text-sm tabular-nums text-amber-700 dark:text-amber-300">
+                      ₹{cashChange.toFixed(2)}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Split Payment Lines Breakdown */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Payment Allocations {payments.length > 1 && "(Split Sale)"}
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    addSplitPaymentMethod(payments.some((p) => p.method === "UPI") ? "CASH" : "UPI")
-                  }
-                  className="text-xs text-primary font-semibold hover:underline flex items-center gap-1"
-                >
-                  <Plus className="h-3 w-3" />
-                  Add Split Method
-                </button>
-              </div>
-
-              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
-                {payments.map((p, idx) => (
-                  <div
-                    key={idx}
-                    className="flex flex-wrap sm:flex-nowrap items-center gap-2 rounded-lg border p-2 bg-muted/20 text-xs"
-                  >
-                    <select
-                      value={p.method}
-                      onChange={(e) => updatePaymentMethod(idx, e.target.value)}
-                      className="h-8 rounded border bg-background px-2 font-bold uppercase text-xs w-28 shrink-0"
-                    >
-                      <option value="CASH">Cash</option>
-                      <option value="UPI">UPI QR</option>
-                      <option value="CARD">Card</option>
-                      <option value="CREDIT">Udhaar</option>
-                    </select>
-                    <div className="relative flex-1 min-w-[120px]">
-                      <span className="absolute left-2.5 top-2 text-muted-foreground font-bold">₹</span>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={p.amount}
-                        onChange={(e) => updatePaymentAmount(idx, parseFloat(e.target.value) || 0)}
-                        className="h-8 pl-6 text-xs font-bold font-mono"
+            {/* UPI PAYMENT DETAILS */}
+            {paymentMode === "UPI" && (
+              <div className="rounded-lg border bg-card p-3 space-y-3 shadow-2xs">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white p-1.5 rounded-lg border shadow-xs shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(upiUrl)}`}
+                        alt="UPI Payment QR"
+                        className="h-20 w-20"
                       />
                     </div>
-                    <Input
-                      placeholder="Ref / Note / Auth No"
-                      value={p.reference || ""}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setPayments((prev) => {
-                          const updated = [...prev];
-                          updated[idx] = { ...updated[idx], reference: val };
-                          return updated;
-                        });
-                      }}
-                      className="h-8 text-xs flex-1 min-w-[120px]"
-                    />
-                    {payments.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removePaymentLine(idx)}
-                        className="text-destructive hover:text-destructive/80 p-1 rounded hover:bg-destructive/10 shrink-0"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
+                    <div>
+                      <span className="text-xs font-bold block">Scan to Pay via UPI</span>
+                      <span className="text-[11px] font-mono text-muted-foreground block">{upiId}</span>
+                      <span className="text-xs font-bold text-emerald-600 block mt-0.5 tabular-nums">
+                        Amount: ₹{grandTotalNum.toFixed(2)}
+                      </span>
+                    </div>
                   </div>
-                ))}
+                  <span className="inline-block rounded bg-muted px-2 py-1 text-[11px] font-mono text-muted-foreground">
+                    GPay • PhonePe • Paytm • BHIM
+                  </span>
+                </div>
+                <Input
+                  placeholder="Optional UPI UTR / Transaction Reference"
+                  value={singlePaymentReference}
+                  onChange={(e) => setSinglePaymentReference(e.target.value)}
+                  className="h-8 text-xs"
+                />
               </div>
-            </div>
+            )}
 
-            {/* Split & Live Balance Calculations */}
+            {/* CARD PAYMENT DETAILS */}
+            {paymentMode === "CARD" && (
+              <div className="rounded-lg border bg-card p-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold">Card POS Settlement</span>
+                  <span className="font-bold text-primary tabular-nums">₹{grandTotalNum.toFixed(2)}</span>
+                </div>
+                <Input
+                  placeholder="Optional Card Approval / Last 4 Digits / Auth Code"
+                  value={singlePaymentReference}
+                  onChange={(e) => setSinglePaymentReference(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+            )}
+
+            {/* OTHER SUPPORTED METHODS (Netbanking / Cheque / Wallet) */}
+            {paymentMode === "OTHER" && (
+              <div className="rounded-lg border bg-card p-3 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold">Other Payment Method</span>
+                  <span className="font-bold text-primary tabular-nums">₹{grandTotalNum.toFixed(2)}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "NETBANKING" as const, label: "Net Banking", icon: Landmark },
+                    { id: "CHEQUE" as const, label: "Cheque", icon: Receipt },
+                    { id: "WALLET" as const, label: "Wallet", icon: Wallet },
+                  ].map((om) => (
+                    <button
+                      key={om.id}
+                      type="button"
+                      onClick={() => setOtherPaymentMethod(om.id)}
+                      className={cn(
+                        "flex items-center justify-center gap-1.5 rounded-md border py-2 px-2 text-xs font-semibold transition-all",
+                        otherPaymentMethod === om.id
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border bg-background text-muted-foreground hover:bg-muted/60"
+                      )}
+                    >
+                      <om.icon className="h-3.5 w-3.5" />
+                      <span>{om.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  placeholder="Reference / Cheque # / UTR / Wallet Txn ID"
+                  value={singlePaymentReference}
+                  onChange={(e) => setSinglePaymentReference(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+            )}
+
+            {/* HYBRID / SPLIT PAYMENT BREAKDOWN */}
+            {paymentMode === "HYBRID" && (
+              <div className="rounded-lg border bg-muted/20 p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                    Hybrid / Split Payment
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => addHybridPaymentRow("NETBANKING")}
+                    className="text-xs text-primary font-semibold hover:underline flex items-center gap-1"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add Method
+                  </button>
+                </div>
+
+                <div className="divide-y rounded-md border bg-background">
+                  {hybridPayments.map((p, idx) => {
+                    const draft = hybridDrafts[idx];
+                    return (
+                      <div key={idx} className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2 text-xs">
+                        <select
+                          value={p.method}
+                          onChange={(e) => updateHybridPaymentMethod(idx, e.target.value)}
+                          aria-label={`Split payment method ${idx + 1}`}
+                          className="h-8 rounded border bg-background px-2 font-bold uppercase text-xs w-28 shrink-0"
+                        >
+                          <option value="CASH">Cash</option>
+                          <option value="UPI">UPI</option>
+                          <option value="CARD">Card</option>
+                          {creditSalesEnabled && <option value="CREDIT">Credit</option>}
+                          <option value="NETBANKING">Net Banking</option>
+                          <option value="CHEQUE">Cheque</option>
+                          <option value="WALLET">Wallet</option>
+                        </select>
+
+                        <div className="relative w-32 shrink-0">
+                          <span className="absolute left-2.5 top-2 text-muted-foreground font-bold">₹</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            aria-label={`Split amount for ${p.method}`}
+                            value={draft !== undefined ? draft : p.amount || ""}
+                            placeholder="0.00"
+                            onChange={(e) => updateHybridPaymentAmount(idx, e.target.value)}
+                            onBlur={() => {
+                              setHybridDrafts((prev) => {
+                                const next = { ...prev };
+                                delete next[idx];
+                                return next;
+                              });
+                            }}
+                            className="h-8 pl-6 text-right text-xs font-bold font-mono tabular-nums"
+                          />
+                        </div>
+
+                        {remainingDue > 0.009 && (
+                          <button
+                            type="button"
+                            onClick={() => fillHybridRemaining(idx)}
+                            className="rounded border border-primary/30 bg-primary/5 px-2 py-1 text-[10px] font-semibold text-primary hover:bg-primary/10 shrink-0"
+                          >
+                            Fill ₹{remainingDue.toFixed(2)}
+                          </button>
+                        )}
+
+                        <Input
+                          placeholder="Ref / UTR (optional)"
+                          value={p.reference || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setHybridPayments((prev) => {
+                              const updated = [...prev];
+                              updated[idx] = { ...updated[idx], reference: val };
+                              return updated;
+                            });
+                          }}
+                          className="h-8 text-xs flex-1 min-w-[110px]"
+                        />
+
+                        {hybridPayments.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeHybridPaymentRow(idx)}
+                            className="text-destructive hover:text-destructive/80 p-1 rounded hover:bg-destructive/10 shrink-0"
+                            aria-label="Remove split row"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Live UPI QR inside Hybrid if UPI > 0 */}
+                {hybridPayments.some((p) => p.method === "UPI" && p.amount > 0) && (
+                  <div className="rounded-md border bg-background p-2.5 flex items-center gap-3">
+                    <div className="bg-white p-1 rounded border shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(upiUrl)}`}
+                        alt="UPI Split QR"
+                        className="h-14 w-14"
+                      />
+                    </div>
+                    <div className="text-xs">
+                      <span className="font-bold block">UPI QR ({upiId})</span>
+                      <span className="text-[11px] font-bold text-emerald-600 tabular-nums">
+                        UPI Split: ₹{upiQrAmount.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Credit Customer Verification & Live Total / Remaining Summary */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
               <div className="md:col-span-7 space-y-2">
-                {payments.some((p) => p.method === "CREDIT") && (
+                {usesCredit && (
                   <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
-                    <p className="font-semibold flex items-center gap-1.5">
-                      <Receipt className="h-3.5 w-3.5 text-amber-600" />
-                      Udhaar / Customer Credit Sale
-                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold flex items-center gap-1.5">
+                        <Receipt className="h-3.5 w-3.5 text-amber-600" />
+                        Customer Credit / Udhaar
+                      </p>
+                      {isWalkIn && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setCustomerModalOpen(true)}
+                          className="h-6 text-[11px] border-amber-600/40"
+                        >
+                          Select Customer
+                        </Button>
+                      )}
+                    </div>
                     {isWalkIn ? (
                       <p className="text-destructive font-medium mt-1">
-                        ⚠️ Walk-in customers cannot take Credit sales. Please select or register a customer first (F4).
+                        Walk-in customers cannot use Credit. Select or add a registered customer first.
                       </p>
                     ) : (
                       <p className="mt-0.5 text-muted-foreground">
-                        Customer: <strong>{selectedCustomer?.full_name}</strong> • Phone: {selectedCustomer?.phone} • Outstanding: ₹{selectedCustomer?.outstanding_credit || 0}
+                        Customer: <strong>{selectedCustomer?.full_name}</strong> • Ph: {selectedCustomer?.phone} • Outstanding: ₹{selectedCustomer?.outstanding_credit || 0}
                       </p>
                     )}
+                  </div>
+                )}
+
+                {isElectronicOverpay && !checkoutError && (
+                  <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive flex items-center gap-1.5">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>Electronic payments cannot exceed the payable total of ₹{grandTotalNum.toFixed(2)}.</span>
                   </div>
                 )}
 
@@ -2299,55 +3335,27 @@ export default function UnifiedBillingWorkspace({
 
               <div className="md:col-span-5 rounded-lg border bg-muted/30 p-2.5 space-y-1 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total Bill:</span>
-                  <span className="font-bold">₹{grandTotalNum.toFixed(2)}</span>
+                  <span className="text-muted-foreground">Bill Total:</span>
+                  <span className="font-bold tabular-nums">₹{grandTotalNum.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Tendered:</span>
-                  <span className="font-bold text-emerald-600">₹{totalPaidSoFar.toFixed(2)}</span>
+                  <span className="text-muted-foreground">Paid / Allocated:</span>
+                  <span className="font-bold text-emerald-600 tabular-nums">₹{totalPaidSoFar.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between font-black border-t pt-1">
-                  <span>Balance Due:</span>
-                  <span className={remainingDue > 0 ? "text-destructive" : "text-emerald-600"}>
+                  <span>Remaining:</span>
+                  <span className={cn("tabular-nums", remainingDue > 0.009 ? "text-destructive" : "text-emerald-600")}>
                     ₹{remainingDue.toFixed(2)}
                   </span>
                 </div>
                 {cashChange > 0 && (
                   <div className="flex justify-between font-bold text-amber-700 dark:text-amber-300 bg-amber-500/15 p-1.5 rounded mt-1">
                     <span>Cash Change:</span>
-                    <span>₹{cashChange.toFixed(2)}</span>
+                    <span className="tabular-nums">₹{cashChange.toFixed(2)}</span>
                   </div>
                 )}
               </div>
             </div>
-
-            {/* UPI QR Display */}
-            {payments.some((p) => p.method === "UPI") && (
-              <div className="rounded-lg border bg-card p-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shadow-2xs">
-                <div className="flex items-center gap-3">
-                  <div className="bg-white p-1.5 rounded-lg border shadow-xs shrink-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(upiUrl)}`}
-                      alt="UPI Payment QR"
-                      className="h-20 w-20"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold block">Scan to Pay via UPI</span>
-                    <span className="text-[11px] font-mono text-muted-foreground block">{upiId}</span>
-                    <span className="text-[11px] font-bold text-emerald-600 block mt-0.5">
-                      Amount: ₹{payments.find((p) => p.method === "UPI")?.amount.toFixed(2) || grandTotalNum.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground text-center sm:text-right">
-                  <span className="inline-block rounded bg-muted px-2 py-1 text-[11px] font-mono">
-                    GooglePay • PhonePe • Paytm • BHIM
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
 
           <DialogFooter className="mt-auto pt-3 border-t flex flex-row items-center justify-between sm:justify-end gap-2 shrink-0 bg-background sticky bottom-0 z-20 safe-area-bottom">
@@ -2358,13 +3366,19 @@ export default function UnifiedBillingWorkspace({
               disabled={checkoutLoading}
               className="h-11 sm:h-9 text-xs sm:text-sm touch-target-min"
             >
-              Cancel
+              Back to Bill
             </Button>
             <Button
               type="button"
               onClick={handleCheckout}
-              disabled={checkoutLoading || (payments.some((p) => p.method === "CREDIT") && isWalkIn)}
-              className="h-11 sm:h-9 font-bold bg-primary text-primary-foreground gap-1.5 min-w-[140px] text-xs sm:text-sm touch-target-min shadow-md"
+              disabled={
+                checkoutLoading ||
+                (usesCredit && (isWalkIn || !creditSalesEnabled)) ||
+                isElectronicOverpay ||
+                totalPaidSoFar < grandTotalNum - 0.009 ||
+                (grandTotalNum > 0 && activePaymentLines.length === 0)
+              }
+              className="h-11 sm:h-9 font-bold bg-primary text-primary-foreground gap-1.5 min-w-[150px] text-xs sm:text-sm touch-target-min shadow-md"
             >
               {checkoutLoading ? (
                 <>
@@ -2391,6 +3405,7 @@ export default function UnifiedBillingWorkspace({
           config={config}
           basePath={basePath}
           onClose={() => setCompletedSale(null)}
+          onWhatsAppUpdated={syncWhatsAppDeliveryState}
           onNewSale={() => {
             setCompletedSale(null);
             clearCart();
@@ -2679,6 +3694,35 @@ export default function UnifiedBillingWorkspace({
               )}
             </div>
 
+            {/* WhatsApp Delivery Feedback Banner */}
+            {(whatsappFeedback?.invoiceId === selectedInvoice.id || selectedInvoice.whatsapp_delivery) && (() => {
+              const presentation = resolveWhatsAppPresentation(
+                selectedInvoice.whatsapp_delivery,
+                selectedInvoice.bill_sent
+              );
+              const isCustomFeedback = whatsappFeedback?.invoiceId === selectedInvoice.id;
+              return (
+                <div
+                  className={cn(
+                    "rounded-lg border px-3 py-1.5 text-xs font-medium flex items-center justify-between gap-2 shrink-0 mb-2",
+                    isCustomFeedback
+                      ? whatsappFeedback.type === "success"
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                      : presentation.status === "failed"
+                      ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                      : presentation.status === "skipped"
+                      ? "border-border bg-muted/40 text-foreground"
+                      : presentation.status === "queued"
+                      ? "border-blue-500/30 bg-blue-500/10 text-blue-800 dark:text-blue-300"
+                      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  )}
+                >
+                  <span>{isCustomFeedback ? whatsappFeedback.message : presentation.message}</span>
+                </div>
+              );
+            })()}
+
             {/* Modal Actions Footer */}
             <div className="border-t pt-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
               <div className="flex items-center gap-2">
@@ -2704,10 +3748,28 @@ export default function UnifiedBillingWorkspace({
                 <Button
                   size="sm"
                   onClick={() => handleShareWhatsApp(selectedInvoice)}
-                  className="h-8 gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                  disabled={
+                    sendingWhatsAppId === selectedInvoice.id ||
+                    isWhatsAppDeliveryActive(selectedInvoice.whatsapp_delivery?.status)
+                  }
+                  className="h-8 gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60"
                 >
-                  <Share2 className="h-3.5 w-3.5" />
-                  <span>WhatsApp</span>
+                  {sendingWhatsAppId === selectedInvoice.id ||
+                  isWhatsAppDeliveryActive(selectedInvoice.whatsapp_delivery?.status) ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Share2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>
+                    {sendingWhatsAppId === selectedInvoice.id ||
+                    isWhatsAppDeliveryActive(selectedInvoice.whatsapp_delivery?.status)
+                      ? "Sending PDF..."
+                      : isWhatsAppDelivered(selectedInvoice.whatsapp_delivery, selectedInvoice.bill_sent)
+                      ? "Resend WhatsApp PDF"
+                      : selectedInvoice.whatsapp_delivery?.status === "failed"
+                      ? "Retry WhatsApp PDF"
+                      : "Send WhatsApp PDF"}
+                  </span>
                 </Button>
               </div>
 
@@ -3024,6 +4086,19 @@ export default function UnifiedBillingWorkspace({
           </div>
         </DialogContent>
       </Dialog>
+      <QuotationCreateModal
+        open={quoteModalOpen}
+        onClose={() => setQuoteModalOpen(false)}
+        initialCustomer={quoteModalSeed.initialCustomer}
+        initialItems={quoteModalSeed.initialItems}
+        title={quoteModalSeed.title || "Create New Quotation"}
+        onCreated={(createdQuote) => {
+          setSavedQuoteBanner({
+            quotation_number: createdQuote.quotation_number,
+            total: String(createdQuote.total),
+          });
+        }}
+      />
     </div>
   );
 }
