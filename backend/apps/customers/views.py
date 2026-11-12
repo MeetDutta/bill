@@ -1,3 +1,4 @@
+import uuid
 from django.db.models import Q
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
@@ -6,9 +7,18 @@ from rest_framework.views import APIView
 
 from common.pagination import StandardPagination
 
+from .analytics import get_bulk_customer_summary_kpis, get_customer_detailed_analytics
 from .models import Customer, CustomerTimeline
 from .serializers import CustomerListSerializer, CustomerSerializer, CustomerTimelineSerializer
 from .utils import normalize_phone, validate_mobile_number
+
+
+def _is_valid_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 class CustomerListView(generics.ListCreateAPIView):
@@ -23,25 +33,33 @@ class CustomerListView(generics.ListCreateAPIView):
             if not include_walkin:
                 qs = qs.filter(is_walk_in=False)
             raw_search = str(self.request.query_params.get("search") or "").strip()
-            norm_search = normalize_phone(raw_search)
-            if norm_search and norm_search.isdigit() and len(norm_search) >= 4 and norm_search != raw_search:
-                # Allow searching "+91 98765-43210" to match normalized stored phone "9876543210"
-                self.search_fields = ["first_name", "last_name", "phone", "email", "customer_id", "gstin", "city"]
-                qs = qs.filter(
-                    Q(phone__icontains=norm_search)
-                    | Q(phone__icontains=raw_search)
-                    | Q(first_name__icontains=raw_search)
-                    | Q(last_name__icontains=raw_search)
-                    | Q(email__icontains=raw_search)
-                    | Q(customer_id__icontains=raw_search)
-                )
+            if raw_search:
+                norm_search = normalize_phone(raw_search)
+                if _is_valid_uuid(raw_search):
+                    qs = qs.filter(Q(id=raw_search) | Q(customer_id__iexact=raw_search))
+                elif norm_search and norm_search.isdigit() and len(norm_search) >= 4 and norm_search != raw_search:
+                    # Allow searching "+91 98765-43210" to match normalized stored phone "9876543210"
+                    qs = qs.filter(
+                        Q(phone__icontains=norm_search)
+                        | Q(phone__icontains=raw_search)
+                        | Q(first_name__icontains=raw_search)
+                        | Q(last_name__icontains=raw_search)
+                        | Q(email__icontains=raw_search)
+                        | Q(customer_id__icontains=raw_search)
+                    )
         return qs
 
     def filter_queryset(self, queryset):
         raw_search = str(self.request.query_params.get("search") or "").strip()
         norm_search = normalize_phone(raw_search)
-        if self.request.method == "GET" and norm_search and norm_search.isdigit() and len(norm_search) >= 4 and norm_search != raw_search:
-            # Skip DRF SearchFilter on raw "+91 ..." string since get_queryset already matched normalized phone
+        skip_drf_search = bool(
+            raw_search
+            and (
+                _is_valid_uuid(raw_search)
+                or (norm_search and norm_search.isdigit() and len(norm_search) >= 4 and norm_search != raw_search)
+            )
+        )
+        if self.request.method == "GET" and skip_drf_search:
             for backend in list(self.filter_backends):
                 if getattr(backend, "__name__", "") == "SearchFilter":
                     continue
@@ -53,6 +71,33 @@ class CustomerListView(generics.ListCreateAPIView):
         if self.request.method == "GET":
             return CustomerListSerializer
         return CustomerSerializer
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            analytics_map = get_bulk_customer_summary_kpis(
+                request.user.organization,
+                [c.id for c in page],
+            )
+            serializer = self.get_serializer(
+                page,
+                many=True,
+                context={**self.get_serializer_context(), "analytics_map": analytics_map},
+            )
+            return self.get_paginated_response(serializer.data)
+
+        objs = list(queryset)
+        analytics_map = get_bulk_customer_summary_kpis(
+            request.user.organization,
+            [c.id for c in objs],
+        )
+        serializer = self.get_serializer(
+            objs,
+            many=True,
+            context={**self.get_serializer_context(), "analytics_map": analytics_map},
+        )
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         customer = serializer.save(organization=self.request.user.organization)
@@ -122,6 +167,31 @@ class CustomerDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Customer.objects.filter(organization=self.request.user.organization)
+
+
+class CustomerAnalyticsDetailView(APIView):
+    """Return detailed database-driven period KPIs, payment breakdown, credit summary, and purchase history."""
+
+    def get(self, request, pk):
+        customer = Customer.objects.filter(
+            organization=request.user.organization,
+            pk=pk,
+        ).first()
+        if not customer:
+            return Response({"detail": "Customer not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            limit = int(request.query_params.get("limit", 50))
+        except (TypeError, ValueError):
+            limit = 50
+        limit = max(1, min(limit, 200))
+
+        payload = get_customer_detailed_analytics(
+            request.user.organization,
+            customer,
+            purchase_limit=limit,
+        )
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class CustomerTimelineView(generics.ListAPIView):

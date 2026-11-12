@@ -904,7 +904,13 @@ class QuotationConvertView(APIView):
                 amount_paid = quotation.total
                 outstanding_amount = Decimal("0.00")
 
-            primary_payment_method = applied_payments[0]["payment_method"] if applied_payments else "cash"
+            distinct_methods = {p["payment_method"] for p in applied_payments}
+            if len(distinct_methods) > 1:
+                primary_payment_method = "split"
+            elif applied_payments:
+                primary_payment_method = applied_payments[0]["payment_method"]
+            else:
+                primary_payment_method = "cash"
             store = quotation.store or Store.objects.filter(organization=org).first()
             if not store:
                 store, _ = Store.objects.get_or_create(

@@ -37,8 +37,10 @@ export interface Customer {
   customer_id: string;
   first_name?: string;
   last_name?: string;
+  name?: string;
   full_name: string;
   phone: string;
+  mobile?: string;
   mobile_number?: string;
   email: string;
   address_line1?: string;
@@ -54,10 +56,106 @@ export interface Customer {
   total_spend: number;
   segment: string;
   last_purchase_at: string;
+  created_at?: string;
   portal_token?: string;
   credit_limit?: number | string;
   outstanding_credit?: number | string;
   is_walk_in?: boolean;
+  today_purchase_count?: number;
+  today_spend?: number;
+  week_purchase_count?: number;
+  week_spend?: number;
+  month_purchase_count?: number;
+  month_spend?: number;
+  year_purchase_count?: number;
+  year_spend?: number;
+  total_purchase_count?: number;
+  lifetime_spend?: number;
+  average_bill_value?: number;
+  last_purchase_date?: string | null;
+  days_since_last_purchase?: number | null;
+}
+
+export interface CustomerPeriodKPI {
+  purchase_count: number;
+  spend: number;
+}
+
+export interface CustomerPaymentBreakdown {
+  cash: number;
+  upi: number;
+  card: number;
+  credit: number;
+  other: number;
+  total_allocated: number;
+}
+
+export interface CustomerCreditSummary {
+  outstanding_balance: number;
+  total_credit_taken: number;
+  total_credit_paid: number;
+  credit_limit: number;
+}
+
+export interface CustomerPurchaseHistoryItem {
+  id: string;
+  invoice_id: string | null;
+  invoice_number: string;
+  date: string;
+  total: number;
+  amount_paid: number;
+  outstanding_amount: number;
+  status: string;
+  payment_status: string;
+  payment_method: string;
+  payment_method_summary: string;
+  payment_allocations: {
+    payment_method: string;
+    label: string;
+    amount: number;
+    reference?: string;
+  }[];
+  items_count: number;
+  store_name?: string;
+  web_url?: string | null;
+  pdf_url?: string | null;
+}
+
+export interface CustomerAnalyticsData {
+  customer: {
+    id: string;
+    customer_id: string;
+    name: string;
+    full_name: string;
+    phone: string;
+    mobile: string;
+    email?: string;
+    address_line1?: string;
+    full_address?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    gstin?: string;
+    segment?: string;
+    is_walk_in: boolean;
+    customer_since: string | null;
+    portal_token?: string | null;
+  };
+  is_walk_in: boolean;
+  walk_in_notice?: string;
+  timezone: string;
+  today: CustomerPeriodKPI;
+  week: CustomerPeriodKPI;
+  month: CustomerPeriodKPI;
+  year: CustomerPeriodKPI;
+  lifetime: CustomerPeriodKPI;
+  average_bill_value: number;
+  last_purchase_date: string | null;
+  customer_since: string | null;
+  days_since_last_purchase: number | null;
+  payment_breakdown: CustomerPaymentBreakdown;
+  credit: CustomerCreditSummary;
+  purchase_history: CustomerPurchaseHistoryItem[];
 }
 
 export interface Transaction {

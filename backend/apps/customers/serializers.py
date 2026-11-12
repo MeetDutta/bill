@@ -126,23 +126,63 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class CustomerListSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source="full_name", read_only=True)
     full_name = serializers.CharField(read_only=True)
     full_address = serializers.CharField(read_only=True)
     address = serializers.CharField(source="address_line1", read_only=True)
     pincode = serializers.CharField(source="postal_code", read_only=True)
     gst_number = serializers.CharField(source="gstin", read_only=True)
     mobile_number = serializers.CharField(source="phone", read_only=True)
+    mobile = serializers.CharField(source="phone", read_only=True)
 
     class Meta:
         model = Customer
         fields = [
-            "id", "customer_id", "first_name", "last_name", "full_name",
-            "phone", "mobile_number", "email",
+            "id", "customer_id", "first_name", "last_name", "name", "full_name",
+            "phone", "mobile", "mobile_number", "email",
             "address_line1", "address", "full_address", "city", "state",
             "postal_code", "pincode", "gstin", "gst_number",
             "credit_limit", "outstanding_credit", "is_walk_in", "whatsapp_opt_in",
             "total_purchases", "total_spend", "segment", "last_purchase_at", "created_at",
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        analytics_map = self.context.get("analytics_map") or {}
+        kpis = analytics_map.get(str(instance.id))
+        if kpis is not None:
+            data["today_purchase_count"] = kpis["today_purchase_count"]
+            data["today_spend"] = kpis["today_spend"]
+            data["week_purchase_count"] = kpis["week_purchase_count"]
+            data["week_spend"] = kpis["week_spend"]
+            data["month_purchase_count"] = kpis["month_purchase_count"]
+            data["month_spend"] = kpis["month_spend"]
+            data["year_purchase_count"] = kpis["year_purchase_count"]
+            data["year_spend"] = kpis["year_spend"]
+            data["total_purchase_count"] = kpis["total_purchase_count"]
+            data["lifetime_spend"] = kpis["lifetime_spend"]
+            data["average_bill_value"] = kpis["average_bill_value"]
+            data["last_purchase_date"] = kpis["last_purchase_date"]
+            data["days_since_last_purchase"] = kpis["days_since_last_purchase"]
+            data["total_purchases"] = kpis["total_purchase_count"]
+            data["total_spend"] = kpis["lifetime_spend"]
+            if kpis["last_purchase_date"]:
+                data["last_purchase_at"] = kpis["last_purchase_date"]
+        else:
+            data["today_purchase_count"] = 0
+            data["today_spend"] = 0.0
+            data["week_purchase_count"] = 0
+            data["week_spend"] = 0.0
+            data["month_purchase_count"] = 0
+            data["month_spend"] = 0.0
+            data["year_purchase_count"] = 0
+            data["year_spend"] = 0.0
+            data["total_purchase_count"] = int(instance.total_purchases or 0)
+            data["lifetime_spend"] = float(instance.total_spend or 0)
+            data["average_bill_value"] = float(instance.average_order_value or 0)
+            data["last_purchase_date"] = instance.last_purchase_at.isoformat() if instance.last_purchase_at else None
+            data["days_since_last_purchase"] = None
+        return data
 
 
 class CustomerTimelineSerializer(serializers.ModelSerializer):

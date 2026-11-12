@@ -118,16 +118,26 @@ function testUnifiedBillingWorkspace() {
   assert(workspaceSrc.includes("calculateCart") && workspaceSrc.includes("handleHoldCart"), "Missing cart calculations and hold bill support");
   assert(workspaceSrc.includes("handleLoadQuotation"), "Missing quotation load support");
 
-  // Checkout, Payments & Idempotency (direct embedded workspace panel, no payment popup modal)
+  // Checkout, Payments & Idempotency (direct unified embedded smart payment panel, no Single vs Split switcher or modal)
   const paymentPanelSrc = fs.readFileSync(path.join(frontendRoot, "components/billing/EmbeddedPaymentPanel.tsx"), "utf8");
+  const smartPaymentSrc = fs.readFileSync(path.join(frontendRoot, "lib/smartPayment.ts"), "utf8");
   assert(workspaceSrc.includes("EmbeddedPaymentPanel"), "Missing direct EmbeddedPaymentPanel integration");
   assert(!workspaceSrc.includes("paymentModalOpen") && !workspaceSrc.includes("openPaymentModal"), "Payment popup modal state/opener must be removed from normal billing");
   assert(workspaceSrc.includes("inFlightCheckoutRef"), "Missing synchronous double-submission lock");
   assert(workspaceSrc.includes("idempotency_key"), "Missing idempotency key in checkout payload");
   assert(workspaceSrc.includes("IsolatedReceiptModal"), "Missing post-sale IsolatedReceiptModal");
   assert(
-    paymentPanelSrc.includes("UPI") && paymentPanelSrc.includes("CREDIT") && paymentPanelSrc.includes("CASH") && paymentPanelSrc.includes("HYBRID"),
-    "Missing multi-payment / split support in EmbeddedPaymentPanel"
+    paymentPanelSrc.includes("UPI") &&
+      paymentPanelSrc.includes("CREDIT") &&
+      paymentPanelSrc.includes("CASH") &&
+      paymentPanelSrc.includes("+ Split Payment") &&
+      paymentPanelSrc.includes("Outstanding Balance After Purchase") &&
+      workspaceSrc.includes("checkoutActive") &&
+      workspaceSrc.includes("selectSingleMethodAllocation") &&
+      smartPaymentSrc.includes("selectMethodAllocation") &&
+      smartPaymentSrc.includes("selectSingleMethodAllocation") &&
+      smartPaymentSrc.includes("updateAllocationAmount"),
+    "EmbeddedPaymentPanel must default to simple single-payment mode with optional progressive Split Payment mode"
   );
 
   // Invoice History Table & Actions

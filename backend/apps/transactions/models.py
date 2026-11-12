@@ -85,6 +85,14 @@ class Transaction(UUIDModel, TenantModel, TimeStampedModel):
             models.Index(fields=["customer", "transaction_date"]),
             models.Index(fields=["invoice_number"]),
             models.Index(fields=["organization", "payment_status"]),
+            models.Index(
+                fields=["organization", "customer", "status", "is_return", "transaction_date"],
+                name="tx_org_cust_stat_ret_dt_idx",
+            ),
+            models.Index(
+                fields=["organization", "status", "is_return", "transaction_date"],
+                name="tx_org_stat_ret_dt_idx",
+            ),
         ]
 
     def __str__(self):
@@ -192,6 +200,12 @@ class SalesReturn(UUIDModel, TenantModel, TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["organization", "customer", "status", "created_at"],
+                name="sr_org_cust_stat_dt_idx",
+            ),
+        ]
 
     def __init__(self, *args, **kwargs):
         if "notes" in kwargs and "reason" not in kwargs:
@@ -266,6 +280,12 @@ class CustomerCreditPayment(UUIDModel, TenantModel, TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["organization", "customer", "created_at"],
+                name="ccp_org_cust_dt_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"Credit Payment ₹{self.amount} by {self.customer.full_name}"

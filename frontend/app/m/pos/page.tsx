@@ -33,10 +33,33 @@ import {
   Share2,
   Landmark,
   Wallet,
-  Split,
   Loader2,
+  Split,
 } from "lucide-react";
 import { printThermalReceipt, downloadInvoicePdf } from "@/lib/receiptPrinter";
+import {
+  blurAllocationAmount,
+  buildCheckoutPaymentPayload,
+  changeAllocationMethod,
+  computePaymentMetrics,
+  computeQuickCashAmounts,
+  fillAllocationRemaining,
+  formatPaise,
+  fromPaise,
+  getAllocationDisplayLabel,
+  reconcileAllocationsForTotal,
+  removeAllocationRow,
+  selectMethodAllocation,
+  selectSingleMethodAllocation,
+  toPaise,
+  updateAllocationAmount,
+  updateAllocationReference,
+  validateSmartPayments,
+  type AllocationMethod,
+  type OtherPaymentSubMethod,
+  type PaymentAllocation,
+  type PrimaryPaymentMethod,
+} from "@/lib/smartPayment";
 
 interface CartItem {
   id: string; // product id or custom
@@ -109,19 +132,11 @@ export default function MobilePOSPage() {
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [manualBarcodeInput, setManualBarcodeInput] = useState("");
 
-  // Payment State
-  const [primaryMethod, setPrimaryMethod] = useState<"cash" | "upi" | "card" | "credit" | "other">("cash");
-  const [otherMethod, setOtherMethod] = useState<"netbanking" | "cheque" | "wallet">("netbanking");
-  const [isSplit, setIsSplit] = useState(false);
-  const [cashTendered, setCashTendered] = useState<number>(0);
-  const [cashDraft, setCashDraft] = useState<string>("");
-  const [splitPayments, setSplitPayments] = useState<SplitPaymentRow[]>([
-    { payment_method: "cash", amount: 0 },
-    { payment_method: "upi", amount: 0 },
-    { payment_method: "card", amount: 0 },
-  ]);
-  const [splitDrafts, setSplitDrafts] = useState<Record<number, string>>({});
-  const [electronicRef, setElectronicRef] = useState("");
+  // Smart Unified Payment State
+  const [isSplitMode, setIsSplitMode] = useState(false);
+  const [showMobileRefField, setShowMobileRefField] = useState(false);
+  const [paymentAllocations, setPaymentAllocations] = useState<PaymentAllocation[]>([]);
+  const [otherMethod, setOtherMethod] = useState<OtherPaymentSubMethod>("NETBANKING");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inFlightSubmitRef = useRef(false);
   const idempotencyKeyRef = useRef("");
@@ -350,13 +365,11 @@ export default function MobilePOSPage() {
     };
   }, [cart, isCalcSynced, calcSummary]);
 
-  // Synchronize payment amounts when grand total changes in single mode
+  // Keep unedited allocations synchronized with bill total changes
+  const grandTotalPaise = toPaise(cartSummary.grandTotal);
   useEffect(() => {
-    if (!isSplit) {
-      setCashTendered(cartSummary.grandTotal);
-      setCashDraft(cartSummary.grandTotal > 0 ? cartSummary.grandTotal.toFixed(2) : "0");
-    }
-  }, [cartSummary.grandTotal, primaryMethod, isSplit]);
+    setPaymentAllocations((prev) => reconcileAllocationsForTotal(prev, grandTotalPaise));
+  }, [grandTotalPaise]);
 
   // Add product to cart
   const addToCart = (product: Product) => {
@@ -515,57 +528,87 @@ export default function MobilePOSPage() {
     }
   };
 
-  // Payment computations (Single & Hybrid)
-  const activePaymentRows: SplitPaymentRow[] = useMemo(() => {
-    if (isSplit) {
-      return splitPayments.filter((p) => Number(p.amount) > 0);
-    }
-    if (primaryMethod === "cash") {
-      return [{ payment_method: "cash", amount: roundCurrency(Number(cashTendered) || 0) }];
-    }
-    if (primaryMethod === "other") {
-      return [{ payment_method: otherMethod, amount: cartSummary.grandTotal, reference: electronicRef }];
-    }
-    return [{ payment_method: primaryMethod, amount: cartSummary.grandTotal, reference: electronicRef }];
-  }, [isSplit, splitPayments, primaryMethod, cashTendered, otherMethod, cartSummary.grandTotal, electronicRef]);
-
-  const totalAllocated = useMemo(
-    () => roundCurrency(activePaymentRows.reduce((s, p) => s + (Number(p.amount) || 0), 0)),
-    [activePaymentRows]
+  // Smart Unified Payment computations
+  const paymentMetrics = useMemo(
+    () => computePaymentMetrics(paymentAllocations, grandTotalPaise),
+    [paymentAllocations, grandTotalPaise]
   );
-  const cashPaidSum = useMemo(
-    () => roundCurrency(activePaymentRows.filter((p) => p.payment_method === "cash").reduce((s, p) => s + p.amount, 0)),
-    [activePaymentRows]
-  );
-  const splitUsesCredit = activePaymentRows.some((p) => p.payment_method === "credit" && p.amount > 0);
-  const splitRemaining = Math.max(0, roundCurrency(cartSummary.grandTotal - totalAllocated));
-  const excessPayment = totalAllocated > cartSummary.grandTotal ? roundCurrency(totalAllocated - cartSummary.grandTotal) : 0;
-  const isElectronicOverpay = excessPayment > 0.009 && cashPaidSum < excessPayment - 0.009;
-  const cashChange = excessPayment > 0 && !isElectronicOverpay ? excessPayment : 0;
 
-  // Set primary payment method
-  const handleSelectPrimaryMethod = (method: "cash" | "upi" | "card" | "credit" | "other") => {
+  const selectedCustomerObj = useMemo(
+    () =>
+      customer.id
+        ? ({
+            id: customer.id,
+            full_name: customer.name,
+            phone: customer.phone,
+            is_walk_in: customer.is_walk_in,
+          } as any)
+        : null,
+    [customer]
+  );
+
+  const mobileValidationError = useMemo(
+    () =>
+      validateSmartPayments(paymentAllocations, grandTotalPaise, {
+        creditSalesEnabled,
+        isWalkIn: customer.is_walk_in,
+        selectedCustomer: selectedCustomerObj,
+      }),
+    [paymentAllocations, grandTotalPaise, creditSalesEnabled, customer.is_walk_in, selectedCustomerObj]
+  );
+
+  const handleSelectSmartMethod = (method: PrimaryPaymentMethod) => {
     setErrorMessage(null);
-    setPrimaryMethod(method);
-    setIsSplit(false);
-    if (method === "cash") {
-      setCashTendered(cartSummary.grandTotal);
-      setCashDraft(cartSummary.grandTotal.toFixed(2));
+    setShowMobileRefField(false);
+    const resolved: AllocationMethod = method === "OTHER" ? otherMethod : method;
+    if (!isSplitMode) {
+      setPaymentAllocations(selectSingleMethodAllocation(resolved, grandTotalPaise));
+      return;
     }
+    setPaymentAllocations((prev) => selectMethodAllocation(prev, resolved, grandTotalPaise).allocations);
   };
 
-  const handleSelectHybridMode = () => {
+  const handleEnableMobileSplit = () => {
     setErrorMessage(null);
-    setIsSplit(true);
-    setSplitDrafts({});
-    setSplitPayments((prev) => {
-      if (prev.some((p) => p.amount > 0)) return prev;
-      return [
-        { payment_method: "cash", amount: cartSummary.grandTotal },
-        { payment_method: "upi", amount: 0 },
-        { payment_method: "card", amount: 0 },
-      ];
+    setIsSplitMode(true);
+    setPaymentAllocations((prev) =>
+      prev.length === 0 ? selectSingleMethodAllocation("CASH", grandTotalPaise) : prev
+    );
+  };
+
+  const handleDisableMobileSplit = () => {
+    setErrorMessage(null);
+    setIsSplitMode(false);
+    setPaymentAllocations((prev) =>
+      prev.length === 0 ? [] : selectSingleMethodAllocation(prev[0].method, grandTotalPaise)
+    );
+  };
+
+  const handleAddMobileSplitRow = () => {
+    setErrorMessage(null);
+    const candidates: AllocationMethod[] = [
+      "CASH",
+      "UPI",
+      "CARD",
+      ...(creditSalesEnabled ? (["CREDIT"] as AllocationMethod[]) : []),
+      otherMethod,
+    ];
+    setPaymentAllocations((prev) => {
+      const used = new Set(prev.map((a) => a.method));
+      const next = candidates.find((m) => !used.has(m)) || "CASH";
+      return selectMethodAllocation(prev, next, grandTotalPaise).allocations;
     });
+  };
+
+  const handleChangeOtherSubMethod = (sub: OtherPaymentSubMethod) => {
+    setOtherMethod(sub);
+    setPaymentAllocations((prev) =>
+      prev.map((a) =>
+        a.method === "NETBANKING" || a.method === "CHEQUE" || a.method === "WALLET"
+          ? { ...a, method: sub }
+          : a
+      )
+    );
   };
 
   const goToPaymentTab = async () => {
@@ -596,20 +639,13 @@ export default function MobilePOSPage() {
       await calculateMobileCartImmediate();
     }
 
-    if (splitUsesCredit && !creditSalesEnabled) {
-      setErrorMessage("Credit / Udhaar sales are disabled in business settings.");
+    if (paymentAllocations.length === 0) {
+      setErrorMessage("Select a payment method above to complete the sale.");
       return;
     }
-    if (splitUsesCredit && customer.is_walk_in) {
-      setErrorMessage("Walk-in customers cannot take Credit. Please select a registered customer first.");
-      return;
-    }
-    if (isElectronicOverpay) {
-      setErrorMessage("Overpayment is only permitted in Cash. Electronic payments cannot exceed bill total.");
-      return;
-    }
-    if (totalAllocated < cartSummary.grandTotal - 0.009) {
-      setErrorMessage(`Paid amount (${formatCurrency(totalAllocated)}) is less than bill total (${formatCurrency(cartSummary.grandTotal)}).`);
+
+    if (mobileValidationError) {
+      setErrorMessage(mobileValidationError);
       return;
     }
 
@@ -631,10 +667,10 @@ export default function MobilePOSPage() {
         discount: it.discount,
       }));
 
-      const paymentsPayload =
-        activePaymentRows.length > 0
-          ? activePaymentRows
-          : [{ payment_method: "cash", amount: 0 }];
+      const paymentsPayload = buildCheckoutPaymentPayload(paymentAllocations);
+      if (paymentsPayload.length === 0) {
+        paymentsPayload.push({ payment_method: "cash", amount: 0 });
+      }
 
       const checkoutPayload = {
         quotation_number: quotationRef || undefined,
@@ -667,7 +703,9 @@ export default function MobilePOSPage() {
         total: Number(data.total || cartSummary.grandTotal),
         amount_paid: Number(data.amount_paid || cartSummary.grandTotal),
         change_amount: Number(data.change_amount || 0),
-        payment_method: data.payment_method || (isSplit ? "split" : primaryMethod),
+        payment_method:
+          data.payment_method ||
+          (paymentsPayload.length > 1 ? "split" : paymentsPayload[0].payment_method),
         web_url: data.invoice?.web_url,
         customer_name: customer.name,
         customer_phone: customer.phone,
@@ -675,6 +713,9 @@ export default function MobilePOSPage() {
         whatsapp_delivery: data.whatsapp_delivery || null,
         raw: data,
       });
+      setPaymentAllocations([]);
+      setIsSplitMode(false);
+      setShowMobileRefField(false);
       setMobileWaPhone(customer.phone || "");
       const waPresentation = resolveWhatsAppPresentation(data.whatsapp_delivery, data.bill_sent);
       setWaStatus({ state: waPresentation.status, message: waPresentation.message });
@@ -1088,404 +1129,527 @@ export default function MobilePOSPage() {
             </div>
           )}
 
-          {/* Direct Payment Options Grid */}
-          <div>
-            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
-              Select Payment Option
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleSelectPrimaryMethod("cash")}
-                className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                  primaryMethod === "cash" && !isSplit
-                    ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
-                    : "border-slate-200 bg-white text-slate-700"
-                }`}
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 shrink-0">
-                  <Banknote className="h-4 w-4" />
-                </div>
-                <div>
-                  <span className="text-xs font-bold block">Cash</span>
-                  <span className="text-[10px] text-slate-400">Cash drawer</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectPrimaryMethod("upi")}
-                className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                  primaryMethod === "upi" && !isSplit
-                    ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
-                    : "border-slate-200 bg-white text-slate-700"
-                }`}
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700 shrink-0">
-                  <QrCode className="h-4 w-4" />
-                </div>
-                <div>
-                  <span className="text-xs font-bold block">UPI</span>
-                  <span className="text-[10px] text-slate-400">GPay, PhonePe</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectPrimaryMethod("card")}
-                className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                  primaryMethod === "card" && !isSplit
-                    ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
-                    : "border-slate-200 bg-white text-slate-700"
-                }`}
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-100 text-purple-700 shrink-0">
-                  <CreditCard className="h-4 w-4" />
-                </div>
-                <div>
-                  <span className="text-xs font-bold block">Card</span>
-                  <span className="text-[10px] text-slate-400">POS Terminal</span>
-                </div>
-              </button>
-
-              {creditSalesEnabled && (
-                <button
-                  type="button"
-                  onClick={() => handleSelectPrimaryMethod("credit")}
-                  className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                    primaryMethod === "credit" && !isSplit
-                      ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
-                      : "border-slate-200 bg-white text-slate-700"
-                  }`}
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-700 shrink-0">
-                    <ClipboardList className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold block">Credit</span>
-                    <span className="text-[10px] text-slate-400">Customer Udhaar</span>
-                  </div>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => handleSelectPrimaryMethod("other")}
-                className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                  primaryMethod === "other" && !isSplit
-                    ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
-                    : "border-slate-200 bg-white text-slate-700"
-                }`}
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700 shrink-0">
-                  <Landmark className="h-4 w-4" />
-                </div>
-                <div>
-                  <span className="text-xs font-bold block">Other</span>
-                  <span className="text-[10px] text-slate-400">Bank / Cheque / Wallet</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSelectHybridMode}
-                className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
-                  isSplit
-                    ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
-                    : "border-slate-200 bg-white text-slate-700"
-                }`}
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 shrink-0">
-                  <Split className="h-4 w-4" />
-                </div>
-                <div>
-                  <span className="text-xs font-bold block">Hybrid / Split</span>
-                  <span className="text-[10px] text-slate-400">Cash + UPI + Card</span>
-                </div>
-              </button>
+          {/* Clean Total Payable Card */}
+          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm flex items-center justify-between">
+            <div>
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                {isSplitMode ? "Split Payment" : "Payment"}
+              </span>
+              <span className="text-xs font-bold text-slate-700">Total Payable</span>
             </div>
+            <span className="text-2xl font-black text-blue-600 tabular-nums">
+              {formatCurrency(fromPaise(paymentMetrics.billTotalPaise))}
+            </span>
           </div>
 
-          {/* Cash Tender & Change Due Section */}
-          {primaryMethod === "cash" && !isSplit && (
-            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800">Cash Tendered</span>
-                <span className="text-xs font-extrabold text-blue-600 tabular-nums">
-                  {formatCurrency(cashTendered)}
-                </span>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCashTendered(cartSummary.grandTotal);
-                    setCashDraft(cartSummary.grandTotal.toFixed(2));
-                  }}
-                  className="rounded-lg bg-blue-50 border border-blue-200 px-2.5 py-1 text-[11px] font-bold text-blue-700 active:scale-95 transition-all"
-                >
-                  Exact (₹{cartSummary.grandTotal})
-                </button>
-                {[100, 200, 500, 1000, 2000].map((denom) => (
-                  <button
-                    key={denom}
-                    type="button"
-                    onClick={() => {
-                      setCashTendered(denom);
-                      setCashDraft(String(denom));
-                    }}
-                    className="rounded-lg bg-slate-100 border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-700 active:scale-95 transition-all"
-                  >
-                    ₹{denom}
-                  </button>
-                ))}
-              </div>
-
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={cashDraft !== "" ? cashDraft : cashTendered || ""}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw.trim().startsWith("-")) return;
-                  setCashDraft(raw);
-                  const parsed = raw.trim() === "" ? 0 : Number(raw);
-                  if (Number.isFinite(parsed) && parsed >= 0) {
-                    setCashTendered(roundCurrency(parsed));
-                  }
-                }}
-                placeholder="Enter cash amount..."
-                className="w-full rounded-lg border border-slate-200 p-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100 tabular-nums"
-              />
-
-              <div className="flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs font-bold text-emerald-800">
-                <span>Change to Return:</span>
-                <span className="text-sm font-extrabold tabular-nums">{formatCurrency(cashChange)}</span>
-              </div>
-            </div>
-          )}
-
-          {/* UPI Reference / Preview */}
-          {primaryMethod === "upi" && !isSplit && (
-            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 text-xs shadow-sm text-center">
-              <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-xl bg-slate-100 border border-slate-200">
-                <QrCode className="h-16 w-16 text-slate-700" />
-              </div>
-              <p className="text-[11px] text-slate-500">Scan QR Code on counter or enter UPI UTR</p>
-              <input
-                type="text"
-                value={electronicRef}
-                onChange={(e) => setElectronicRef(e.target.value)}
-                placeholder="Optional UPI Reference / UTR Number..."
-                className="w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-          )}
-
-          {/* Card Reference */}
-          {primaryMethod === "card" && !isSplit && (
-            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 text-xs shadow-sm">
-              <span className="text-[11px] font-bold text-slate-700">Card Approval / Ref Number</span>
-              <input
-                type="text"
-                value={electronicRef}
-                onChange={(e) => setElectronicRef(e.target.value)}
-                placeholder="Card Authorization Code (e.g. TXN-1029)..."
-                className="w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-          )}
-
-          {/* Other Payment Methods */}
-          {primaryMethod === "other" && !isSplit && (
-            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 text-xs shadow-sm">
-              <div className="grid grid-cols-3 gap-1.5">
-                {[
-                  { id: "netbanking" as const, label: "Net Banking", icon: Landmark },
-                  { id: "cheque" as const, label: "Cheque", icon: Receipt },
-                  { id: "wallet" as const, label: "Wallet", icon: Wallet },
-                ].map((om) => (
-                  <button
-                    key={om.id}
-                    type="button"
-                    onClick={() => setOtherMethod(om.id)}
-                    className={`flex items-center justify-center gap-1 rounded-lg border py-2 text-[11px] font-bold ${
-                      otherMethod === om.id
-                        ? "border-blue-600 bg-blue-50 text-blue-700"
-                        : "border-slate-200 text-slate-600"
-                    }`}
-                  >
-                    <om.icon className="h-3.5 w-3.5" />
-                    <span>{om.label}</span>
-                  </button>
-                ))}
-              </div>
-              <input
-                type="text"
-                value={electronicRef}
-                onChange={(e) => setElectronicRef(e.target.value)}
-                placeholder="Reference / Cheque / Wallet Transaction ID..."
-                className="w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-          )}
-
-          {/* Hybrid / Split Payment Breakdown */}
-          {isSplit && (
-            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5 text-xs shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
-                  Hybrid Payment Split
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSplitPayments((prev) => [
-                      ...prev,
-                      { payment_method: "netbanking", amount: splitRemaining },
-                    ])
-                  }
-                  className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-0.5"
-                >
-                  <Plus className="h-3 w-3" />
-                  Add Method
-                </button>
-              </div>
-
-              <div className="divide-y divide-slate-200 rounded-lg border border-slate-200 overflow-hidden">
-                {splitPayments.map((row, idx) => {
-                  const draft = splitDrafts[idx];
-                  return (
-                    <div key={idx} className="p-2 flex items-center gap-2 bg-white">
-                      <select
-                        value={row.payment_method}
-                        onChange={(e) => {
-                          const m = e.target.value;
-                          setSplitPayments((prev) =>
-                            prev.map((p, i) => (i === idx ? { ...p, payment_method: m } : p))
-                          );
-                        }}
-                        className="h-8 rounded border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold uppercase text-slate-800 w-24 shrink-0"
+          {!isSplitMode ? (
+            <div className="space-y-3">
+              {/* Primary Payment Method Tiles */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1.5">
+                  Select Payment Method
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "CASH" as const, label: "Cash", sub: "Cash drawer", icon: Banknote, badge: "bg-emerald-100 text-emerald-700" },
+                    { id: "UPI" as const, label: "UPI", sub: "GPay, PhonePe", icon: QrCode, badge: "bg-blue-100 text-blue-700" },
+                    { id: "CARD" as const, label: "Card", sub: "POS Terminal", icon: CreditCard, badge: "bg-purple-100 text-purple-700" },
+                    ...(creditSalesEnabled
+                      ? [{ id: "CREDIT" as const, label: "Credit", sub: "Customer Udhaar", icon: ClipboardList, badge: "bg-amber-100 text-amber-700" }]
+                      : []),
+                    { id: "OTHER" as const, label: "Other", sub: "Bank / Cheque / Wallet", icon: Landmark, badge: "bg-slate-100 text-slate-700" },
+                  ].map((m) => {
+                    const Icon = m.icon;
+                    const single = paymentAllocations.length === 1 ? paymentAllocations[0] : null;
+                    const isSelected =
+                      m.id === "OTHER"
+                        ? Boolean(
+                            single &&
+                              (single.method === "NETBANKING" ||
+                                single.method === "CHEQUE" ||
+                                single.method === "WALLET")
+                          )
+                        : single?.method === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => handleSelectSmartMethod(m.id)}
+                        className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-all ${
+                          isSelected
+                            ? "border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 text-blue-900 font-bold"
+                            : "border-slate-200 bg-white text-slate-700"
+                        }`}
                       >
-                        <option value="cash">Cash</option>
-                        <option value="upi">UPI</option>
-                        <option value="card">Card</option>
-                        {creditSalesEnabled && <option value="credit">Credit</option>}
-                        <option value="netbanking">Bank</option>
-                        <option value="cheque">Cheque</option>
-                        <option value="wallet">Wallet</option>
-                      </select>
-
-                      <div className="relative flex-1">
-                        <span className="absolute left-2 top-2 text-slate-400 font-bold">₹</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={draft !== undefined ? draft : row.amount || ""}
-                          placeholder="0.00"
-                          onChange={(e) => {
-                            const raw = e.target.value;
-                            if (raw.trim().startsWith("-")) return;
-                            setSplitDrafts((prev) => ({ ...prev, [idx]: raw }));
-                            const parsed = raw.trim() === "" ? 0 : Number(raw);
-                            if (!Number.isFinite(parsed) || parsed < 0) return;
-                            setSplitPayments((prev) =>
-                              prev.map((p, i) =>
-                                i === idx ? { ...p, amount: roundCurrency(parsed) } : p
-                              )
-                            );
-                          }}
-                          onBlur={() => {
-                            setSplitDrafts((prev) => {
-                              const next = { ...prev };
-                              delete next[idx];
-                              return next;
-                            });
-                          }}
-                          className="h-8 w-full rounded border border-slate-200 pl-5 pr-2 text-right font-bold text-slate-900 tabular-nums"
-                        />
-                      </div>
-
-                      {splitRemaining > 0.009 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const fill = Math.max(0, roundCurrency(cartSummary.grandTotal - (totalAllocated - row.amount)));
-                            setSplitPayments((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, amount: fill } : p))
-                            );
-                          }}
-                          className="rounded bg-blue-50 px-1.5 py-1 text-[10px] font-bold text-blue-700 border border-blue-200 shrink-0"
-                        >
-                          Fill
-                        </button>
-                      )}
-
-                      {splitPayments.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSplitDrafts({});
-                            setSplitPayments((prev) => prev.filter((_, i) => i !== idx));
-                          }}
-                          className="p-1 text-slate-400 hover:text-rose-600 shrink-0"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                        <div className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 ${m.badge}`}>
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold block">{m.label}</span>
+                          <span className="text-[10px] text-slate-400">{m.sub}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 space-y-1 text-[11px]">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Total Bill</span>
-                  <span className="font-bold text-slate-900 tabular-nums">{formatCurrency(cartSummary.grandTotal)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Entered Total</span>
-                  <span className="font-bold text-emerald-700 tabular-nums">{formatCurrency(totalAllocated)}</span>
-                </div>
-                <div className="flex justify-between border-t pt-1 font-extrabold">
-                  <span className="text-slate-700">Remaining</span>
-                  <span className={splitRemaining > 0.009 ? "text-rose-600 tabular-nums" : "text-emerald-700 tabular-nums"}>
-                    {formatCurrency(splitRemaining)}
-                  </span>
-                </div>
-                {cashChange > 0 && (
-                  <div className="flex justify-between text-amber-700 font-bold">
-                    <span>Cash Change</span>
-                    <span className="tabular-nums">{formatCurrency(cashChange)}</span>
+              {/* Other Sub-Methods */}
+              {paymentAllocations.length === 1 &&
+                (paymentAllocations[0].method === "NETBANKING" ||
+                  paymentAllocations[0].method === "CHEQUE" ||
+                  paymentAllocations[0].method === "WALLET") && (
+                  <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-200 bg-white p-2 text-xs shadow-sm">
+                    {[
+                      { id: "NETBANKING" as const, label: "Net Banking", icon: Landmark },
+                      { id: "CHEQUE" as const, label: "Cheque", icon: Receipt },
+                      { id: "WALLET" as const, label: "Wallet", icon: Wallet },
+                    ].map((om) => (
+                      <button
+                        key={om.id}
+                        type="button"
+                        onClick={() => handleChangeOtherSubMethod(om.id)}
+                        className={`flex items-center justify-center gap-1 rounded-lg border py-2 text-[11px] font-bold ${
+                          otherMethod === om.id
+                            ? "border-blue-600 bg-blue-50 text-blue-700"
+                            : "border-slate-200 text-slate-600"
+                        }`}
+                      >
+                        <om.icon className="h-3.5 w-3.5" />
+                        <span>{om.label}</span>
+                      </button>
+                    ))}
                   </div>
                 )}
+
+              {/* Selected Single Method Summary Card */}
+              {paymentAllocations.length === 1 && (() => {
+                const row = paymentAllocations[0];
+                const billRupees = fromPaise(paymentMetrics.billTotalPaise);
+                const quickChips = computeQuickCashAmounts(billRupees);
+                return (
+                  <div className="rounded-xl border border-blue-200 bg-white p-3 space-y-2.5 text-xs shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        Payment Method:{" "}
+                        <span className="text-blue-700">
+                          {getAllocationDisplayLabel(row.method)}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentAllocations([]);
+                          setShowMobileRefField(false);
+                        }}
+                        className="text-[11px] font-semibold text-slate-500 underline"
+                      >
+                        Change
+                      </button>
+                    </div>
+
+                    {row.method === "CASH" && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600 font-medium">Cash Received</span>
+                          <div className="relative w-32">
+                            <span className="absolute left-2.5 top-2 text-slate-400 font-bold">₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={row.amountDraft}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw.trim().startsWith("-")) return;
+                                setPaymentAllocations((prev) =>
+                                  updateAllocationAmount(prev, row.id, raw, grandTotalPaise, {
+                                    markManual: true,
+                                  })
+                                );
+                              }}
+                              onBlur={() =>
+                                setPaymentAllocations((prev) => blurAllocationAmount(prev, row.id))
+                              }
+                              className="h-9 w-full rounded-lg border border-slate-300 pl-6 pr-2 text-right font-extrabold text-sm text-slate-900 tabular-nums"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPaymentAllocations((prev) =>
+                                updateAllocationAmount(prev, row.id, billRupees.toFixed(2), grandTotalPaise, {
+                                  markManual: true,
+                                })
+                              )
+                            }
+                            className="rounded-lg bg-blue-50 border border-blue-200 px-2.5 py-1 text-[11px] font-bold text-blue-700"
+                          >
+                            Exact ₹{formatPaise(paymentMetrics.billTotalPaise)}
+                          </button>
+                          {quickChips.map((denom) => (
+                            <button
+                              key={denom}
+                              type="button"
+                              onClick={() =>
+                                setPaymentAllocations((prev) =>
+                                  updateAllocationAmount(prev, row.id, denom.toFixed(2), grandTotalPaise, {
+                                    markManual: true,
+                                  })
+                                )
+                              }
+                              className="rounded-lg bg-slate-100 border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-700"
+                            >
+                              ₹{denom}
+                            </button>
+                          ))}
+                        </div>
+
+                        {paymentMetrics.changePaise > 0 ? (
+                          <div className="flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs">
+                            <span className="font-semibold text-emerald-800">
+                              Received: {formatCurrency(fromPaise(paymentMetrics.totalPaidPaise))}
+                            </span>
+                            <span className="text-sm font-black text-emerald-700 tabular-nums">
+                              Change: {formatCurrency(fromPaise(paymentMetrics.changePaise))}
+                            </span>
+                          </div>
+                        ) : paymentMetrics.remainingPaise > 0 ? (
+                          <div className="flex items-center justify-between rounded-lg bg-amber-50 border border-amber-200 p-2 text-[11px] text-amber-800">
+                            <span className="font-semibold">
+                              Short by {formatCurrency(fromPaise(paymentMetrics.remainingPaise))}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleEnableMobileSplit}
+                              className="rounded bg-amber-600 text-white px-2 py-0.5 font-bold"
+                            >
+                              + Split Remaining
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+
+                    {row.method !== "CASH" && row.method !== "CREDIT" && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between rounded-lg bg-slate-50 border border-slate-200 p-2.5">
+                          <span className="text-slate-600 font-medium">Amount</span>
+                          <span className="text-base font-black text-slate-900 tabular-nums">
+                            {formatCurrency(fromPaise(row.amountPaise))}
+                          </span>
+                        </div>
+
+                        {showMobileRefField || row.reference ? (
+                          <input
+                            type="text"
+                            value={row.reference}
+                            onChange={(e) =>
+                              setPaymentAllocations((prev) =>
+                                updateAllocationReference(prev, row.id, e.target.value)
+                              )
+                            }
+                            placeholder={
+                              row.method === "UPI"
+                                ? "Optional UPI UTR / Ref..."
+                                : "Optional Ref / Auth / Cheque #..."
+                            }
+                            className="w-full rounded-lg border border-slate-200 p-2 text-xs"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowMobileRefField(true)}
+                            className="text-[11px] font-semibold text-slate-500 hover:text-blue-600"
+                          >
+                            + Add {row.method === "UPI" ? "UTR / " : ""}Reference (optional)
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {row.method === "CREDIT" && (
+                      <div className="space-y-2">
+                        {customer.is_walk_in || !customer.confirmed ? (
+                          <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 space-y-2 text-amber-900">
+                            <p className="font-semibold text-xs">
+                              Please select a registered customer before using Credit.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setShowCustomerModal(true)}
+                              className="w-full rounded-lg bg-amber-600 text-white font-bold py-2 text-xs"
+                            >
+                              Select Customer →
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-2.5 space-y-1 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-amber-800">Customer</span>
+                              <span className="font-bold text-amber-950">{customer.name}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-amber-800">Credit (This Bill)</span>
+                              <span className="font-bold text-amber-950 tabular-nums">
+                                {formatCurrency(billRupees)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Explicit Split Payment Toggle Button */}
+              <button
+                type="button"
+                onClick={handleEnableMobileSplit}
+                className="w-full rounded-xl border border-dashed border-slate-300 bg-white py-2.5 text-xs font-bold text-slate-600 hover:text-blue-600 hover:border-blue-400 flex items-center justify-center gap-1.5"
+              >
+                <Split className="h-3.5 w-3.5" />
+                <span>+ Split Payment</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-blue-700 flex items-center gap-1">
+                  <Split className="h-3.5 w-3.5" />
+                  Split Payment Allocations
+                </span>
+                <button
+                  type="button"
+                  onClick={handleDisableMobileSplit}
+                  className="text-xs font-semibold text-slate-500 underline"
+                >
+                  ← Single Payment
+                </button>
               </div>
+
+              <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-white p-2.5 text-xs shadow-sm">
+                <div>
+                  <span className="block text-[10px] font-semibold uppercase text-slate-400">Total</span>
+                  <span className="font-extrabold text-slate-900 tabular-nums">
+                    {formatCurrency(fromPaise(paymentMetrics.billTotalPaise))}
+                  </span>
+                </div>
+                <div className="text-center">
+                  <span className="block text-[10px] font-semibold uppercase text-slate-400">Paid</span>
+                  <span className="font-extrabold text-slate-900 tabular-nums">
+                    {formatCurrency(fromPaise(paymentMetrics.totalPaidPaise))}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="block text-[10px] font-semibold uppercase text-slate-400">
+                    {paymentMetrics.changePaise > 0 ? "Change" : "Remaining"}
+                  </span>
+                  <span
+                    className={`font-extrabold tabular-nums ${
+                      paymentMetrics.changePaise > 0
+                        ? "text-amber-600"
+                        : paymentMetrics.remainingPaise > 0 || paymentMetrics.isElectronicOverpay
+                        ? "text-rose-600"
+                        : "text-emerald-600"
+                    }`}
+                  >
+                    {formatCurrency(
+                      fromPaise(
+                        paymentMetrics.changePaise > 0
+                          ? paymentMetrics.changePaise
+                          : paymentMetrics.remainingPaise
+                      )
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {paymentAllocations.length > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5 text-xs shadow-sm">
+                  <div className="divide-y divide-slate-200">
+                    {paymentAllocations.map((row) => {
+                      const otherPaidPaise = paymentMetrics.totalPaidPaise - row.amountPaise;
+                      const exactNeeded = fromPaise(Math.max(0, grandTotalPaise - otherPaidPaise));
+                      return (
+                        <div key={row.id} className="py-2 first:pt-0 last:pb-0 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={row.method}
+                              onChange={(e) =>
+                                setPaymentAllocations((prev) =>
+                                  changeAllocationMethod(prev, row.id, e.target.value as AllocationMethod)
+                                )
+                              }
+                              className="h-8 rounded border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold uppercase text-slate-800 w-24 shrink-0"
+                            >
+                              <option value="CASH">Cash</option>
+                              <option value="UPI">UPI</option>
+                              <option value="CARD">Card</option>
+                              {creditSalesEnabled && <option value="CREDIT">Credit</option>}
+                              <option value="NETBANKING">Bank</option>
+                              <option value="CHEQUE">Cheque</option>
+                              <option value="WALLET">Wallet</option>
+                            </select>
+
+                            <div className="relative flex-1">
+                              <span className="absolute left-2 top-2 text-slate-400 font-bold">₹</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={row.amountDraft}
+                                placeholder="0.00"
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  if (raw.trim().startsWith("-")) return;
+                                  setPaymentAllocations((prev) =>
+                                    updateAllocationAmount(prev, row.id, raw, grandTotalPaise, {
+                                      markManual: true,
+                                    })
+                                  );
+                                }}
+                                onBlur={() =>
+                                  setPaymentAllocations((prev) => blurAllocationAmount(prev, row.id))
+                                }
+                                className="h-8 w-full rounded border border-slate-200 pl-5 pr-2 text-right font-bold text-slate-900 tabular-nums"
+                              />
+                            </div>
+
+                            {paymentMetrics.remainingPaise > 0 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPaymentAllocations((prev) =>
+                                    fillAllocationRemaining(prev, row.id, grandTotalPaise)
+                                  )
+                                }
+                                className="rounded bg-blue-50 px-1.5 py-1 text-[10px] font-bold text-blue-700 border border-blue-200 shrink-0"
+                              >
+                                Fill ₹{formatPaise(paymentMetrics.remainingPaise)}
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPaymentAllocations((prev) => removeAllocationRow(prev, row.id))
+                              }
+                              className="p-1 text-slate-400 hover:text-rose-600 shrink-0"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          {row.method === "CASH" && exactNeeded > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPaymentAllocations((prev) =>
+                                    updateAllocationAmount(prev, row.id, exactNeeded.toFixed(2), grandTotalPaise, {
+                                      markManual: true,
+                                    })
+                                  )
+                                }
+                                className="rounded-lg bg-blue-50 border border-blue-200 px-2 py-0.5 text-[10px] font-bold text-blue-700"
+                              >
+                                Exact ₹{exactNeeded.toFixed(2)}
+                              </button>
+                              {computeQuickCashAmounts(exactNeeded).map((denom) => (
+                                <button
+                                  key={denom}
+                                  type="button"
+                                  onClick={() =>
+                                    setPaymentAllocations((prev) =>
+                                      updateAllocationAmount(prev, row.id, denom.toFixed(2), grandTotalPaise, {
+                                        markManual: true,
+                                      })
+                                    )
+                                  }
+                                  className="rounded-lg bg-slate-100 border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700"
+                                >
+                                  ₹{denom}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {row.method !== "CASH" && row.method !== "CREDIT" && (
+                            <input
+                              type="text"
+                              value={row.reference}
+                              onChange={(e) =>
+                                setPaymentAllocations((prev) =>
+                                  updateAllocationReference(prev, row.id, e.target.value)
+                                )
+                              }
+                              placeholder={
+                                row.method === "UPI"
+                                  ? "Optional UPI UTR / Ref..."
+                                  : "Optional Ref / Auth / Cheque #..."
+                              }
+                              className="w-full rounded-lg border border-slate-200 p-1.5 text-[11px]"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {paymentMetrics.changePaise > 0 && (
+                    <div className="flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs font-bold text-emerald-800">
+                      <span>Change to Return:</span>
+                      <span className="text-sm font-extrabold tabular-nums">
+                        {formatCurrency(fromPaise(paymentMetrics.changePaise))}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {paymentMetrics.remainingPaise > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {(["CASH", "UPI", "CARD", ...(creditSalesEnabled ? ["CREDIT"] : []), "OTHER"] as PrimaryPaymentMethod[]).map(
+                    (m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => handleSelectSmartMethod(m)}
+                        className="rounded-lg bg-blue-50 border border-blue-200 px-2.5 py-1 text-[11px] font-bold text-blue-700"
+                      >
+                        + {m === "OTHER" ? "Other" : m === "CREDIT" ? "Credit" : m === "UPI" ? "UPI" : m === "CARD" ? "Card" : "Cash"} (₹{formatPaise(paymentMetrics.remainingPaise)})
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleAddMobileSplitRow}
+                className="w-full rounded-xl border border-slate-300 bg-white py-2 text-xs font-bold text-slate-700 flex items-center justify-center gap-1"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add Payment Method</span>
+              </button>
             </div>
           )}
 
-          {/* Customer Credit / Udhaar Notice */}
-          {((primaryMethod === "credit" && !isSplit) || splitUsesCredit) && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1.5 text-xs text-amber-800">
-              <span className="font-bold flex items-center gap-1">
-                <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                Customer Credit Policy
-              </span>
-              <p className="text-[11px]">
-                Credit sales require a registered customer. Currently selected:{" "}
-                <span className="font-bold">{customer.name || (customer.is_walk_in ? "Walk-in Customer" : "Unselected")}</span>
-              </p>
-              {(customer.is_walk_in || !customer.confirmed) && (
-                <button
-                  type="button"
-                  onClick={() => setShowCustomerModal(true)}
-                  className="rounded-lg bg-amber-600 text-white font-bold px-2.5 py-1 text-[10px] mt-1"
-                >
-                  Select Registered Customer →
-                </button>
-              )}
+          {/* Live Inline Validation Notice */}
+          {mobileValidationError && !errorMessage && !(
+            !isSplitMode &&
+            paymentAllocations.length === 1 &&
+            paymentAllocations[0].method === "CREDIT" &&
+            (customer.is_walk_in || !customer.confirmed)
+          ) && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 font-medium">
+              {mobileValidationError}
             </div>
           )}
 
@@ -1495,9 +1659,8 @@ export default function MobilePOSPage() {
             onClick={handleCompleteSale}
             disabled={
               isSubmitting ||
-              (splitUsesCredit && (customer.is_walk_in || !creditSalesEnabled)) ||
-              isElectronicOverpay ||
-              totalAllocated < cartSummary.grandTotal - 0.009
+              paymentAllocations.length === 0 ||
+              Boolean(mobileValidationError)
             }
             className="w-full rounded-xl bg-blue-600 py-3.5 text-center text-sm font-extrabold text-white shadow-xl shadow-blue-500/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
           >
@@ -1509,7 +1672,15 @@ export default function MobilePOSPage() {
             ) : (
               <>
                 <CheckCircle2 className="h-4 w-4" />
-                <span>Complete Sale ({formatCurrency(cartSummary.grandTotal)})</span>
+                <span>
+                  {paymentAllocations.length === 0
+                    ? "Select Payment Method"
+                    : !isSplitMode && paymentAllocations.length === 1
+                      ? paymentAllocations[0].method === "CREDIT"
+                        ? `Complete Credit Sale (${formatCurrency(cartSummary.grandTotal)})`
+                        : `Complete ${getAllocationDisplayLabel(paymentAllocations[0].method)} Payment (${formatCurrency(cartSummary.grandTotal)})`
+                      : `Complete Split Payment (${formatCurrency(cartSummary.grandTotal)})`}
+                </span>
               </>
             )}
           </button>

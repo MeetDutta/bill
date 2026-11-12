@@ -534,7 +534,13 @@ class CheckoutService:
                 )
 
                 # 8c. Create Transaction
-                primary_method = parsed_payments[0]["payment_method"] if parsed_payments else "cash"
+                distinct_methods = {p["payment_method"] for p in applied_payments}
+                if len(distinct_methods) > 1:
+                    primary_method = "split"
+                elif applied_payments:
+                    primary_method = applied_payments[0]["payment_method"]
+                else:
+                    primary_method = parsed_payments[0]["payment_method"] if parsed_payments else "cash"
                 tx = Transaction.objects.create(
                     organization=organization,
                     store=store,
@@ -716,6 +722,7 @@ class CheckoutService:
                     "payment_status": tx.payment_status,
                     "payment_method": tx.payment_method,
                     "cashier": tx.cashier.get_full_name() if tx.cashier else "Staff",
+                    "customer_id": str(tx.customer.id) if tx.customer else None,
                     "customer_name": tx.customer.full_name if tx.customer else "Walk-in",
                     "items_count": tx.items.count(),
                     "created_at": tx.transaction_date.isoformat(),

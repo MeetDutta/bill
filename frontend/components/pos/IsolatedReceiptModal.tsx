@@ -428,10 +428,27 @@ export function IsolatedReceiptModal({
                   <span>GRAND TOTAL:</span>
                   <span>{formatCurrency(total)}</span>
                 </div>
-                <div className="flex justify-between text-[10px] text-slate-500 pt-0.5">
-                  <span>Paid ({paymentMethod}):</span>
-                  <span>{formatCurrency(amountPaid)}</span>
-                </div>
+                {printPayload.payments && printPayload.payments.length > 0 ? (
+                  <div className="pt-0.5 space-y-0.5 text-[10px] text-slate-600">
+                    {printPayload.payments.map((p, idx) => (
+                      <div key={idx} className="flex justify-between">
+                        <span>{String(p.payment_method || "CASH").toUpperCase()}{p.reference ? ` (${p.reference})` : ""}:</span>
+                        <span>{formatCurrency(Number(p.amount) || 0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex justify-between text-[10px] text-slate-500 pt-0.5">
+                    <span>Paid ({paymentMethod}):</span>
+                    <span>{formatCurrency(amountPaid)}</span>
+                  </div>
+                )}
+                {tenderedAmount > total && (
+                  <div className="flex justify-between text-[10px] text-slate-500">
+                    <span>Cash Tendered:</span>
+                    <span>{formatCurrency(tenderedAmount)}</span>
+                  </div>
+                )}
                 {changeAmount > 0 && (
                   <div className="flex justify-between text-[10px] font-bold text-emerald-700">
                     <span>Change Returned:</span>
@@ -730,6 +747,24 @@ export function IsolatedReceiptModal({
                           ₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
+                      {printPayload.payments && printPayload.payments.length > 0 && (
+                        <tr className="border-b border-black">
+                          <td className="p-1 px-2 text-black">Payment</td>
+                          <td className="p-1 px-2 text-right font-mono text-[8.5px]">
+                            {printPayload.payments
+                              .map((p) => `${String(p.payment_method || "CASH").toUpperCase()} ₹${Number(p.amount || 0).toFixed(2)}`)
+                              .join(" + ")}
+                          </td>
+                        </tr>
+                      )}
+                      {changeAmount > 0 && (
+                        <tr className="border-b border-black">
+                          <td className="p-1 px-2 text-black">Change Returned</td>
+                          <td className="p-1 px-2 text-right font-mono">
+                            {changeAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
 

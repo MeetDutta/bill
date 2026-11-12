@@ -43,7 +43,7 @@ def score_customer(c):
 
 def customer_profile(c):
     score,label,reasons=score_customer(c)
-    txs=list(Transaction.objects.filter(organization=c.organization,customer=c,status="completed").order_by("-transaction_date")[:10])
+    txs=list(Transaction.objects.filter(organization=c.organization,customer=c,status="completed",is_return=False).order_by("-transaction_date")[:10])
     timeline=list(CustomerTimeline.objects.filter(organization=c.organization,customer=c)[:20])
     try: loyalty=LoyaltyAccount.objects.get(organization=c.organization,customer=c)
     except LoyaltyAccount.DoesNotExist: loyalty=None
@@ -54,7 +54,31 @@ def customer_profile(c):
     elif c.total_purchases<2: action="Encourage a second purchase"
     else: action="Send a personalized loyalty reminder"
     return {
-        "customer":{"id":str(c.id),"customer_id":c.customer_id,"name":c.full_name,"phone":c.phone,"email":c.email,"city":c.city,"segment":c.segment,"created_at":c.created_at,"last_purchase_at":c.last_purchase_at,"total_purchases":c.total_purchases,"total_spend":str(c.total_spend),"average_order_value":str(c.average_order_value),"preferred_store":c.preferred_store.name if c.preferred_store else None,"portal_token":str(c.portal_token)},
+        "customer":{
+            "id":str(c.id),
+            "customer_id":c.customer_id,
+            "name":c.full_name,
+            "full_name":c.full_name,
+            "phone":c.phone,
+            "email":c.email,
+            "address_line1":c.address_line1,
+            "full_address":c.full_address,
+            "city":c.city,
+            "state":c.state,
+            "postal_code":c.postal_code,
+            "gstin":c.gstin,
+            "segment":c.segment,
+            "is_walk_in":bool(c.is_walk_in),
+            "credit_limit":str(c.credit_limit),
+            "outstanding_credit":str(c.outstanding_credit),
+            "created_at":c.created_at,
+            "last_purchase_at":c.last_purchase_at,
+            "total_purchases":c.total_purchases,
+            "total_spend":str(c.total_spend),
+            "average_order_value":str(c.average_order_value),
+            "preferred_store":c.preferred_store.name if c.preferred_store else None,
+            "portal_token":str(c.portal_token),
+        },
         "engagement":{"score":score,"label":label,"reasons":reasons},
         "loyalty":None if not loyalty else {"balance":str(loyalty.balance),"total_earned":str(loyalty.total_earned),"total_redeemed":str(loyalty.total_redeemed),"total_expired":str(loyalty.total_expired)},
         "recommended_action":{"title":action,"reason":"Based on purchase recency, frequency, value and loyalty activity.","suggested_offer":"₹250 OFF above ₹1,499" if last_days and last_days>60 else "Reward points on the next purchase"},

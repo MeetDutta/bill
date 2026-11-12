@@ -109,6 +109,22 @@ class CreditService:
                 if active_register:
                     active_register.record_sale(amount)
 
+        try:
+            from .realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=organization,
+                store=store,
+                event_type="credit_payment",
+                payload={
+                    "payment_id": str(credit_payment.id),
+                    "customer_id": str(customer.id),
+                    "amount_paid": str(credit_payment.amount),
+                    "remaining_outstanding": str(customer.outstanding_credit),
+                },
+            )
+        except Exception:
+            pass
+
         return {
             "id": str(credit_payment.id),
             "customer_id": str(customer.id),

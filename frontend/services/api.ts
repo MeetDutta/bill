@@ -5,6 +5,7 @@ import type {
   Organization,
   Store,
   Customer,
+  CustomerAnalyticsData,
   Transaction,
   Product,
   Campaign,
@@ -59,6 +60,8 @@ export const customerApi = {
       `/customers/by-mobile/${encodeURIComponent(mobile.trim())}/`
     ),
   get: (id: string) => api.get<Customer>(`/customers/${id}/`),
+  getAnalytics: (id: string, params?: { limit?: number }) =>
+    api.get<CustomerAnalyticsData>(`/customers/${id}/analytics/`, { params }),
   create: (data: Partial<Customer>) => api.post<Customer>("/customers/", data),
   update: (id: string, data: Partial<Customer>) => api.patch<Customer>(`/customers/${id}/`, data),
   getTimeline: (id: string) => api.get(`/customers/${id}/timeline/`),

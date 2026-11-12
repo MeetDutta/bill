@@ -950,15 +950,34 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
         leading=12,
         textColor=colors.black,
     )
+    total_row_idx = len(totals_rows)
     totals_rows.append([
         Paragraph("Total", grand_total_label),
         Paragraph(f"<b>₹{total_val:,.2f}</b>", grand_total_style),
     ])
 
-    # If partial payment
+    # If partial payment or split/cash change details
     if due_val > Decimal("0.00"):
         totals_rows.append([Paragraph("Amount Paid", meta_label), Paragraph(f"₹{paid_val:,.2f}", cell_right)])
         totals_rows.append([Paragraph("Balance Due", ParagraphStyle("DueL", parent=meta_label, fontName=bold_font)), Paragraph(f"₹{due_val:,.2f}", ParagraphStyle("DueR", parent=cell_right, fontName=bold_font))])
+    elif payments:
+        payment_summary = ", ".join(
+            f"{safe_str(p.payment_method.upper())}: ₹{p.amount:,.2f}" for p in payments
+        )
+        totals_rows.append([
+            Paragraph("Payment Mode", meta_label),
+            Paragraph(payment_summary, cell_right),
+        ])
+
+    if tx and getattr(tx, "change_amount", Decimal("0.00")) > Decimal("0.00"):
+        totals_rows.append([
+            Paragraph("Cash Tendered", meta_label),
+            Paragraph(f"₹{tx.tendered_amount:,.2f}", cell_right),
+        ])
+        totals_rows.append([
+            Paragraph("Change Returned", meta_label),
+            Paragraph(f"₹{tx.change_amount:,.2f}", cell_right),
+        ])
 
     right_totals_table = Table(
         totals_rows,
@@ -970,7 +989,7 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ("LEFTPADDING", (0, 0), (-1, -1), 2),
         ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-        ("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.black),
+        ("LINEABOVE", (0, total_row_idx), (-1, total_row_idx), 0.8, colors.black),
     ]
     right_totals_table.setStyle(TableStyle(totals_table_style))
 
@@ -1190,6 +1209,8 @@ def _render_thermal_pdf(buffer, invoice, tx, org, store, customer, items, paymen
         story.append(Spacer(1, 1 * mm))
         for p in payments:
             story.append(Paragraph(f"{safe_str(p.payment_method.upper())}: ₹{p.amount:,.2f}", t_meta))
+    if tx and getattr(tx, "change_amount", Decimal("0.00")) > Decimal("0.00"):
+        story.append(Paragraph(f"Tendered: ₹{tx.tendered_amount:,.2f} | Change: ₹{tx.change_amount:,.2f}", t_meta))
 
     story.append(Spacer(1, 3 * mm))
     story.append(Paragraph("Thank You! Please Visit Again", t_meta))

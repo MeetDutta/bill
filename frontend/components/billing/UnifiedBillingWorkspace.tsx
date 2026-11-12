@@ -80,11 +80,29 @@ import {
   isEditableEventTarget,
 } from "@/lib/keyboardUtils";
 import { IsolatedReceiptModal } from "@/components/pos/IsolatedReceiptModal";
+import { EmbeddedPaymentPanel } from "@/components/billing/EmbeddedPaymentPanel";
 import {
-  EmbeddedPaymentPanel,
-  PaymentMode,
-  OtherPaymentSubMethod,
-} from "@/components/billing/EmbeddedPaymentPanel";
+  blurAllocationAmount,
+  buildCheckoutPaymentPayload,
+  changeAllocationMethod,
+  computePaymentMetrics,
+  fillAllocationRemaining,
+  formatPaise,
+  fromPaise,
+  getAllocationDisplayLabel,
+  reconcileAllocationsForTotal,
+  removeAllocationRow,
+  selectMethodAllocation,
+  selectSingleMethodAllocation,
+  toPaise,
+  updateAllocationAmount,
+  updateAllocationReference,
+  validateSmartPayments,
+  type AllocationMethod,
+  type OtherPaymentSubMethod,
+  type PaymentAllocation,
+  type PrimaryPaymentMethod,
+} from "@/lib/smartPayment";
 import {
   resolveWhatsAppPresentation,
   isWhatsAppDelivered,
@@ -253,18 +271,10 @@ export default function UnifiedBillingWorkspace({
   // ==========================================
   // 8. EMBEDDED PAYMENT & SETTLEMENT STATE
   // ==========================================
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>(null);
+  const [checkoutActive, setCheckoutActive] = useState(false);
+  const [isSplitMode, setIsSplitMode] = useState(false);
+  const [paymentAllocations, setPaymentAllocations] = useState<PaymentAllocation[]>([]);
   const [otherPaymentMethod, setOtherPaymentMethod] = useState<OtherPaymentSubMethod>("NETBANKING");
-  const [singlePaymentReference, setSinglePaymentReference] = useState("");
-  const [hybridPayments, setHybridPayments] = useState<{ method: string; amount: number; reference?: string }[]>([
-    { method: "CASH", amount: 0 },
-    { method: "UPI", amount: 0 },
-    { method: "CARD", amount: 0 },
-  ]);
-  const [hybridDrafts, setHybridDrafts] = useState<Record<number, string>>({});
-  const [singleAmountDraft, setSingleAmountDraft] = useState<string>("");
-  const [singlePayingAmount, setSinglePayingAmount] = useState<number>(0);
-  const [singleAmountManuallyEdited, setSingleAmountManuallyEdited] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const inFlightCheckoutRef = useRef(false);
@@ -849,18 +859,10 @@ export default function UnifiedBillingWorkspace({
   };
 
   const resetPaymentState = useCallback(() => {
-    setPaymentMode(null);
+    setCheckoutActive(false);
+    setIsSplitMode(false);
+    setPaymentAllocations([]);
     setOtherPaymentMethod("NETBANKING");
-    setSinglePaymentReference("");
-    setSingleAmountDraft("");
-    setSinglePayingAmount(0);
-    setSingleAmountManuallyEdited(false);
-    setHybridDrafts({});
-    setHybridPayments([
-      { method: "CASH", amount: 0 },
-      { method: "UPI", amount: 0 },
-      { method: "CARD", amount: 0 },
-    ]);
     setCheckoutError("");
   }, []);
 
@@ -963,6 +965,9 @@ export default function UnifiedBillingWorkspace({
   };
 
   const handleCheckoutRef = useRef<() => void>(() => {});
+  const handleSelectPaymentMethodRef = useRef<(method: PrimaryPaymentMethod) => void>(() => {});
+  const handleEnableSplitModeRef = useRef<() => void>(() => {});
+  const handleDisableSplitModeRef = useRef<() => void>(() => {});
   const handleBarcodeScannedRef = useRef<
     (code: string, options?: { exactOnly?: boolean; clearSearchOnMatch?: boolean }) => Promise<void>
   >(async () => {});
@@ -970,11 +975,17 @@ export default function UnifiedBillingWorkspace({
   const keyboardStateRef = useRef({
     activeView,
     cartLength: 0,
+    checkoutActive: false,
+    isSplitMode: false,
+    creditSalesEnabled: true,
     hasOpenModal: false,
   });
   keyboardStateRef.current = {
     activeView,
     cartLength: cart.length,
+    checkoutActive,
+    isSplitMode,
+    creditSalesEnabled: config ? config.allow_credit_sales !== false : true,
     hasOpenModal:
       customerModalOpen ||
       quickAddModalOpen ||
@@ -993,17 +1004,29 @@ export default function UnifiedBillingWorkspace({
         return;
       }
 
+      const state = keyboardStateRef.current;
+
       if (key === "Escape") {
         barcodeBufferRef.current = "";
-        setCustomerModalOpen(false);
-        setQuickAddModalOpen(false);
-        setHeldModalOpen(false);
-        setQuoteModalOpen(false);
-        setSelectedInvoice(null);
+        if (state.hasOpenModal) {
+          setCustomerModalOpen(false);
+          setQuickAddModalOpen(false);
+          setHeldModalOpen(false);
+          setQuoteModalOpen(false);
+          setSelectedInvoice(null);
+          return;
+        }
+        if (state.activeView === "new" && state.checkoutActive) {
+          if (state.isSplitMode) {
+            handleDisableSplitModeRef.current();
+          } else {
+            setCheckoutActive(false);
+            setCheckoutError("");
+          }
+        }
         return;
       }
 
-      const state = keyboardStateRef.current;
       if (state.activeView !== "new") {
         barcodeBufferRef.current = "";
         return;
@@ -1014,8 +1037,73 @@ export default function UnifiedBillingWorkspace({
       const isSearchInput = Boolean(searchInputRef.current && target === searchInputRef.current);
       const hasModifier = Boolean(e.ctrlKey || e.metaKey || e.altKey);
 
-      // Function shortcuts only when no modal is open and no modifier is held
-      if (!hasModifier && !state.hasOpenModal) {
+      const blurActiveEditable = () => {
+        if (document.activeElement instanceof HTMLElement && isEditableEventTarget(document.activeElement)) {
+          document.activeElement.blur();
+        }
+      };
+
+      // Payment screen shortcuts when Checkout Payment panel is active
+      if (!hasModifier && !state.hasOpenModal && state.checkoutActive && state.cartLength > 0) {
+        if (key === "F1") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          blurActiveEditable();
+          handleSelectPaymentMethodRef.current("CASH");
+          return;
+        }
+        if (key === "F2") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          blurActiveEditable();
+          handleSelectPaymentMethodRef.current("UPI");
+          return;
+        }
+        if (key === "F3") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          blurActiveEditable();
+          handleSelectPaymentMethodRef.current("CARD");
+          return;
+        }
+        if (key === "F4") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          blurActiveEditable();
+          if (state.creditSalesEnabled) {
+            handleSelectPaymentMethodRef.current("CREDIT");
+          }
+          return;
+        }
+        if (key === "F5") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          blurActiveEditable();
+          handleEnableSplitModeRef.current();
+          return;
+        }
+        if (key === "F8") {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          blurActiveEditable();
+          handleCheckoutRef.current();
+          return;
+        }
+        if (
+          key === "Enter" &&
+          !isEditableTarget &&
+          !(target instanceof HTMLButtonElement) &&
+          !(target instanceof HTMLAnchorElement)
+        ) {
+          e.preventDefault();
+          barcodeBufferRef.current = "";
+          handleCheckoutRef.current();
+          return;
+        }
+      }
+
+      // Cart workspace function shortcuts when not in Payment screen
+      if (!hasModifier && !state.hasOpenModal && !state.checkoutActive) {
         if (key === "F2") {
           e.preventDefault();
           barcodeBufferRef.current = "";
@@ -1042,11 +1130,11 @@ export default function UnifiedBillingWorkspace({
         if (key === "F8") {
           e.preventDefault();
           barcodeBufferRef.current = "";
-          if (document.activeElement instanceof HTMLElement && isEditableEventTarget(document.activeElement)) {
-            document.activeElement.blur();
-          }
+          blurActiveEditable();
           if (state.cartLength > 0) {
-            handleCheckoutRef.current();
+            setCheckoutActive(true);
+            setCheckoutError("");
+            setTimeout(() => firstPaymentMethodRef.current?.focus(), 30);
           }
           return;
         }
@@ -1314,274 +1402,166 @@ export default function UnifiedBillingWorkspace({
     }
   }, [cart.length, resetPaymentState]);
 
-  // Keep single-mode payment amount synchronized to live grandTotal unless manually edited
+  // Keep system-suggested payment allocations synchronized when bill total changes
+  const grandTotalPaise = toPaise(grandTotalNum);
   useEffect(() => {
     if (cart.length === 0) return;
-    if (paymentMode && paymentMode !== "HYBRID" && !singleAmountManuallyEdited) {
-      const synced = roundCurrency(grandTotalNum);
-      setSinglePayingAmount(synced);
-      setSingleAmountDraft(synced > 0 ? synced.toFixed(2) : "");
-    }
-  }, [cart.length, paymentMode, grandTotalNum, singleAmountManuallyEdited]);
+    setPaymentAllocations((prev) => reconcileAllocationsForTotal(prev, grandTotalPaise));
+  }, [cart.length, grandTotalPaise]);
 
-  const resolveActivePaymentLines = (
-    mode: PaymentMode,
-    effectiveTotal: number,
-    manualOverride = singleAmountManuallyEdited
-  ): { method: string; amount: number; reference?: string }[] => {
-    if (mode === null) return [];
-    if (mode === "HYBRID") {
-      return hybridPayments
-        .filter((p) => Number(p.amount) > 0)
-        .map((p) => ({
-          method: p.method,
-          amount: roundCurrency(Number(p.amount)),
-          reference: p.reference,
-        }));
-    }
-    const singleAmt = manualOverride ? roundCurrency(Number(singlePayingAmount) || 0) : roundCurrency(effectiveTotal);
-    const resolvedMethod = mode === "OTHER" ? otherPaymentMethod : mode;
-    return singleAmt > 0
-      ? [{ method: resolvedMethod, amount: singleAmt, reference: singlePaymentReference || undefined }]
-      : [];
-  };
+  const paymentMetrics = computePaymentMetrics(paymentAllocations, grandTotalPaise);
+  const paymentValidationMessage =
+    cart.length === 0
+      ? null
+      : validateSmartPayments(paymentAllocations, grandTotalPaise, {
+          creditSalesEnabled,
+          isWalkIn,
+          selectedCustomer,
+        });
 
-  // Derived active payment allocations for validation & checkout payload
-  const activePaymentLines = resolveActivePaymentLines(paymentMode, grandTotalNum, singleAmountManuallyEdited);
-
-  const totalPaidSoFar = roundCurrency(
-    activePaymentLines.reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
-  );
-  const cashPaidTotal = roundCurrency(
-    activePaymentLines
-      .filter((p) => p.method === "CASH")
-      .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
-  );
-  const creditRequestedTotal = roundCurrency(
-    activePaymentLines
-      .filter((p) => p.method === "CREDIT")
-      .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
-  );
-  const usesCredit = creditRequestedTotal > 0;
-  const remainingDue = Math.max(0, roundCurrency(grandTotalNum - totalPaidSoFar));
-  const rawOverpayment = totalPaidSoFar > grandTotalNum ? roundCurrency(totalPaidSoFar - grandTotalNum) : 0;
-  const isElectronicOverpay = rawOverpayment > 0.009 && cashPaidTotal < rawOverpayment - 0.009;
-  const cashChange = rawOverpayment > 0 && !isElectronicOverpay ? rawOverpayment : 0;
-
-  const hasInvalidDraftPrecision = (raw: string) => {
-    const trimmed = raw.trim();
-    if (!trimmed) return false;
-    return !/^\d*(\.\d{0,2})?$/.test(trimmed);
-  };
-
-  const validatePaymentState = (
-    mode: PaymentMode,
-    effectiveTotal: number,
-    lines: { method: string; amount: number; reference?: string }[]
-  ): string | null => {
-    if (cart.length === 0 || mode === null) return null;
-
-    if (mode !== "HYBRID" && singleAmountDraft.trim() !== "") {
-      const parsedDraft = Number(singleAmountDraft);
-      if (!Number.isFinite(parsedDraft) || parsedDraft < 0) {
-        return "Enter a valid payment amount.";
-      }
-      if (hasInvalidDraftPrecision(singleAmountDraft)) {
-        return "Payment amount supports at most 2 decimal places.";
-      }
-    }
-
-    if (mode === "HYBRID") {
-      for (const draft of Object.values(hybridDrafts)) {
-        if (draft.trim() !== "") {
-          const parsed = Number(draft);
-          if (!Number.isFinite(parsed) || parsed < 0) {
-            return "Enter valid non-negative amounts for split payments.";
-          }
-          if (hasInvalidDraftPrecision(draft)) {
-            return "Split payment amounts support at most 2 decimal places.";
-          }
-        }
-      }
-    }
-
-    const totalPaid = roundCurrency(lines.reduce((acc, p) => acc + (Number(p.amount) || 0), 0));
-    const cashPaid = roundCurrency(
-      lines.filter((p) => p.method === "CASH").reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
-    );
-    const creditTotal = roundCurrency(
-      lines.filter((p) => p.method === "CREDIT").reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
-    );
-
-    if (effectiveTotal > 0 && lines.length === 0) {
-      return "Enter a valid payment amount greater than ₹0.00.";
-    }
-
-    if (creditTotal > 0) {
-      if (!creditSalesEnabled) {
-        return "Credit / Udhaar sales are disabled in business settings.";
-      }
-      if (isWalkIn || !selectedCustomer) {
-        return "Walk-in customers cannot take Credit sales. Select a registered customer first.";
-      }
-      const creditLimit = Number(selectedCustomer.credit_limit || 0);
-      if (creditLimit > 0) {
-        const projectedOutstanding = roundCurrency(
-          Number(selectedCustomer.outstanding_credit || 0) + creditTotal
-        );
-        if (projectedOutstanding > creditLimit) {
-          return `Customer credit limit of ₹${creditLimit.toFixed(2)} exceeded (Current due: ₹${Number(
-            selectedCustomer.outstanding_credit || 0
-          ).toFixed(2)}).`;
-        }
-      }
-    }
-
-    const overpay = totalPaid > effectiveTotal ? roundCurrency(totalPaid - effectiveTotal) : 0;
-    if (overpay > 0.009 && cashPaid < overpay - 0.009) {
-      return `Overpayment of ₹${overpay.toFixed(2)} is only permitted in Cash. Electronic payments cannot exceed ₹${effectiveTotal.toFixed(2)}.`;
-    }
-
-    if (totalPaid < effectiveTotal - 0.009) {
-      const due = Math.max(0, roundCurrency(effectiveTotal - totalPaid));
-      return mode === "HYBRID"
-        ? `Split total (₹${totalPaid.toFixed(2)}) must equal ₹${effectiveTotal.toFixed(2)}. Remaining: ₹${due.toFixed(2)}.`
-        : `Paid amount (₹${totalPaid.toFixed(2)}) is less than bill total (₹${effectiveTotal.toFixed(2)}). Remaining: ₹${due.toFixed(2)}.`;
-    }
-
-    return null;
-  };
-
-  const paymentValidationMessage = validatePaymentState(paymentMode, grandTotalNum, activePaymentLines);
-
-  const selectPaymentMode = (mode: Exclude<PaymentMode, null>) => {
+  const handleSelectPaymentMethod = (method: PrimaryPaymentMethod) => {
     checkoutIdempotencyKeyRef.current = "";
     setCheckoutError("");
-    setPaymentMode(mode);
-    if (mode !== "HYBRID") {
-      setSingleAmountManuallyEdited(false);
-      const payable = roundCurrency(grandTotalNum);
-      setSinglePayingAmount(payable);
-      setSingleAmountDraft(payable > 0 ? payable.toFixed(2) : "");
-    } else {
-      setHybridDrafts({});
-      setHybridPayments((prev) => {
-        const hasPositive = prev.some((p) => p.amount > 0);
-        if (hasPositive) return prev;
-        return [
-          { method: "CASH", amount: roundCurrency(grandTotalNum) },
-          { method: "UPI", amount: 0 },
-          { method: "CARD", amount: 0 },
-        ];
-      });
-    }
-  };
+    const targetMethod: AllocationMethod =
+      method === "OTHER" ? otherPaymentMethod : method;
 
-  const handleSingleAmountChange = (raw: string) => {
-    if (raw.trim().startsWith("-")) return;
-    checkoutIdempotencyKeyRef.current = "";
-    setSingleAmountManuallyEdited(true);
-    setSingleAmountDraft(raw);
-    const num = raw.trim() === "" ? 0 : Number(raw);
-    if (Number.isFinite(num) && num >= 0) {
-      setSinglePayingAmount(roundCurrency(num));
-    }
-    setCheckoutError("");
-  };
-
-  const handleSingleAmountBlur = () => {
-    if (singleAmountDraft.trim() === "") {
-      setSinglePayingAmount(0);
+    if (!isSplitMode) {
+      const next = selectSingleMethodAllocation(targetMethod, grandTotalPaise);
+      setPaymentAllocations(next);
+      if (targetMethod === "CASH" && next[0]?.id) {
+        const cashId = next[0].id;
+        setTimeout(() => {
+          const el = document.getElementById(`payment-amount-${cashId}`) as HTMLInputElement | null;
+          el?.focus();
+          el?.select();
+        }, 20);
+      }
       return;
     }
-    const num = Number(singleAmountDraft);
-    if (Number.isFinite(num) && num >= 0) {
-      const rounded = roundCurrency(num);
-      setSinglePayingAmount(rounded);
-      setSingleAmountDraft(rounded.toFixed(2));
-    }
-  };
 
-  const setExactSingleAmount = () => {
+    setPaymentAllocations((prev) => {
+      const { allocations, focusedId } = selectMethodAllocation(
+        prev,
+        targetMethod,
+        grandTotalPaise
+      );
+      if (focusedId && targetMethod === "CASH") {
+        setTimeout(() => {
+          const el = document.getElementById(`payment-amount-${focusedId}`) as HTMLInputElement | null;
+          el?.focus();
+          el?.select();
+        }, 20);
+      }
+      return allocations;
+    });
+  };
+  handleSelectPaymentMethodRef.current = handleSelectPaymentMethod;
+
+  const handleEnableSplitMode = () => {
     checkoutIdempotencyKeyRef.current = "";
-    const rounded = roundCurrency(grandTotalNum);
-    setSingleAmountManuallyEdited(false);
-    setSinglePayingAmount(rounded);
-    setSingleAmountDraft(rounded > 0 ? rounded.toFixed(2) : "");
     setCheckoutError("");
+    setIsSplitMode(true);
+    setPaymentAllocations((prev) => {
+      if (prev.length === 0) {
+        return selectSingleMethodAllocation("CASH", grandTotalPaise);
+      }
+      return prev;
+    });
   };
+  handleEnableSplitModeRef.current = handleEnableSplitMode;
 
-  const setQuickCashTender = (tenderedAmount: number) => {
+  const handleDisableSplitMode = () => {
     checkoutIdempotencyKeyRef.current = "";
-    const rounded = roundCurrency(tenderedAmount);
-    setSingleAmountManuallyEdited(true);
-    setSinglePayingAmount(rounded);
-    setSingleAmountDraft(rounded.toFixed(2));
     setCheckoutError("");
+    setIsSplitMode(false);
+    setPaymentAllocations((prev) => {
+      if (prev.length === 0) return [];
+      return selectSingleMethodAllocation(prev[0].method, grandTotalPaise);
+    });
+  };
+  handleDisableSplitModeRef.current = handleDisableSplitMode;
+
+  const handleAddSplitAllocation = () => {
+    checkoutIdempotencyKeyRef.current = "";
+    setCheckoutError("");
+    const candidates: AllocationMethod[] = [
+      "CASH",
+      "UPI",
+      "CARD",
+      ...(creditSalesEnabled ? (["CREDIT"] as AllocationMethod[]) : []),
+      otherPaymentMethod,
+    ];
+    setPaymentAllocations((prev) => {
+      const used = new Set(prev.map((a) => a.method));
+      const nextMethod = candidates.find((m) => !used.has(m)) || "CASH";
+      return selectMethodAllocation(prev, nextMethod, grandTotalPaise).allocations;
+    });
   };
 
-  const updateHybridPaymentMethod = (index: number, newMethod: string) => {
+  const handleResetPaymentSelection = () => {
     checkoutIdempotencyKeyRef.current = "";
-    setHybridPayments((prev) => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], method: newMethod };
-      return updated;
+    setCheckoutError("");
+    setPaymentAllocations([]);
+  };
+
+  const handleChangeOtherMethod = (subMethod: OtherPaymentSubMethod) => {
+    checkoutIdempotencyKeyRef.current = "";
+    setOtherPaymentMethod(subMethod);
+    setPaymentAllocations((prev) => {
+      const hasOtherRow = prev.some(
+        (a) => a.method === "NETBANKING" || a.method === "CHEQUE" || a.method === "WALLET"
+      );
+      if (!hasOtherRow) return prev;
+      return prev.map((a) =>
+        a.method === "NETBANKING" || a.method === "CHEQUE" || a.method === "WALLET"
+          ? { ...a, method: subMethod }
+          : a
+      );
     });
     setCheckoutError("");
   };
 
-  const updateHybridPaymentAmount = (index: number, raw: string) => {
+  const handleAllocationMethodChange = (id: string, method: AllocationMethod) => {
+    checkoutIdempotencyKeyRef.current = "";
+    setPaymentAllocations((prev) => changeAllocationMethod(prev, id, method));
+    setCheckoutError("");
+  };
+
+  const handleAllocationAmountChange = (id: string, raw: string) => {
     if (raw.trim().startsWith("-")) return;
     checkoutIdempotencyKeyRef.current = "";
-    setHybridDrafts((prev) => ({ ...prev, [index]: raw }));
-    const parsed = raw.trim() === "" ? 0 : Number(raw);
-    if (!Number.isFinite(parsed) || parsed < 0) return;
-    setHybridPayments((prev) => {
-      const updated = [...prev];
-      if (!updated[index]) return prev;
-      updated[index] = { ...updated[index], amount: roundCurrency(parsed) };
-      return updated;
-    });
+    setPaymentAllocations((prev) =>
+      updateAllocationAmount(prev, id, raw, grandTotalPaise, { markManual: true })
+    );
     setCheckoutError("");
   };
 
-  const blurHybridPaymentAmount = (index: number) => {
-    setHybridDrafts((prev) => {
-      const next = { ...prev };
-      delete next[index];
-      return next;
-    });
+  const handleAllocationAmountBlur = (id: string) => {
+    setPaymentAllocations((prev) => blurAllocationAmount(prev, id));
   };
 
-  const fillHybridRemaining = (index: number) => {
+  const handleAllocationReferenceChange = (id: string, reference: string) => {
+    setPaymentAllocations((prev) => updateAllocationReference(prev, id, reference));
+  };
+
+  const handleFillRemainingAllocation = (id: string) => {
     checkoutIdempotencyKeyRef.current = "";
-    const currentLineAmt = Number(hybridPayments[index]?.amount) || 0;
-    const otherPaid = totalPaidSoFar - currentLineAmt;
-    const fillAmt = Math.max(0, roundCurrency(grandTotalNum - otherPaid));
-    setHybridDrafts((prev) => {
-      const next = { ...prev };
-      delete next[index];
-      return next;
-    });
-    setHybridPayments((prev) => {
-      const updated = [...prev];
-      if (!updated[index]) return prev;
-      updated[index] = { ...updated[index], amount: fillAmt };
-      return updated;
-    });
+    setPaymentAllocations((prev) => fillAllocationRemaining(prev, id, grandTotalPaise));
     setCheckoutError("");
   };
 
-  const addHybridPaymentRow = (method = "NETBANKING") => {
+  const handleQuickCashAllocation = (id: string, amountRupees: number) => {
     checkoutIdempotencyKeyRef.current = "";
-    setHybridPayments((prev) => [...prev, { method, amount: remainingDue > 0 ? remainingDue : 0 }]);
+    const formatted = Math.max(0, amountRupees).toFixed(2);
+    setPaymentAllocations((prev) =>
+      updateAllocationAmount(prev, id, formatted, grandTotalPaise, { markManual: true })
+    );
     setCheckoutError("");
   };
 
-  const removeHybridPaymentRow = (index: number) => {
+  const handleRemoveAllocation = (id: string) => {
     checkoutIdempotencyKeyRef.current = "";
-    setHybridDrafts({});
-    setHybridPayments((prev) => prev.filter((_, i) => i !== index));
+    setPaymentAllocations((prev) => removeAllocationRow(prev, id));
     setCheckoutError("");
   };
 
@@ -1602,7 +1582,7 @@ export default function UnifiedBillingWorkspace({
       return;
     }
 
-    if (paymentMode === null) {
+    if (paymentAllocations.length === 0) {
       setCheckoutError("Please select a payment method to complete the sale.");
       paymentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       firstPaymentMethodRef.current?.focus();
@@ -1610,19 +1590,25 @@ export default function UnifiedBillingWorkspace({
     }
 
     let effectiveTotal = grandTotalNum;
+    let effectiveAllocations = paymentAllocations;
     if (!isCalcSynced) {
       const synced = await calculateCartImmediate();
       if (synced && synced.grand_total !== undefined) {
         effectiveTotal = Number(synced.grand_total);
+        effectiveAllocations = reconcileAllocationsForTotal(
+          paymentAllocations,
+          toPaise(effectiveTotal)
+        );
+        setPaymentAllocations(effectiveAllocations);
       }
     }
 
-    const effectiveLines = resolveActivePaymentLines(
-      paymentMode,
-      effectiveTotal,
-      singleAmountManuallyEdited
-    );
-    const validationErr = validatePaymentState(paymentMode, effectiveTotal, effectiveLines);
+    const effectiveTotalPaise = toPaise(effectiveTotal);
+    const validationErr = validateSmartPayments(effectiveAllocations, effectiveTotalPaise, {
+      creditSalesEnabled,
+      isWalkIn,
+      selectedCustomer,
+    });
     if (validationErr) {
       setCheckoutError(validationErr);
       paymentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1638,14 +1624,10 @@ export default function UnifiedBillingWorkspace({
     setCheckoutError("");
 
     try {
-      const payloadPayments =
-        effectiveLines.length > 0
-          ? effectiveLines.map((p) => ({
-              payment_method: p.method.toLowerCase(),
-              amount: p.amount,
-              reference: p.reference,
-            }))
-          : [{ payment_method: "cash", amount: 0 }];
+      const payloadPayments = buildCheckoutPaymentPayload(effectiveAllocations);
+      if (payloadPayments.length === 0) {
+        payloadPayments.push({ payment_method: "cash", amount: 0 });
+      }
 
       const payload: any = {
         store_id: selectedStoreId || undefined,
@@ -1958,10 +1940,11 @@ export default function UnifiedBillingWorkspace({
     (config?.gstin
       ? `${(config.trade_name || "shop").replace(/\s+/g, "").toLowerCase()}@upi`
       : "billmeet@upi");
+  const upiQrAmountPaise = paymentAllocations
+    .filter((p) => p.method === "UPI")
+    .reduce((sum, p) => sum + p.amountPaise, 0);
   const upiQrAmount =
-    paymentMode === "HYBRID"
-      ? hybridPayments.filter((p) => p.method === "UPI").reduce((s, p) => s + (Number(p.amount) || 0), 0) || grandTotalNum
-      : grandTotalNum;
+    upiQrAmountPaise > 0 ? fromPaise(upiQrAmountPaise) : grandTotalNum;
   const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(config?.trade_name || "BillMeet Store")}&am=${upiQrAmount.toFixed(2)}&cu=INR&tn=Invoice%20Bill`;
 
   // History KPI metrics
@@ -2392,10 +2375,158 @@ export default function UnifiedBillingWorkspace({
               </div>
             </div>
 
-            {/* Right Side: Mobile-First Customer Identification, Cart, Calculations, and Embedded Payment */}
+            {/* Right Side: Two-Step Fast Cashier Checkout (Cart & Bill Builder <-> Clean Payment Screen) */}
             <div className="flex flex-col rounded-lg border bg-card p-3 shadow-xs md:col-span-6 lg:col-span-5 md:overflow-hidden min-h-0">
-              {/* Step 1: Mobile-First Inline Customer Identification */}
-              <div ref={customerSectionRef} className="border-b pb-2.5 shrink-0 space-y-2">
+              {checkoutActive && cart.length > 0 ? (
+                <div className="flex flex-col h-full min-h-0 gap-2.5">
+                  {/* Payment Screen Header */}
+                  <div className="flex items-center justify-between gap-2 pb-2 border-b shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCheckoutActive(false);
+                        setCheckoutError("");
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      <span>Back to Cart</span>
+                      <span className="text-[10px] font-mono opacity-75">(Esc)</span>
+                    </button>
+                    <div className="text-right">
+                      <span className="text-[11px] font-semibold text-muted-foreground">
+                        {cart.reduce((sum, item) => sum + item.quantity, 0)} items
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Compact Customer Confirmation Bar */}
+                  <div className="shrink-0">
+                    {customerSelectionMode === "unselected" || customerSelectionMode === "not_found" ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50/80 px-2.5 py-2 text-xs">
+                        <span className="font-semibold text-amber-900">
+                          Customer not set yet
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleSelectWalkIn}
+                            className="h-7 text-[11px] font-bold bg-white hover:bg-amber-100 border-amber-300 text-amber-900"
+                          >
+                            Walk-in
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => setCustomerModalOpen(true)}
+                            className="h-7 text-[11px] font-bold"
+                          >
+                            Select Customer
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/40 px-2.5 py-1.5 text-xs">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <User className="h-3.5 w-3.5 text-primary shrink-0" />
+                          <span className="font-bold truncate">
+                            {isWalkIn ? "Walk-in Customer" : selectedCustomer?.full_name || "Customer"}
+                          </span>
+                          {!isWalkIn && selectedCustomer?.phone && (
+                            <span className="text-[11px] font-mono text-muted-foreground shrink-0">
+                              · {selectedCustomer.phone}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCustomerModalOpen(true)}
+                          className="text-[11px] font-semibold text-primary hover:underline shrink-0 cursor-pointer"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Focused Single-or-Split Payment Panel */}
+                  <div className="flex-1 md:overflow-y-auto min-h-0 pr-0.5">
+                    <EmbeddedPaymentPanel
+                      cartLength={cart.length}
+                      allocations={paymentAllocations}
+                      metrics={paymentMetrics}
+                      isSplitMode={isSplitMode}
+                      otherPaymentMethod={otherPaymentMethod}
+                      isWalkIn={isWalkIn}
+                      selectedCustomer={selectedCustomer}
+                      creditSalesEnabled={creditSalesEnabled}
+                      upiId={upiId}
+                      upiUrl={upiUrl}
+                      upiQrAmount={upiQrAmount}
+                      validationMessage={paymentValidationMessage}
+                      checkoutError={checkoutError}
+                      containerRef={paymentSectionRef}
+                      firstMethodButtonRef={firstPaymentMethodRef}
+                      onSelectMethod={handleSelectPaymentMethod}
+                      onEnableSplitMode={handleEnableSplitMode}
+                      onDisableSplitMode={handleDisableSplitMode}
+                      onAddSplitAllocation={handleAddSplitAllocation}
+                      onResetSelection={handleResetPaymentSelection}
+                      onChangeOtherMethod={handleChangeOtherMethod}
+                      onChangeAllocationMethod={handleAllocationMethodChange}
+                      onChangeAllocationAmount={handleAllocationAmountChange}
+                      onBlurAllocationAmount={handleAllocationAmountBlur}
+                      onChangeAllocationReference={handleAllocationReferenceChange}
+                      onFillRemaining={handleFillRemainingAllocation}
+                      onQuickCash={handleQuickCashAllocation}
+                      onRemoveAllocation={handleRemoveAllocation}
+                      onOpenCustomerModal={() => setCustomerModalOpen(true)}
+                    />
+                  </div>
+
+                  {/* Payment Completion Footer */}
+                  <div className="border-t pt-2.5 space-y-2 shrink-0 bg-card">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleCheckout}
+                      disabled={
+                        cart.length === 0 ||
+                        checkoutLoading ||
+                        customerSelectionMode === "unselected" ||
+                        customerSelectionMode === "not_found" ||
+                        paymentAllocations.length === 0 ||
+                        Boolean(paymentValidationMessage)
+                      }
+                      className="w-full h-11 text-sm font-black bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+                    >
+                      {checkoutLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      )}
+                      <span>
+                        {checkoutLoading
+                          ? "Completing Sale..."
+                          : customerSelectionMode === "unselected" || customerSelectionMode === "not_found"
+                            ? "Select Customer or Walk-in Above"
+                            : paymentAllocations.length === 0
+                              ? "Select Payment Method Above"
+                              : !isSplitMode && paymentAllocations.length === 1
+                                ? paymentAllocations[0].method === "CREDIT"
+                                  ? `Complete Credit Sale · ₹${grandTotalNum.toFixed(2)}`
+                                  : `Complete ${getAllocationDisplayLabel(paymentAllocations[0].method)} Payment · ₹${grandTotalNum.toFixed(2)}`
+                                : `Complete Split Payment · ₹${grandTotalNum.toFixed(2)}`}
+                      </span>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Step 1: Mobile-First Inline Customer Identification */}
+                  <div ref={customerSectionRef} className="border-b pb-2.5 shrink-0 space-y-2">
                 {customerSelectionMode === "unselected" && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
@@ -2956,91 +3087,28 @@ export default function UnifiedBillingWorkspace({
                       </span>
                     </div>
                   </div>
-
-                  {/* Direct Embedded Payment Section (replaces payment popup modal) */}
-                  <EmbeddedPaymentPanel
-                    cartLength={cart.length}
-                    grandTotal={grandTotalNum}
-                    isWalkIn={isWalkIn}
-                    selectedCustomer={selectedCustomer}
-                    creditSalesEnabled={creditSalesEnabled}
-                    paymentMode={paymentMode}
-                    otherPaymentMethod={otherPaymentMethod}
-                    singleAmountDraft={singleAmountDraft}
-                    singlePayingAmount={singlePayingAmount}
-                    singlePaymentReference={singlePaymentReference}
-                    hybridPayments={hybridPayments}
-                    hybridDrafts={hybridDrafts}
-                    upiId={upiId}
-                    upiUrl={upiUrl}
-                    upiQrAmount={upiQrAmount}
-                    totalPaidSoFar={totalPaidSoFar}
-                    remainingDue={remainingDue}
-                    cashChange={cashChange}
-                    isElectronicOverpay={isElectronicOverpay}
-                    usesCredit={usesCredit}
-                    validationMessage={paymentValidationMessage}
-                    checkoutError={checkoutError}
-                    containerRef={paymentSectionRef}
-                    firstMethodButtonRef={firstPaymentMethodRef}
-                    onSelectPaymentMode={selectPaymentMode}
-                    onChangeOtherMethod={(m) => {
-                      checkoutIdempotencyKeyRef.current = "";
-                      setOtherPaymentMethod(m);
-                      setCheckoutError("");
-                    }}
-                    onSingleAmountChange={handleSingleAmountChange}
-                    onSingleAmountBlur={handleSingleAmountBlur}
-                    onSetExactAmount={setExactSingleAmount}
-                    onSetQuickCash={setQuickCashTender}
-                    onChangeSingleReference={setSinglePaymentReference}
-                    onUpdateHybridMethod={updateHybridPaymentMethod}
-                    onUpdateHybridAmount={updateHybridPaymentAmount}
-                    onBlurHybridAmount={blurHybridPaymentAmount}
-                    onUpdateHybridReference={(idx, val) =>
-                      setHybridPayments((prev) =>
-                        prev.map((row, i) => (i === idx ? { ...row, reference: val } : row))
-                      )
-                    }
-                    onFillHybridRemaining={fillHybridRemaining}
-                    onAddHybridRow={() => addHybridPaymentRow("NETBANKING")}
-                    onRemoveHybridRow={removeHybridPaymentRow}
-                    onOpenCustomerModal={() => setCustomerModalOpen(true)}
-                  />
                 </div>
               </div>
 
-              {/* Sticky Checkout Action Footer */}
+              {/* Sticky Cart Checkout Entry Footer */}
               <div className="border-t pt-2.5 space-y-2 shrink-0 bg-card">
                 <Button
                   type="button"
                   size="sm"
-                  onClick={handleCheckout}
-                  disabled={
-                    cart.length === 0 ||
-                    checkoutLoading ||
-                    customerSelectionMode === "unselected" ||
-                    customerSelectionMode === "not_found" ||
-                    paymentMode === null ||
-                    Boolean(paymentValidationMessage)
-                  }
-                  className="w-full h-10 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+                  onClick={() => {
+                    if (cart.length === 0) return;
+                    setCheckoutError("");
+                    setCheckoutActive(true);
+                    setTimeout(() => firstPaymentMethodRef.current?.focus(), 30);
+                  }}
+                  disabled={cart.length === 0 || checkoutLoading}
+                  className="w-full h-11 text-sm font-black bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-sm cursor-pointer disabled:opacity-50"
                 >
-                  {checkoutLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  )}
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
                   <span>
-                    {checkoutLoading
-                      ? "Completing Sale..."
-                      : cart.length === 0
-                        ? "Add Products to Complete Sale"
-                        : customerSelectionMode === "unselected" || customerSelectionMode === "not_found"
-                          ? "Identify Customer or Choose Walk-in"
-                          : paymentMode === null
-                            ? "Select Payment Method to Complete Sale"
-                            : `Complete Sale (₹${grandTotalNum.toFixed(2)}) · F8`}
+                    {cart.length === 0
+                      ? "Add Products to Checkout"
+                      : `Checkout · ₹${grandTotalNum.toFixed(2)} (F8)`}
                   </span>
                 </Button>
 
@@ -3083,6 +3151,8 @@ export default function UnifiedBillingWorkspace({
                   </Button>
                 </div>
               </div>
+                </>
+              )}
             </div>
           </div>
         </div>

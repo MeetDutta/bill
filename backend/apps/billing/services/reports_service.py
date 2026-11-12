@@ -1,6 +1,6 @@
 from datetime import datetime, time
 from decimal import Decimal
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 from django.utils import timezone
 
 from apps.transactions.models import Transaction, TransactionItem, TransactionPayment, SalesReturn, CustomerCreditPayment
@@ -75,7 +75,10 @@ class ReportsService:
         if store_id:
             qs = qs.filter(store_id=store_id)
         if payment_method:
-            qs = qs.filter(payment_method=payment_method)
+            qs = qs.filter(
+                Q(payment_method__iexact=payment_method)
+                | Q(payments__payment_method__iexact=payment_method)
+            ).distinct()
 
         aggregates = qs.aggregate(
             total_sales=Sum("total"),

@@ -193,6 +193,22 @@ class ReturnService:
                 if active_register:
                     active_register.record_refund(total_refund_amount)
 
+        try:
+            from .realtime_service import RealtimeService
+            RealtimeService.publish_event(
+                organization=organization,
+                store=original_tx.store,
+                event_type="sale_return",
+                payload={
+                    "return_id": str(sales_return.id),
+                    "return_number": sales_return.return_number,
+                    "customer_id": str(original_tx.customer.id) if original_tx.customer else None,
+                    "refund_amount": str(total_refund_amount),
+                },
+            )
+        except Exception:
+            pass
+
         return {
             "id": str(sales_return.id),
             "return_number": sales_return.return_number,

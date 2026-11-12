@@ -74,13 +74,13 @@ class StaffOverviewView(StaffBaseView):
             status="success",
         ).exclude(payment_method__iexact="credit").aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
-        # Sales by payment method today for this staff member
+        # Sales by payment method today for this staff member (collected monetary payments)
         pm_qs = TransactionPayment.objects.filter(
             organization=org,
             transaction__cashier=user,
             created_at__gte=today_start,
             status="success",
-        ).values("payment_method").annotate(
+        ).exclude(payment_method__iexact="credit").values("payment_method").annotate(
             total=Sum("amount"),
             count=Count("id"),
         ).order_by("-total")
@@ -344,14 +344,14 @@ class StaffSalesProfileView(StaffBaseView):
             status="success",
         ).exclude(payment_method__iexact="credit").aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
-        # Breakdown by payment method
+        # Breakdown by payment method (collected monetary payments)
         pm_qs = TransactionPayment.objects.filter(
             organization=org,
             transaction__cashier=user,
             created_at__gte=start_dt,
             created_at__lte=end_dt,
             status="success",
-        ).values("payment_method").annotate(
+        ).exclude(payment_method__iexact="credit").values("payment_method").annotate(
             total=Sum("amount"),
             count=Count("id"),
         ).order_by("-total")
