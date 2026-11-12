@@ -106,9 +106,10 @@ export function IsolatedReceiptModal({
   if (!saleData) return null;
 
   // Normalize data for printing
+  const custData = saleData.customer || saleData.customer_snapshot || null;
   const invoiceNumber = saleData.invoice_number || saleData.invoice?.invoice_number || "INV-000";
-  const customerName = saleData.customer?.name || saleData.customer?.full_name || "Walk-in Customer";
-  const customerPhone = saleData.customer?.phone || "";
+  const customerName = custData?.name || custData?.full_name || "Walk-in Customer";
+  const customerPhone = custData?.phone || custData?.mobile || "";
   const total = Number(saleData.total || 0);
   const subtotal = Number(saleData.subtotal || 0);
   const discount = Number(saleData.discount || 0);
@@ -125,8 +126,8 @@ export function IsolatedReceiptModal({
     (saleData.invoice?.invoice_type || saleData.invoice_type) !== "non_gst"
   );
   const sellerState = saleData.seller?.state || config?.state || "Maharashtra";
-  const customerState = saleData.customer?.state || "";
-  const placeOfSupply = resolvePlaceOfSupply(customerState || sellerState, saleData.customer?.gstin || config?.gstin);
+  const customerState = custData?.state || "";
+  const placeOfSupply = resolvePlaceOfSupply(customerState || sellerState, custData?.gstin || config?.gstin);
 
   const printPayload: PrintReceiptData = {
     invoice_id: invoiceId,
@@ -170,16 +171,16 @@ export function IsolatedReceiptModal({
       signature_url: saleData.seller?.signature_url || config?.signature_url || config?.signature_image || undefined,
       invoice_elements: saleData.seller?.invoice_elements || config?.invoice_elements || {},
     },
-    customer: saleData.customer ? {
+    customer: custData ? {
       name: customerName,
       full_name: customerName,
       phone: customerPhone,
-      gstin: saleData.customer?.gstin || "",
-      address: saleData.customer?.address || "",
-      city: saleData.customer?.city || "",
-      state: saleData.customer?.state || "",
-      pincode: saleData.customer?.postal_code || saleData.customer?.pincode || "",
-      is_walk_in: saleData.customer?.is_walk_in ?? (!saleData.customer?.phone),
+      gstin: custData?.gstin || "",
+      address: custData?.address_line1 || custData?.address || "",
+      city: custData?.city || "",
+      state: custData?.state || "",
+      pincode: custData?.postal_code || custData?.pincode || "",
+      is_walk_in: custData?.is_walk_in ?? (!custData?.phone),
     } : null,
     cashier_name: saleData.cashier || "Staff",
     store_name: saleData.store?.name || "Main Counter",

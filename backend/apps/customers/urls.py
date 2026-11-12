@@ -13,6 +13,8 @@ from apps.analytics.views import (
 
 urlpatterns = [
     path("", views.CustomerListView.as_view(), name="customer-list"),
+    path("by-mobile/", views.CustomerByMobileView.as_view(), name="customer-by-mobile-query"),
+    path("by-mobile/<str:mobile_number>/", views.CustomerByMobileView.as_view(), name="customer-by-mobile"),
     path("<uuid:pk>/", views.CustomerDetailView.as_view(), name="customer-detail"),
     path("<uuid:pk>/timeline/", views.CustomerTimelineView.as_view(), name="customer-timeline"),
     path("<uuid:pk>/health/", CustomerHealthDetailView.as_view(), name="customer-health"),

@@ -272,58 +272,82 @@ class CheckoutService:
         grand_total = cart_calc["grand_total"]
 
         # 6. Customer Identification
+        from apps.customers.utils import validate_mobile_number
+
         customer_info = cart_data.get("customer") or {}
         customer = None
         customer_id = customer_info.get("id") or cart_data.get("customer_id")
         if customer_id:
             customer = Customer.objects.filter(organization=organization, id=customer_id).first()
+            if not customer:
+                raise ValidationError("Selected customer was not found for this business.")
 
-        is_walk_in = cart_data.get("is_walk_in", False)
-        if not customer:
-            if is_walk_in or not bool(customer_info.get("phone")):
+        explicit_is_walk_in = cart_data.get("is_walk_in", None)
+        has_phone_input = bool(
+            str(customer_info.get("phone") or customer_info.get("mobile_number") or "").strip()
+        )
+
+        if customer is not None:
+            if customer.is_walk_in:
                 is_walk_in = True
+                customer = None
             else:
                 is_walk_in = False
+        elif explicit_is_walk_in is True:
+            is_walk_in = True
+        elif has_phone_input:
+            is_walk_in = False
+        elif explicit_is_walk_in is False:
+            raise ValidationError("Please identify a customer by mobile number or explicitly select Walk-in Customer.")
+        else:
+            # Backward-compatible default when legacy callers omit both is_walk_in and customer
+            is_walk_in = True
 
         if is_walk_in:
-            # Walk-in customer strategy: Single tenant-scoped walk-in record or null
             if config.require_customer:
                 raise ValidationError("Customer information is required for this business.")
-            customer = Customer.objects.filter(organization=organization, is_walk_in=True).first()
-            if not customer:
-                try:
-                    customer = Customer.objects.create(
-                        organization=organization,
-                        customer_id=f"WALKIN-{secrets.token_hex(4).upper()}",
-                        first_name="Walk-in",
-                        last_name="Customer",
-                        phone=f"walkin-{organization.id.hex[:6]}",
-                        is_walk_in=True,
-                        source="pos",
-                    )
-                except IntegrityError:
-                    customer = Customer.objects.filter(organization=organization, is_walk_in=True).first()
+            customer = None
         elif not customer:
-            raw_phone = customer_info.get("phone", "")
-            phone = normalize_phone(raw_phone)
-            if not phone:
-                raise ValidationError("A valid customer phone number is required.")
+            raw_phone = str(customer_info.get("phone") or customer_info.get("mobile_number") or "").strip()
+            valid_phone, phone, phone_err = validate_mobile_number(raw_phone)
+            if not valid_phone:
+                raise ValidationError({"customer": phone_err or "A valid customer phone number is required."})
+
+            raw_name = str(
+                customer_info.get("full_name")
+                or customer_info.get("name")
+                or ""
+            ).strip()
+            name_parts = raw_name.split() if raw_name else []
+            first_name = str(customer_info.get("first_name") or (name_parts[0] if name_parts else "Customer")).strip()
+            last_name = str(customer_info.get("last_name") or (" ".join(name_parts[1:]) if len(name_parts) > 1 else "")).strip()
+            address_line1 = str(customer_info.get("address_line1") or customer_info.get("address") or "").strip()
+            city = str(customer_info.get("city") or "").strip()
+            state = str(customer_info.get("state") or "").strip()
+            postal_code = str(customer_info.get("postal_code") or customer_info.get("pincode") or "").strip()
+            gstin = str(customer_info.get("gstin") or customer_info.get("gst_number") or "").strip().upper()
 
             try:
                 customer, created = Customer.objects.get_or_create(
                     organization=organization,
                     phone=phone,
                     defaults={
-                        "first_name": customer_info.get("first_name") or customer_info.get("name", "Customer").split()[0],
-                        "last_name": customer_info.get("last_name") or " ".join(customer_info.get("name", "").split()[1:]),
-                        "email": customer_info.get("email", ""),
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "email": str(customer_info.get("email") or "").strip(),
+                        "address_line1": address_line1,
+                        "city": city,
+                        "state": state,
+                        "postal_code": postal_code,
+                        "gstin": gstin,
+                        "is_walk_in": False,
                         "source": "pos",
                     },
                 )
             except IntegrityError:
                 customer = Customer.objects.filter(organization=organization, phone=phone).first()
                 created = False
-            if created:
+            if created and customer:
                 from apps.loyalty.models import LoyaltyAccount
                 LoyaltyAccount.objects.get_or_create(
                     organization=organization,
@@ -621,9 +645,11 @@ class CheckoutService:
 
                 # 8g. Create Invoice Record
                 from apps.billing.branding_utils import build_branding_snapshot
+                from apps.invoices.models import build_invoice_customer_snapshot
                 secure_token = secrets.token_urlsafe(24)
                 invoice_type = "gst" if config.gst_enabled else "non_gst"
                 branding_snap = build_branding_snapshot(config, organization, store)
+                customer_snap = build_invoice_customer_snapshot(customer, is_walk_in=is_walk_in)
                 invoice = Invoice.objects.create(
                     organization=organization,
                     transaction=tx,
@@ -635,6 +661,7 @@ class CheckoutService:
                     secure_token=secure_token,
                     web_url=f"/bills/{secure_token}",
                     branding_snapshot=branding_snap,
+                    **customer_snap,
                 )
 
                 # 8h. Update Open Cash Register if Cash Payment Involved
@@ -799,6 +826,8 @@ class CheckoutService:
             "invoice_terms": getattr(config, "invoice_terms_and_conditions", "Goods once sold cannot be returned.") if config else "Goods once sold cannot be returned.",
         }
 
+        cust_snapshot = invoice.get_customer_snapshot_dict() if invoice else None
+
         return {
             "id": str(tx.id),
             "transaction_id": str(tx.id),
@@ -806,15 +835,26 @@ class CheckoutService:
             "invoice_number": tx.invoice_number,
             "transaction_date": tx.transaction_date.isoformat(),
             "seller": seller_data,
-            "customer": {
-                "id": str(tx.customer.id) if tx.customer else None,
-                "name": tx.customer.full_name if tx.customer else "Walk-in Customer",
-                "phone": tx.customer.phone if tx.customer else "",
-                "gstin": getattr(tx.customer, "gst_number", "") or "",
-                "address": getattr(tx.customer, "address_line1", "") or "",
-                "outstanding_credit": str(tx.customer.outstanding_credit) if tx.customer else "0.00",
-                "is_walk_in": tx.customer.is_walk_in if tx.customer else True,
-            } if tx.customer else None,
+            "customer": cust_snapshot if (tx.customer and not getattr(tx.customer, "is_walk_in", False)) else None,
+            "customer_snapshot": cust_snapshot or {
+                "id": None,
+                "name": "Walk-in Customer",
+                "full_name": "Walk-in Customer",
+                "phone": "",
+                "mobile": "",
+                "address": "",
+                "address_line1": "",
+                "city": "",
+                "state": "",
+                "pincode": "",
+                "postal_code": "",
+                "gstin": "",
+                "full_address": "",
+                "is_walk_in": True,
+                "outstanding_credit": "0.00",
+                "credit_limit": "0.00",
+            },
+            "is_walk_in": bool(cust_snapshot.get("is_walk_in")) if cust_snapshot else (tx.customer is None),
             "store": {
                 "id": str(tx.store.id) if tx.store else None,
                 "name": tx.store.name if tx.store else "",

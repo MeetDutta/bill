@@ -49,7 +49,13 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
 
     class Meta:
         ordering = ["-created_at"]
-        unique_together = [("organization", "phone")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "phone"],
+                condition=models.Q(phone__gt=""),
+                name="unique_customer_phone_per_org",
+            )
+        ]
         indexes = [
             models.Index(fields=["organization", "segment"]),
             models.Index(fields=["organization", "last_purchase_at"]),
@@ -64,8 +70,28 @@ class Customer(UUIDModel, TenantModel, TimeStampedModel):
     def full_name(self):
         return f"{self.first_name} {self.last_name}".strip()
 
+    @property
+    def full_address(self):
+        from .utils import build_customer_address
+        return build_customer_address(
+            address_line1=self.address_line1,
+            city=self.city,
+            state=self.state,
+            postal_code=self.postal_code,
+        )
+
     def save(self, *args, **kwargs):
         import secrets
+        from .utils import normalize_phone
+
+        self.phone = normalize_phone(self.phone or "")
+        self.first_name = (self.first_name or "").strip()
+        self.last_name = (self.last_name or "").strip()
+        self.address_line1 = (self.address_line1 or "").strip()
+        self.city = (self.city or "").strip()
+        self.state = (self.state or "").strip()
+        self.postal_code = (self.postal_code or "").strip()
+        self.gstin = (self.gstin or "").strip().upper()
         if not self.customer_id:
             while True:
                 candidate_id = f"CUS-{secrets.token_hex(5).upper()}"

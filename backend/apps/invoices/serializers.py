@@ -7,8 +7,15 @@ class InvoiceSerializer(serializers.ModelSerializer):
     transaction_details = serializers.SerializerMethodField()
     organization_name = serializers.CharField(source="organization.name", read_only=True)
     store_name = serializers.CharField(source="transaction.store.name", read_only=True)
-    customer_name = serializers.CharField(source="transaction.customer.full_name", read_only=True)
-    customer_phone = serializers.CharField(source="transaction.customer.phone", read_only=True)
+    customer_name = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    customer_address = serializers.SerializerMethodField()
+    customer_city = serializers.SerializerMethodField()
+    customer_state = serializers.SerializerMethodField()
+    customer_pincode = serializers.SerializerMethodField()
+    customer_gstin = serializers.SerializerMethodField()
+    customer_details = serializers.SerializerMethodField()
+    is_walk_in = serializers.SerializerMethodField()
     subtotal = serializers.DecimalField(source="transaction.subtotal", max_digits=12, decimal_places=2, read_only=True)
     discount = serializers.DecimalField(source="transaction.discount", max_digits=12, decimal_places=2, read_only=True)
     tax = serializers.DecimalField(source="transaction.tax", max_digits=12, decimal_places=2, read_only=True)
@@ -27,12 +34,44 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "id", "transaction", "invoice_number", "invoice_type", "template_format",
             "pdf_url", "web_url", "secure_token", "is_viewed", "viewed_at",
             "organization", "created_at", "terms_and_conditions", "custom_notes",
-            "transaction_details", "organization_name", "store_name", "customer_name", "customer_phone",
+            "transaction_details", "organization_name", "store_name",
+            "customer_name", "customer_phone", "customer_address", "customer_city",
+            "customer_state", "customer_pincode", "customer_gstin", "customer_details", "is_walk_in",
             "subtotal", "discount", "tax", "total", "payment_status", "payment_method",
             "origin_quotation_id", "origin_quotation_number", "seller_details",
             "bill_sent", "whatsapp_delivery",
         ]
         read_only_fields = ["id", "secure_token", "created_at", "organization"]
+
+    def _get_cust_snap(self, obj):
+        return obj.get_customer_snapshot_dict()
+
+    def get_customer_name(self, obj):
+        return self._get_cust_snap(obj)["name"]
+
+    def get_customer_phone(self, obj):
+        return self._get_cust_snap(obj)["phone"]
+
+    def get_customer_address(self, obj):
+        return self._get_cust_snap(obj)["address"]
+
+    def get_customer_city(self, obj):
+        return self._get_cust_snap(obj)["city"]
+
+    def get_customer_state(self, obj):
+        return self._get_cust_snap(obj)["state"]
+
+    def get_customer_pincode(self, obj):
+        return self._get_cust_snap(obj)["pincode"]
+
+    def get_customer_gstin(self, obj):
+        return self._get_cust_snap(obj)["gstin"]
+
+    def get_is_walk_in(self, obj):
+        return self._get_cust_snap(obj)["is_walk_in"]
+
+    def get_customer_details(self, obj):
+        return self._get_cust_snap(obj)
 
     def get_whatsapp_delivery(self, obj):
         from apps.whatsapp.service import get_invoice_whatsapp_status
@@ -72,8 +111,13 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
     items = serializers.SerializerMethodField()
     organization_name = serializers.CharField(source="organization.name", read_only=True)
     store_name = serializers.CharField(source="transaction.store.name", read_only=True)
-    customer_name = serializers.CharField(source="transaction.customer.full_name", read_only=True)
-    customer_phone = serializers.CharField(source="transaction.customer.phone", read_only=True)
+    customer_name = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    customer_address = serializers.SerializerMethodField()
+    customer_city = serializers.SerializerMethodField()
+    customer_state = serializers.SerializerMethodField()
+    customer_pincode = serializers.SerializerMethodField()
+    customer_gstin = serializers.SerializerMethodField()
     transaction_date = serializers.DateTimeField(source="transaction.transaction_date", read_only=True)
     subtotal = serializers.DecimalField(source="transaction.subtotal", max_digits=12, decimal_places=2, read_only=True)
     discount = serializers.DecimalField(source="transaction.discount", max_digits=12, decimal_places=2, read_only=True)
@@ -96,9 +140,32 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
             "subtotal", "discount", "tax", "total", "payment_method",
             "loyalty_points_earned", "loyalty_balance", "loyalty_tier", "portal_token",
             "smart_offer", "product_recommendation", "created_at",
-            "organization_name", "store_name", "customer_name", "customer_phone",
+            "organization_name", "store_name",
+            "customer_name", "customer_phone", "customer_address", "customer_city",
+            "customer_state", "customer_pincode", "customer_gstin",
             "transaction_details",
         ]
+
+    def get_customer_name(self, obj):
+        return obj.get_customer_snapshot_dict()["name"]
+
+    def get_customer_phone(self, obj):
+        return obj.get_customer_snapshot_dict()["phone"]
+
+    def get_customer_address(self, obj):
+        return obj.get_customer_snapshot_dict()["address"]
+
+    def get_customer_city(self, obj):
+        return obj.get_customer_snapshot_dict()["city"]
+
+    def get_customer_state(self, obj):
+        return obj.get_customer_snapshot_dict()["state"]
+
+    def get_customer_pincode(self, obj):
+        return obj.get_customer_snapshot_dict()["pincode"]
+
+    def get_customer_gstin(self, obj):
+        return obj.get_customer_snapshot_dict()["gstin"]
 
     def get_transaction_details(self, obj):
         tx = obj.transaction
@@ -174,13 +241,10 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
         }
 
     def get_customer(self, obj):
-        cust = obj.transaction.customer
-        if not cust:
+        snap = obj.get_customer_snapshot_dict()
+        if snap.get("is_walk_in"):
             return None
-        return {
-            "name": cust.full_name or "Valued Customer",
-            "phone": cust.phone,
-        }
+        return snap
 
     def get_items(self, obj):
         return [
@@ -253,6 +317,12 @@ class PublicInvoiceSerializer(serializers.ModelSerializer):
 class InvoiceListSerializer(serializers.ModelSerializer):
     customer_name = serializers.SerializerMethodField()
     customer_phone = serializers.SerializerMethodField()
+    customer_address = serializers.SerializerMethodField()
+    customer_city = serializers.SerializerMethodField()
+    customer_state = serializers.SerializerMethodField()
+    customer_pincode = serializers.SerializerMethodField()
+    customer_gstin = serializers.SerializerMethodField()
+    is_walk_in = serializers.SerializerMethodField()
     store_name = serializers.CharField(source="transaction.store.name", read_only=True)
     transaction_date = serializers.DateTimeField(source="transaction.transaction_date", read_only=True)
     subtotal = serializers.DecimalField(source="transaction.subtotal", max_digits=12, decimal_places=2, read_only=True)
@@ -270,7 +340,9 @@ class InvoiceListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "invoice_number", "invoice_type", "template_format",
             "pdf_url", "web_url", "is_viewed", "viewed_at", "created_at",
-            "customer_name", "customer_phone", "store_name", "transaction_date",
+            "customer_name", "customer_phone", "customer_address", "customer_city",
+            "customer_state", "customer_pincode", "customer_gstin", "is_walk_in",
+            "store_name", "transaction_date",
             "subtotal", "discount", "tax", "total",
             "payment_status", "payment_method", "origin_quotation_id",
             "bill_sent", "whatsapp_delivery",
@@ -287,16 +359,28 @@ class InvoiceListSerializer(serializers.ModelSerializer):
         return get_invoice_whatsapp_status(obj)
 
     def get_customer_name(self, obj):
-        if not obj.transaction:
-            return "Walk-in Customer"
-        if obj.transaction.customer:
-            return obj.transaction.customer.full_name or "Customer"
-        return "Walk-in Customer"
+        return obj.get_customer_snapshot_dict()["name"]
 
     def get_customer_phone(self, obj):
-        if not obj.transaction or not obj.transaction.customer:
-            return ""
-        return obj.transaction.customer.phone or ""
+        return obj.get_customer_snapshot_dict()["phone"]
+
+    def get_customer_address(self, obj):
+        return obj.get_customer_snapshot_dict()["address"]
+
+    def get_customer_city(self, obj):
+        return obj.get_customer_snapshot_dict()["city"]
+
+    def get_customer_state(self, obj):
+        return obj.get_customer_snapshot_dict()["state"]
+
+    def get_customer_pincode(self, obj):
+        return obj.get_customer_snapshot_dict()["pincode"]
+
+    def get_customer_gstin(self, obj):
+        return obj.get_customer_snapshot_dict()["gstin"]
+
+    def get_is_walk_in(self, obj):
+        return obj.get_customer_snapshot_dict()["is_walk_in"]
 
     def get_origin_quotation_id(self, obj):
         if hasattr(obj, "origin_quotation") and obj.origin_quotation:

@@ -459,9 +459,10 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
     if tx and tx.due_date and tx.transaction_date and tx.due_date > tx.transaction_date.date():
         payment_terms_str = f"Net {(tx.due_date - tx.transaction_date.date()).days} Days"
 
-    # Place of supply
-    cust_state = getattr(customer, "state", "") if customer else ""
-    cust_gstin = safe_str(getattr(customer, "gstin", "") or getattr(customer, "gst_number", "") or "")
+    # Place of supply (uses immutable customer snapshot when present)
+    cust_snap = invoice.get_customer_snapshot_dict() if hasattr(invoice, "get_customer_snapshot_dict") else {}
+    cust_state = cust_snap.get("state") or (getattr(customer, "state", "") if customer else "")
+    cust_gstin = safe_str(cust_snap.get("gstin") or getattr(customer, "gstin", "") or getattr(customer, "gst_number", "") or "")
     supply_state = cust_state or seller_state or "Maharashtra"
     place_of_supply_str = get_place_of_supply(supply_state, cust_gstin or seller_gstin)
 
@@ -521,11 +522,13 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
     # ---------------------------------------------------------
     # 3. BILL TO / SHIP TO SECTION
     # ---------------------------------------------------------
-    cust_name = safe_str(getattr(customer, "full_name", "") or getattr(customer, "name", "") or "Walk-in Customer")
-    cust_addr1 = safe_str(getattr(customer, "address_line1", "") or "")
-    cust_city = safe_str(getattr(customer, "city", "") or "")
-    cust_state_pin = safe_str(f"{getattr(customer, 'postal_code', '')} {cust_state}".strip())
-    cust_phone = safe_str(getattr(customer, "phone", "") or "")
+    cust_is_walkin = bool(cust_snap.get("is_walk_in", False))
+    cust_name = safe_str(cust_snap.get("name") or getattr(customer, "full_name", "") or getattr(customer, "name", "") or "Walk-in Customer")
+    cust_addr1 = safe_str(cust_snap.get("address") or getattr(customer, "address_line1", "") or "")
+    cust_city = safe_str(cust_snap.get("city") or getattr(customer, "city", "") or "")
+    cust_pin = safe_str(cust_snap.get("pincode") or getattr(customer, "postal_code", "") or "")
+    cust_state_pin = safe_str(f"{cust_pin} {cust_state}".strip())
+    cust_phone = safe_str(cust_snap.get("phone") or getattr(customer, "phone", "") or "")
 
     bill_to_content = [
         Paragraph("<b>Bill To</b>", section_title),
@@ -541,7 +544,7 @@ def _render_a4_pdf(buffer, invoice, tx, org, store, customer, items, payments):
     bill_to_content.append(Paragraph("India", party_text))
     if cust_gstin:
         bill_to_content.append(Paragraph(f"GSTIN <b>{cust_gstin}</b>", party_text))
-    elif cust_phone and not getattr(customer, "is_walk_in", False):
+    if cust_phone and not cust_is_walkin:
         bill_to_content.append(Paragraph(f"Contact: {cust_phone}", party_text))
 
     ship_to_content = [
@@ -1116,8 +1119,16 @@ def _render_thermal_pdf(buffer, invoice, tx, org, store, customer, items, paymen
     inv_date = tx.transaction_date.strftime("%d/%m/%Y %I:%M %p") if tx and tx.transaction_date else invoice.created_at.strftime("%d/%m/%Y %I:%M %p")
     story.append(Paragraph(f"Invoice: #{safe_str(invoice.invoice_number)}", t_row_l))
     story.append(Paragraph(f"Date: {inv_date}", t_row_l))
-    if customer:
-        story.append(Paragraph(f"Customer: {safe_str(customer.full_name or customer.name)}", t_row_l))
+    cust_snap = invoice.get_customer_snapshot_dict() if hasattr(invoice, "get_customer_snapshot_dict") else {}
+    t_cust_name = safe_str(cust_snap.get("name") or (getattr(customer, "full_name", "") if customer else "") or "Walk-in Customer")
+    story.append(Paragraph(f"Customer: {t_cust_name}", t_row_l))
+    if not cust_snap.get("is_walk_in", False):
+        t_phone = safe_str(cust_snap.get("phone") or (getattr(customer, "phone", "") if customer else ""))
+        t_addr = safe_str(cust_snap.get("full_address") or "")
+        if t_phone:
+            story.append(Paragraph(f"Mobile: {t_phone}", t_row_l))
+        if t_addr:
+            story.append(Paragraph(f"Addr: {t_addr}", t_row_l))
 
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.black, spaceBefore=2, spaceAfter=2))
 

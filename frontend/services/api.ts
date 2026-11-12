@@ -54,6 +54,10 @@ export const storeApi = {
 export const customerApi = {
   list: (params?: { search?: string; page?: number; page_size?: number }) =>
     api.get<PaginatedResponse<Customer>>("/customers/", { params }),
+  lookupByMobile: (mobile: string) =>
+    api.get<{ exists: boolean; normalized_mobile: string; customer: Customer | null }>(
+      `/customers/by-mobile/${encodeURIComponent(mobile.trim())}/`
+    ),
   get: (id: string) => api.get<Customer>(`/customers/${id}/`),
   create: (data: Partial<Customer>) => api.post<Customer>("/customers/", data),
   update: (id: string, data: Partial<Customer>) => api.patch<Customer>(`/customers/${id}/`, data),

@@ -63,6 +63,11 @@ interface BillData {
   store_name: string;
   customer_name: string;
   customer_phone: string;
+  customer_address?: string;
+  customer_city?: string;
+  customer_state?: string;
+  customer_pincode?: string;
+  customer_gstin?: string;
   created_at: string;
   transaction_details: {
     id: string;
@@ -207,6 +212,18 @@ export default function DigitalBillPage() {
                 <Phone className="w-3 h-3 text-slate-400" />
                 {bill.customer_phone || "—"}
               </p>
+              {(bill.customer_address || bill.customer_city || bill.customer_state || bill.customer_pincode) && (
+                <p className="text-slate-500 text-[11px] mt-1 leading-snug">
+                  {[bill.customer_address, bill.customer_city, bill.customer_state, bill.customer_pincode]
+                    .filter(Boolean)
+                    .join(", ")}
+                </p>
+              )}
+              {bill.customer_gstin && (
+                <p className="text-slate-600 text-[11px] font-mono mt-0.5">
+                  GSTIN: {bill.customer_gstin}
+                </p>
+              )}
             </div>
             <div className="text-right">
               <p className="text-slate-400 font-medium">DATE & TIME</p>

@@ -76,11 +76,30 @@ export default function MobilePOSPage() {
   const [calcSummary, setCalcSummary] = useState<POSCalculateResponse | null>(null);
   const [calcSyncedSignature, setCalcSyncedSignature] = useState<string>("");
   const calcSeqRef = useRef(0);
-  const [customer, setCustomer] = useState<{ id?: string; name: string; phone: string; is_walk_in: boolean }>({
-    name: "Walk-in Customer",
+  const [customer, setCustomer] = useState<{
+    id?: string;
+    name: string;
+    phone: string;
+    address_line1?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    gstin?: string;
+    is_walk_in: boolean;
+    confirmed?: boolean;
+  }>({
+    name: "",
     phone: "",
-    is_walk_in: true,
+    address_line1: "",
+    city: "",
+    state: "",
+    postal_code: "",
+    gstin: "",
+    is_walk_in: false,
+    confirmed: false,
   });
+  const [mobileLookupLoading, setMobileLookupLoading] = useState(false);
+  const [mobileLookupMsg, setMobileLookupMsg] = useState("");
   const [quotationRef, setQuotationRef] = useState<string | null>(null);
 
   // Modals inside POS
@@ -473,9 +492,11 @@ export default function MobilePOSPage() {
     setQuotationRef(q.quotation_number);
     if (q.customer_name || q.customer_phone) {
       setCustomer({
+        id: typeof q.customer === "string" ? q.customer : undefined,
         name: q.customer_name || "Customer",
         phone: q.customer_phone || "",
         is_walk_in: false,
+        confirmed: true,
       });
     }
     setActiveTab("cart");
@@ -565,6 +586,11 @@ export default function MobilePOSPage() {
       alert("Cart cannot be empty.");
       return;
     }
+    if (!customer.confirmed && !customer.is_walk_in && !customer.phone.trim()) {
+      setErrorMessage("Please identify customer by mobile number or select Walk-in Customer.");
+      setShowCustomerModal(true);
+      return;
+    }
 
     if (!isCalcSynced) {
       await calculateMobileCartImmediate();
@@ -621,6 +647,11 @@ export default function MobilePOSPage() {
               id: customer.id,
               name: customer.name,
               phone: customer.phone,
+              address_line1: customer.address_line1 || "",
+              city: customer.city || "",
+              state: customer.state || "",
+              postal_code: customer.postal_code || "",
+              gstin: customer.gstin || "",
             },
         idempotency_key: idempotencyKeyRef.current,
       };
@@ -648,10 +679,21 @@ export default function MobilePOSPage() {
       const waPresentation = resolveWhatsAppPresentation(data.whatsapp_delivery, data.bill_sent);
       setWaStatus({ state: waPresentation.status, message: waPresentation.message });
 
-      // Clear cart on confirmed success
+      // Clear cart and reset customer identification on confirmed success
       setPriceDrafts({});
       setCart([]);
       setQuotationRef(null);
+      setCustomer({
+        name: "",
+        phone: "",
+        address_line1: "",
+        city: "",
+        state: "",
+        postal_code: "",
+        gstin: "",
+        is_walk_in: false,
+        confirmed: false,
+      });
       setActiveTab("success");
     } catch (err: unknown) {
       const msg = parseApiError(err, "Payment checkout failed. Please review cart and retry.");
@@ -733,7 +775,7 @@ export default function MobilePOSPage() {
               className="flex items-center gap-1.5 text-slate-700 font-semibold truncate hover:text-blue-600 transition-colors"
             >
               <User className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-              <span className="truncate">{customer.name}</span>
+              <span className="truncate">{customer.name || (customer.is_walk_in ? "Walk-in Customer" : "Identify Customer")}</span>
             </button>
 
             <button
@@ -867,7 +909,7 @@ export default function MobilePOSPage() {
             <div>
               <h2 className="text-sm font-bold text-slate-900">Current Cart Items</h2>
               <p className="text-[10px] text-slate-400">
-                {cartSummary.itemCount} items • {customer.name}
+                {cartSummary.itemCount} items • {customer.name || (customer.is_walk_in ? "Walk-in Customer" : "Customer Not Selected")}
               </p>
             </div>
             {cart.length > 0 && (
@@ -1433,9 +1475,9 @@ export default function MobilePOSPage() {
               </span>
               <p className="text-[11px]">
                 Credit sales require a registered customer. Currently selected:{" "}
-                <span className="font-bold">{customer.name}</span>
+                <span className="font-bold">{customer.name || (customer.is_walk_in ? "Walk-in Customer" : "Unselected")}</span>
               </p>
-              {customer.is_walk_in && (
+              {(customer.is_walk_in || !customer.confirmed) && (
                 <button
                   type="button"
                   onClick={() => setShowCustomerModal(true)}
@@ -1524,10 +1566,14 @@ export default function MobilePOSPage() {
                         phone: raw.seller?.phone || "",
                         address: raw.seller?.address || "",
                       },
-                      customer: raw.customer ? {
-                        name: raw.customer?.name || confirmedSale.customer_name || "Walk-in",
-                        phone: raw.customer?.phone || confirmedSale.customer_phone || "",
-                        gstin: raw.customer?.gstin || "",
+                      customer: (raw.customer || raw.customer_snapshot) ? {
+                        name: (raw.customer || raw.customer_snapshot)?.name || confirmedSale.customer_name || "Walk-in Customer",
+                        phone: (raw.customer || raw.customer_snapshot)?.phone || confirmedSale.customer_phone || "",
+                        gstin: (raw.customer || raw.customer_snapshot)?.gstin || "",
+                        address: (raw.customer || raw.customer_snapshot)?.address_line1 || (raw.customer || raw.customer_snapshot)?.address || "",
+                        city: (raw.customer || raw.customer_snapshot)?.city || "",
+                        state: (raw.customer || raw.customer_snapshot)?.state || "",
+                        pincode: (raw.customer || raw.customer_snapshot)?.postal_code || (raw.customer || raw.customer_snapshot)?.pincode || "",
                       } : null,
                       cashier_name: raw.cashier || "Mobile Staff",
                       store_name: raw.store?.name || "Mobile Counter",
@@ -1736,35 +1782,97 @@ export default function MobilePOSPage() {
       {/* Customer Selection Modal */}
       {showCustomerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-xs rounded-2xl bg-white p-4 shadow-2xl space-y-3">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-4 shadow-2xl space-y-3 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="font-bold text-xs text-slate-900">Select Customer</h3>
+              <h3 className="font-bold text-xs text-slate-900">Identify Customer</h3>
               <button onClick={() => setShowCustomerModal(false)} className="text-slate-400">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="space-y-2">
               <button
+                type="button"
                 onClick={() => {
-                  setCustomer({ name: "Walk-in Customer", phone: "", is_walk_in: true });
+                  setCustomer({
+                    name: "Walk-in Customer",
+                    phone: "",
+                    address_line1: "",
+                    city: "",
+                    state: "",
+                    postal_code: "",
+                    gstin: "",
+                    is_walk_in: true,
+                    confirmed: true,
+                  });
+                  setMobileLookupMsg("");
                   setShowCustomerModal(false);
                 }}
                 className="w-full rounded-xl border border-slate-200 p-2.5 text-left text-xs font-bold text-slate-800 hover:bg-slate-50"
               >
-                🚶 Walk-in Customer
+                🚶 Continue as Walk-in Customer
               </button>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500">Customer Phone</label>
-                <input
-                  type="tel"
-                  placeholder="e.g. 9876543210"
-                  value={customer.phone}
-                  onChange={(e) => setCustomer({ ...customer, phone: e.target.value, is_walk_in: false })}
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs"
-                />
+                <label className="text-[10px] font-bold text-slate-500">Customer Mobile *</label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="tel"
+                    placeholder="10-digit mobile number"
+                    value={customer.phone}
+                    onChange={(e) => {
+                      setMobileLookupMsg("");
+                      setCustomer({ ...customer, id: undefined, phone: e.target.value, is_walk_in: false });
+                    }}
+                    className="flex-1 rounded-lg border border-slate-200 p-2 text-xs font-mono"
+                  />
+                  <button
+                    type="button"
+                    disabled={mobileLookupLoading || !customer.phone.trim()}
+                    onClick={async () => {
+                      setMobileLookupLoading(true);
+                      setMobileLookupMsg("");
+                      try {
+                        const res = await customerApi.lookupByMobile(customer.phone);
+                        if (res.data?.exists && res.data?.customer) {
+                          const c = res.data.customer;
+                          setCustomer({
+                            id: c.id,
+                            name: c.full_name,
+                            phone: c.phone,
+                            address_line1: c.address_line1 || "",
+                            city: c.city || "",
+                            state: c.state || "",
+                            postal_code: c.postal_code || "",
+                            gstin: c.gstin || "",
+                            is_walk_in: false,
+                            confirmed: true,
+                          });
+                          setMobileLookupMsg("Customer found and loaded.");
+                        } else {
+                          setCustomer((prev) => ({
+                            ...prev,
+                            id: undefined,
+                            phone: res.data?.normalized_mobile || prev.phone,
+                            is_walk_in: false,
+                          }));
+                          setMobileLookupMsg("New customer — fill name & address below.");
+                        }
+                      } catch (err) {
+                        setMobileLookupMsg(parseApiError(err, "Invalid mobile number."));
+                      } finally {
+                        setMobileLookupLoading(false);
+                      }
+                    }}
+                    className="rounded-lg bg-slate-900 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                  >
+                    {mobileLookupLoading ? "..." : "Find"}
+                  </button>
+                </div>
+                {mobileLookupMsg && (
+                  <p className="text-[10px] font-medium text-blue-700">{mobileLookupMsg}</p>
+                )}
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500">Customer Name</label>
+                <label className="text-[10px] font-bold text-slate-500">Customer Name *</label>
                 <input
                   type="text"
                   placeholder="e.g. Rajesh Sharma"
@@ -1773,9 +1881,43 @@ export default function MobilePOSPage() {
                   className="w-full rounded-lg border border-slate-200 p-2 text-xs"
                 />
               </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500">Address *</label>
+                <input
+                  type="text"
+                  placeholder="Full Address / Street"
+                  value={customer.address_line1 || ""}
+                  onChange={(e) => setCustomer({ ...customer, address_line1: e.target.value, is_walk_in: false })}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <input
+                  type="text"
+                  placeholder="City"
+                  value={customer.city || ""}
+                  onChange={(e) => setCustomer({ ...customer, city: e.target.value, is_walk_in: false })}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs"
+                />
+                <input
+                  type="text"
+                  placeholder="PIN Code"
+                  value={customer.postal_code || ""}
+                  onChange={(e) => setCustomer({ ...customer, postal_code: e.target.value, is_walk_in: false })}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs font-mono"
+                />
+              </div>
             </div>
             <button
-              onClick={() => setShowCustomerModal(false)}
+              type="button"
+              onClick={() => {
+                if (!customer.is_walk_in && (!customer.phone.trim() || !customer.name.trim())) {
+                  setMobileLookupMsg("Enter mobile & name, or choose Walk-in.");
+                  return;
+                }
+                setCustomer((prev) => ({ ...prev, confirmed: true }));
+                setShowCustomerModal(false);
+              }}
               className="w-full rounded-xl bg-blue-600 py-2 text-xs font-bold text-white"
             >
               Confirm Customer

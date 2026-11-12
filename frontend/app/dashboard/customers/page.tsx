@@ -32,7 +32,11 @@ export default function CustomersPage() {
     last_name: "",
     phone: "",
     email: "",
+    address_line1: "",
     city: "",
+    state: "",
+    postal_code: "",
+    gstin: "",
     segment: "new",
   });
 
@@ -67,7 +71,11 @@ export default function CustomersPage() {
         last_name: formData.last_name.trim(),
         phone: formData.phone.trim(),
         email: formData.email.trim(),
+        address_line1: formData.address_line1.trim(),
         city: formData.city.trim(),
+        state: formData.state.trim(),
+        postal_code: formData.postal_code.trim(),
+        gstin: formData.gstin.trim().toUpperCase(),
         segment: formData.segment,
         whatsapp_opt_in: true,
         marketing_consent: true,
@@ -79,7 +87,11 @@ export default function CustomersPage() {
         last_name: "",
         phone: "",
         email: "",
+        address_line1: "",
         city: "",
+        state: "",
+        postal_code: "",
+        gstin: "",
         segment: "new",
       });
       await fetchCustomers();
@@ -168,13 +180,49 @@ export default function CustomersPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Address</label>
+                  <Input
+                    placeholder="Street, Area, Landmark"
+                    value={formData.address_line1}
+                    onChange={(e) => setFormData({ ...formData, address_line1: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
                   <div className="space-y-1">
                     <label className="text-xs font-medium">City</label>
                     <Input
-                      placeholder="Mumbai"
+                      placeholder="Pune"
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">State</label>
+                    <Input
+                      placeholder="Maharashtra"
+                      value={formData.state}
+                      onChange={(e) => setFormData({ ...formData, state: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">PIN Code</label>
+                    <Input
+                      placeholder="411014"
+                      value={formData.postal_code}
+                      onChange={(e) => setFormData({ ...formData, postal_code: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">GSTIN (Optional)</label>
+                    <Input
+                      placeholder="27AAAAA0000A1Z5"
+                      value={formData.gstin}
+                      onChange={(e) => setFormData({ ...formData, gstin: e.target.value.toUpperCase() })}
                     />
                   </div>
                   <div className="space-y-1">
