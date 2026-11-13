@@ -212,7 +212,7 @@ export function EmbeddedPaymentPanel({
                     onSelectMethod(btn.id);
                   }}
                   className={cn(
-                    "flex items-center justify-between rounded-lg border px-2.5 py-2 text-xs font-bold transition-all cursor-pointer",
+                    "flex items-center justify-between rounded-lg border px-3 py-2.5 sm:py-2 text-xs font-bold transition-all cursor-pointer min-h-[42px] active:scale-[0.98]",
                     btn.active
                       ? "border-primary bg-primary/10 text-primary ring-1 ring-primary/30 shadow-xs"
                       : "border-border bg-card text-foreground hover:bg-accent/70"
@@ -322,7 +322,7 @@ export function EmbeddedPaymentPanel({
                 <button
                   type="button"
                   onClick={() => onQuickCash(singleAllocation.id, billTotalRupees)}
-                  className="rounded-md bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-1 text-[11px] font-bold text-blue-700 cursor-pointer tabular-nums"
+                  className="rounded-md bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800 px-2.5 py-1.5 text-xs font-bold text-blue-700 dark:text-blue-300 cursor-pointer tabular-nums active:scale-95 transition-transform"
                 >
                   Exact ₹{formatPaise(metrics.billTotalPaise)}
                 </button>
@@ -331,7 +331,7 @@ export function EmbeddedPaymentPanel({
                     key={denom}
                     type="button"
                     onClick={() => onQuickCash(singleAllocation.id, denom)}
-                    className="rounded-md bg-background hover:bg-accent border px-2 py-1 text-[11px] font-bold text-foreground cursor-pointer tabular-nums"
+                    className="rounded-md bg-background hover:bg-accent border px-2.5 py-1.5 text-xs font-bold text-foreground cursor-pointer tabular-nums active:scale-95 transition-transform"
                   >
                     ₹{denom.toLocaleString("en-IN")}
                   </button>
@@ -340,38 +340,38 @@ export function EmbeddedPaymentPanel({
 
               {/* Received, Change, or Remaining Display */}
               {metrics.changePaise > 0 ? (
-                <div className="flex items-center justify-between rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-2 text-xs">
-                  <span className="text-emerald-800 font-semibold">
+                <div className="flex items-center justify-between rounded-md bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 px-3 py-2 text-xs">
+                  <span className="text-emerald-800 dark:text-emerald-300 font-semibold">
                     Received: ₹{formatPaise(metrics.totalPaidPaise)}
                   </span>
-                  <span className="text-sm font-black text-emerald-700 tabular-nums">
+                  <span className="text-sm font-black text-emerald-700 dark:text-emerald-400 tabular-nums">
                     Change to Return: ₹{formatPaise(metrics.changePaise)}
                   </span>
                 </div>
               ) : metrics.remainingPaise > 0 ? (
-                <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-md bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs text-amber-900">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
                   <span className="font-semibold tabular-nums">
                     Remaining: ₹{formatPaise(metrics.remainingPaise)}
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => onAddAnotherMethod("UPI")}
-                      className="rounded bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 text-[10px] font-bold cursor-pointer"
+                      className="rounded bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 text-[11px] font-bold cursor-pointer active:scale-95 transition-transform"
                     >
                       + UPI (₹{formatPaise(metrics.remainingPaise)})
                     </button>
                     <button
                       type="button"
                       onClick={() => onAddAnotherMethod("CARD")}
-                      className="rounded bg-purple-600 hover:bg-purple-700 text-white px-2 py-0.5 text-[10px] font-bold cursor-pointer"
+                      className="rounded bg-purple-600 hover:bg-purple-700 text-white px-2.5 py-1 text-[11px] font-bold cursor-pointer active:scale-95 transition-transform"
                     >
                       + Card
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-between rounded-md bg-emerald-50/70 border border-emerald-200 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800">
+                <div className="flex items-center justify-between rounded-md bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 px-3 py-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
                   <span>Received: ₹{formatPaise(metrics.totalPaidPaise)}</span>
                   <span>Change: ₹0.00</span>
                 </div>

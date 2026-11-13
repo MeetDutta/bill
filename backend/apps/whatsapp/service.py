@@ -1094,9 +1094,14 @@ def deliver_invoice_pdf_via_whatsapp(
                         organization=transaction.organization,
                         customer=customer,
                         event_type="bill_sent",
-                        title=f"Invoice #{invoice.invoice_number} PDF sent via WhatsApp",
-                        description=f"Attachment {filename} delivered to +{phone}",
-                        metadata={"invoice_id": str(invoice.id), "provider_message_id": wamid},
+                        reference_id=str(invoice.id),
+                        metadata={
+                            "invoice_id": str(invoice.id),
+                            "invoice_number": invoice.invoice_number,
+                            "provider_message_id": wamid,
+                            "filename": filename,
+                            "phone": phone,
+                        },
                     )
                 except Exception as tl_exc:
                     logger.warning("Failed to record CustomerTimeline bill_sent event: %s", sanitize_whatsapp_error(tl_exc))

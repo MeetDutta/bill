@@ -329,8 +329,8 @@ export function IsolatedReceiptModal({
         </div>
 
         {/* Format Selector Pills */}
-        <div className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-muted/60 text-xs font-semibold">
-          <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 p-1.5 rounded-lg bg-muted/60 text-xs font-semibold">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
             <button
               onClick={() => setActiveFormat("thermal")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all ${
@@ -880,11 +880,11 @@ export function IsolatedReceiptModal({
 
         {/* Primary Action Buttons */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
             {/* Primary Print Button */}
             <button
               onClick={handlePrint}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-foreground text-background font-bold text-xs hover:bg-foreground/90 transition-all shadow-sm active:scale-95"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 rounded-lg bg-foreground text-background font-bold text-xs hover:bg-foreground/90 transition-all shadow-sm active:scale-95"
             >
               <Printer className="h-4 w-4" />
               <span>Print {activeFormat === "thermal" ? "Thermal (80mm)" : "A4 Invoice"}</span>
@@ -894,7 +894,7 @@ export function IsolatedReceiptModal({
             {invoiceId && (
               <button
                 onClick={handleOpenPdf}
-                className="flex items-center gap-1 px-3 py-2 rounded-lg border font-semibold text-xs hover:bg-accent text-foreground transition-colors"
+                className="flex items-center gap-1 px-3 py-2.5 sm:py-2 rounded-lg border font-semibold text-xs hover:bg-accent text-foreground transition-colors"
                 title="Open genuine ReportLab PDF in browser"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
@@ -906,7 +906,7 @@ export function IsolatedReceiptModal({
             {invoiceId && (
               <button
                 onClick={handleDownloadPdf}
-                className="flex items-center gap-1 px-3 py-2 rounded-lg border font-semibold text-xs hover:bg-accent text-foreground transition-colors"
+                className="flex items-center gap-1 px-3 py-2.5 sm:py-2 rounded-lg border font-semibold text-xs hover:bg-accent text-foreground transition-colors"
                 title="Download genuine ReportLab PDF file"
               >
                 <Download className="h-3.5 w-3.5" />
@@ -920,7 +920,7 @@ export function IsolatedReceiptModal({
                 type="button"
                 onClick={() => handleWhatsApp()}
                 disabled={waState.status === "sending" || waState.status === "queued"}
-                className="flex items-center gap-1 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-semibold text-xs hover:bg-emerald-500/20 transition-colors disabled:opacity-60"
+                className="flex items-center gap-1 px-3 py-2.5 sm:py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-semibold text-xs hover:bg-emerald-500/20 transition-colors disabled:opacity-60"
                 title="Send official Invoice PDF attachment via WhatsApp"
               >
                 {waState.status === "sending" || waState.status === "queued" ? (
@@ -944,7 +944,7 @@ export function IsolatedReceiptModal({
           {/* New Sale Button */}
           <button
             onClick={onNewSale}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 transition-all shadow-xs active:scale-95 ml-auto"
+            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 rounded-lg bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 transition-all shadow-xs active:scale-95 sm:ml-auto"
           >
             <span>Start New Sale (Enter)</span>
           </button>

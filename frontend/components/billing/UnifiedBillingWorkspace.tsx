@@ -22,6 +22,9 @@ import {
   Tag,
   Sparkles,
   ShoppingBag,
+  ShoppingCart,
+  Boxes,
+  ArrowLeft,
   ExternalLink,
   ChevronRight,
   ChevronLeft,
@@ -213,6 +216,20 @@ export default function UnifiedBillingWorkspace({
   const [calcSyncedSignature, setCalcSyncedSignature] = useState<string>("");
   const [calcLoading, setCalcLoading] = useState(false);
   const calcRequestSeqRef = useRef(0);
+
+  // Mobile terminal view mode: "catalog" (browse/search products) vs "checkout" (customer/cart/payment)
+  const [mobilePosTab, setMobilePosTab] = useState<"catalog" | "checkout">("catalog");
+
+  // Haptic feedback utility for mobile touch responsiveness
+  const triggerHaptic = useCallback((pattern: number | number[] = 15) => {
+    if (typeof window !== "undefined" && "vibrate" in navigator) {
+      try {
+        navigator.vibrate(pattern);
+      } catch {
+        // Ignore vibration failure
+      }
+    }
+  }, []);
 
   // ==========================================
   // 5. CUSTOMER STATE (Mobile-First Default)
@@ -740,7 +757,50 @@ export default function UnifiedBillingWorkspace({
     return () => clearTimeout(timer);
   }, [cart, calculateCartImmediate]);
 
+  // Mobile active cart draft recovery: protect cashiers from accidental reloads/refreshes
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      const saved = localStorage.getItem("billmeet_active_cart_draft");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.cart && Array.isArray(parsed.cart) && parsed.cart.length > 0) {
+          const ageHours = (Date.now() - (parsed.savedAt || 0)) / (1000 * 60 * 60);
+          if (ageHours < 4) {
+            setCart(parsed.cart);
+            if (parsed.mobileInput) setMobileInput(parsed.mobileInput);
+            if (parsed.customerSelectionMode) setCustomerSelectionMode(parsed.customerSelectionMode);
+          }
+        }
+      }
+    } catch {
+      // Ignore draft restore errors
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (cart.length > 0) {
+        localStorage.setItem(
+          "billmeet_active_cart_draft",
+          JSON.stringify({
+            cart,
+            mobileInput,
+            customerSelectionMode,
+            savedAt: Date.now(),
+          })
+        );
+      } else {
+        localStorage.removeItem("billmeet_active_cart_draft");
+      }
+    } catch {
+      // Ignore localStorage write errors
+    }
+  }, [cart, mobileInput, customerSelectionMode]);
+
   const addToCart = (product: POSProduct) => {
+    triggerHaptic(15);
     checkoutIdempotencyKeyRef.current = "";
     setCart((prev) => {
       const idx = prev.findIndex((item) => item.product_id === product.id);
@@ -776,6 +836,7 @@ export default function UnifiedBillingWorkspace({
   };
 
   const updateCartItemQuantity = (index: number, delta: number) => {
+    triggerHaptic(15);
     checkoutIdempotencyKeyRef.current = "";
     const targetItem = cart[index];
     if (!targetItem) return;
@@ -852,6 +913,7 @@ export default function UnifiedBillingWorkspace({
   };
 
   const removeFromCart = (index: number) => {
+    triggerHaptic(25);
     checkoutIdempotencyKeyRef.current = "";
     setPriceDrafts({});
     setCart((prev) => prev.filter((_, i) => i !== index));
@@ -876,6 +938,11 @@ export default function UnifiedBillingWorkspace({
   });
 
   const clearCart = () => {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("billmeet_active_cart_draft");
+      }
+    } catch {}
     checkoutIdempotencyKeyRef.current = "";
     setPriceDrafts({});
     setCart([]);
@@ -1585,6 +1652,7 @@ export default function UnifiedBillingWorkspace({
 
       const res = await posApi.checkout(payload);
       checkoutIdempotencyKeyRef.current = "";
+      triggerHaptic([30, 50, 30]);
       setCompletedSale(res.data);
       clearCart();
       // Silently refresh history in background
@@ -2095,25 +2163,44 @@ export default function UnifiedBillingWorkspace({
       {/* ========================================================================= */}
       {activeView === "new" && (
         <div className="flex-1 flex flex-col gap-3 min-h-0 md:overflow-hidden">
-          {/* Mobile Compact Quick-Jump Header (Catalog + Billing & Payment both stacked naturally below) */}
-          <div className="flex md:hidden items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
-            <div className="flex items-center gap-2 min-w-0">
-              <ShoppingBag className="h-4 w-4 text-primary shrink-0" />
-              <span className="font-semibold truncate">
-                {cart.length === 0
-                  ? "Select products below to start billing"
-                  : `${cart.reduce((s, i) => s + i.quantity, 0)} items • ₹${grandTotalNum.toFixed(2)}`}
+          {/* Mobile POS View Toggle: [ 📦 Products (N) ] [ 🛒 Bill & Pay (N • ₹Total) ] */}
+          <div className="flex md:hidden items-center rounded-lg border bg-muted/60 p-1 gap-1 text-xs font-semibold shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic(15);
+                setMobilePosTab("catalog");
+              }}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-md transition-all cursor-pointer touch-target-min",
+                mobilePosTab === "catalog"
+                  ? "bg-background text-foreground shadow-xs font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Boxes className="h-4 w-4 text-primary" />
+              <span>Catalog ({products.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic(15);
+                setMobilePosTab("checkout");
+              }}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-md transition-all cursor-pointer touch-target-min",
+                mobilePosTab === "checkout"
+                  ? "bg-emerald-600 text-white shadow-xs font-bold"
+                  : cart.length > 0
+                  ? "text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-500/10"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <ShoppingCart className="h-4 w-4" />
+              <span>
+                Bill &amp; Pay {cart.length > 0 && `(${cart.reduce((s, i) => s + i.quantity, 0)} • ₹${grandTotalNum.toFixed(0)})`}
               </span>
-            </div>
-            {cart.length > 0 && (
-              <button
-                type="button"
-                onClick={() => paymentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground shadow-2xs"
-              >
-                Bill &amp; Pay ↓
-              </button>
-            )}
+            </button>
           </div>
 
           {/* Quotation Loaded Notification Banner */}
@@ -2162,7 +2249,12 @@ export default function UnifiedBillingWorkspace({
           {/* Main Work Area: Left Catalog & Right Cart + Embedded Payment */}
           <div className="grid flex-1 grid-cols-1 gap-3 md:overflow-hidden md:grid-cols-12 min-h-0">
             {/* Left Side: Product Search, Category Pills, Grid */}
-            <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-xs md:col-span-6 lg:col-span-7 overflow-hidden max-h-[430px] md:max-h-none min-h-0">
+            <div
+              className={cn(
+                "flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-xs md:col-span-6 lg:col-span-7 overflow-hidden min-h-0",
+                mobilePosTab === "catalog" ? "flex flex-1" : "hidden md:flex"
+              )}
+            >
               {/* Search bar + Quick Add Product */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
@@ -2236,12 +2328,13 @@ export default function UnifiedBillingWorkspace({
                       const isOutOfStock = p.track_inventory && stockNum <= 0;
                       const isLowStock =
                         p.track_inventory && stockNum > 0 && stockNum <= (Number(p.min_stock) || 5);
+                      const inCartQty = cart.find((i) => i.product_id === p.id)?.quantity || 0;
 
                       return (
                         <div
                           key={p.id}
                           onClick={() => !isOutOfStock && addToCart(p)}
-                          className={`group relative flex flex-col justify-between rounded-md border p-2.5 transition-all cursor-pointer hover:border-primary hover:shadow-sm ${
+                          className={`group relative flex flex-col justify-between rounded-md border p-2.5 transition-all cursor-pointer hover:border-primary hover:shadow-sm active:scale-[0.98] select-none ${
                             isOutOfStock ? "opacity-50 cursor-not-allowed bg-muted/40" : "bg-card"
                           }`}
                         >
@@ -2250,6 +2343,11 @@ export default function UnifiedBillingWorkspace({
                               <h4 className="line-clamp-2 text-xs font-semibold leading-snug group-hover:text-primary">
                                 {p.name}
                               </h4>
+                              {inCartQty > 0 && (
+                                <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-emerald-600 text-white text-[10px] font-black px-1.5 shadow-xs shrink-0 animate-in zoom-in-50">
+                                  {inCartQty}
+                                </span>
+                              )}
                             </div>
                             <p className="mt-0.5 text-[11px] font-mono text-muted-foreground">{p.sku}</p>
 
@@ -2302,7 +2400,29 @@ export default function UnifiedBillingWorkspace({
             </div>
 
             {/* Right Side: Integrated Fast Cashier Workspace (Customer, Cart, Totals, and Direct Payment) */}
-            <div className="flex flex-col rounded-lg border bg-card p-3 shadow-xs md:col-span-6 lg:col-span-5 md:overflow-hidden min-h-0">
+            <div
+              className={cn(
+                "flex flex-col rounded-lg border bg-card p-3 shadow-xs md:col-span-6 lg:col-span-5 md:overflow-hidden min-h-0",
+                mobilePosTab === "checkout" ? "flex flex-1" : "hidden md:flex"
+              )}
+            >
+              {/* Mobile Back Button to Catalog */}
+              <div className="flex md:hidden items-center justify-between pb-2 border-b">
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(15);
+                    setMobilePosTab("catalog");
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline cursor-pointer py-1 touch-target-min"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>+ Add More Products</span>
+                </button>
+                <span className="text-xs font-semibold text-muted-foreground">
+                  {cart.length} {cart.length === 1 ? "item" : "items"}
+                </span>
+              </div>
               {/* Step 1: Mobile-First Inline Customer Identification */}
               <div ref={customerSectionRef} className="border-b pb-2.5 shrink-0 space-y-2">
                 {customerSelectionMode === "unselected" && (
@@ -2977,6 +3097,31 @@ export default function UnifiedBillingWorkspace({
               </div>
             </div>
           </div>
+
+          {/* Mobile Floating Sticky Cart Summary Pill */}
+          {mobilePosTab === "catalog" && cart.length > 0 && (
+            <div className="md:hidden fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] inset-x-3 z-30 animate-in slide-in-from-bottom-2 fade-in">
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(15);
+                  setMobilePosTab("checkout");
+                }}
+                className="w-full flex items-center justify-between rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 py-3 shadow-xl border border-slate-700/50 font-bold text-xs active:scale-[0.99] transition-transform cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white text-[11px] font-black">
+                    {cart.reduce((s, i) => s + i.quantity, 0)}
+                  </span>
+                  <span>Review Bill</span>
+                </div>
+                <div className="flex items-center gap-2 text-emerald-400 dark:text-emerald-600 font-extrabold text-sm">
+                  <span>₹{grandTotalNum.toFixed(2)}</span>
+                  <span className="rounded bg-emerald-500 text-white px-2.5 py-1 text-xs font-bold">Checkout →</span>
+                </div>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -3168,9 +3313,180 @@ export default function UnifiedBillingWorkspace({
             </div>
           </div>
 
-          {/* Invoices Table */}
+          {/* Invoices Table & Mobile Cards */}
           <div className="rounded-lg border bg-card shadow-2xs overflow-hidden flex-1 flex flex-col min-h-0">
-            <div className="overflow-x-auto flex-1">
+            {/* Mobile Responsive Invoices Card List */}
+            <div className="sm:hidden divide-y divide-border overflow-y-auto flex-1">
+              {historyLoading ? (
+                <div className="py-12 text-center text-xs text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary mx-auto mb-2" />
+                  <span>Loading invoice records...</span>
+                </div>
+              ) : invoices.length === 0 ? (
+                <div className="py-12 text-center text-xs text-muted-foreground p-4">
+                  <FileText className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
+                  <div>
+                    <p className="font-semibold text-foreground text-sm">No Invoices Found</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {historySearch || historyPaymentStatus || historyStartDate
+                        ? "Adjust your search filters to find past invoices."
+                        : "Invoices generated from the POS will automatically appear here."}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => switchView("new")}
+                    className="mt-3 gap-1 text-xs font-semibold"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Create New Bill</span>
+                  </Button>
+                </div>
+              ) : (
+                invoices.map((inv) => {
+                  const isPaid = inv.payment_status?.toLowerCase() === "paid";
+                  const isCredit = inv.payment_status?.toLowerCase() === "credit";
+
+                  return (
+                    <div
+                      key={`m-${inv.id}`}
+                      className="p-3 space-y-2 hover:bg-accent/40 transition-colors cursor-pointer"
+                      onClick={() => handleViewInvoiceDetail(inv)}
+                    >
+                      {/* Top Row: Invoice # + Badges + Payment Status */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono font-bold text-xs text-foreground">
+                            {inv.invoice_number}
+                          </span>
+                          {inv.origin_quotation_id && (
+                            <span className="rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 px-1 py-0.2 text-[9px] font-bold">
+                              QUOTE
+                            </span>
+                          )}
+                          <span className="inline-flex items-center rounded bg-secondary px-1.5 py-0.2 text-[9px] font-medium uppercase tracking-wider text-secondary-foreground">
+                            {inv.invoice_type || "GST"}
+                          </span>
+                        </div>
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0",
+                            isPaid
+                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                              : isCredit
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                              : "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "h-1.5 w-1.5 rounded-full",
+                              isPaid ? "bg-emerald-500" : isCredit ? "bg-amber-500" : "bg-blue-500"
+                            )}
+                          />
+                          {inv.payment_status ? inv.payment_status.toUpperCase() : "PAID"}
+                        </span>
+                      </div>
+
+                      {/* Middle Row: Customer Info + Date + Total */}
+                      <div className="flex items-center justify-between text-xs gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground truncate">
+                            {inv.customer_name || "Walk-in Customer"}
+                          </p>
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            {inv.customer_phone && <span className="font-mono">{inv.customer_phone}</span>}
+                            {inv.customer_phone && <span>•</span>}
+                            <span>
+                              {inv.transaction_date || inv.created_at
+                                ? new Date(inv.transaction_date || inv.created_at).toLocaleString("en-IN", {
+                                    dateStyle: "short",
+                                    timeStyle: "short",
+                                  })
+                                : "—"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-[10px] text-muted-foreground block">Grand Total</span>
+                          <span className="font-extrabold text-sm text-foreground tabular-nums">
+                            ₹
+                            {Number(inv.total || 0).toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Bottom Row: Action Buttons */}
+                      <div
+                        className="flex items-center justify-end gap-1.5 pt-1.5 border-t"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleViewInvoiceDetail(inv)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                          title="View Details"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>View</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintInvoice(inv)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                          title="Print Invoice"
+                        >
+                          <Printer className="h-3.5 w-3.5" />
+                          <span>Print</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadInvoicePdf(inv)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                          title="Download PDF"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          <span>PDF</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleShareWhatsApp(inv, e)}
+                          disabled={sendingWhatsAppId === inv.id || isWhatsAppDeliveryActive(inv.whatsapp_delivery?.status)}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors disabled:opacity-60",
+                            inv.whatsapp_delivery?.status === "failed"
+                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                              : isWhatsAppDelivered(inv.whatsapp_delivery, inv.bill_sent)
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                              : isWhatsAppDeliveryActive(inv.whatsapp_delivery?.status)
+                              ? "bg-blue-500/10 text-blue-700 border border-blue-500/30"
+                              : "bg-emerald-600 text-white hover:bg-emerald-700"
+                          )}
+                          title="Send Invoice PDF on WhatsApp"
+                        >
+                          {sendingWhatsAppId === inv.id || isWhatsAppDeliveryActive(inv.whatsapp_delivery?.status) ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : isWhatsAppDelivered(inv.whatsapp_delivery, inv.bill_sent) ? (
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          ) : (
+                            <Share2 className="h-3.5 w-3.5" />
+                          )}
+                          <span>
+                            {isWhatsAppDelivered(inv.whatsapp_delivery, inv.bill_sent) ? "Sent" : "WhatsApp"}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop Invoices Table */}
+            <div className="hidden sm:block overflow-x-auto flex-1">
               <table className="w-full text-left text-xs">
                 <thead className="border-b bg-muted/40 font-semibold text-muted-foreground uppercase tracking-wider text-[11px] sticky top-0 z-10">
                   <tr>
@@ -3410,8 +3726,8 @@ export default function UnifiedBillingWorkspace({
       {/* MODAL 3: INVOICE DETAIL VIEW MODAL (FROM HISTORY)                         */}
       {/* ========================================================================= */}
       {selectedInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="relative w-full max-w-2xl rounded-2xl border bg-card p-5 sm:p-6 shadow-2xl text-foreground max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
+          <div className="relative w-full max-w-2xl rounded-2xl border bg-card p-4 sm:p-6 shadow-2xl text-foreground max-h-[90vh] flex flex-col">
             <div className="flex items-start justify-between border-b pb-3.5 shrink-0">
               <div>
                 <div className="flex items-center gap-2">
@@ -3747,7 +4063,7 @@ export default function UnifiedBillingWorkspace({
 
             {/* Modal Actions Footer */}
             <div className="border-t pt-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 <Button
                   variant="outline"
                   size="sm"
