@@ -1890,70 +1890,88 @@ export default function UnifiedBillingWorkspace({
   return (
     <div className="flex flex-col gap-3 min-h-[calc(100vh-8.5rem)] md:h-[calc(100vh-8rem)] pb-20 md:pb-0">
       {/* ========================================================================= */}
-      {/* UNIFIED WORKSPACE HEADER & VIEW SEGMENTED CONTROLS                         */}
+      {/* UNIFIED WORKSPACE HEADER & SINGLE-ROW NAVIGATION                          */}
       {/* ========================================================================= */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-2.5 sm:p-3 shadow-xs">
-        <div className="flex flex-wrap items-center gap-2.5 sm:gap-4">
-          {/* Workspace Title & Vertical Badge */}
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+      <div className="flex items-center justify-between gap-2.5 sm:gap-3 rounded-lg border bg-card px-2.5 py-2 sm:px-3 sm:py-2 shadow-xs shrink-0 min-h-[46px] overflow-x-auto no-scrollbar">
+        {/* Left Section: Compact Branding + Primary Actions in ONE HORIZONTAL LINE */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Workspace Title & Vertical Badge (hidden on small mobile to maximize space, compact on desktop) */}
+          <div className="hidden lg:flex items-center gap-2 shrink-0">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
               <Receipt className="h-4 w-4" />
             </span>
-            <div>
-              <h1 className="text-sm sm:text-base font-bold leading-tight flex items-center gap-2">
-                <span>Billing Workspace</span>
-                <span className="hidden sm:inline-block rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold text-primary">
-                  {currentVerticalMeta.label || currentVerticalMeta.name}
-                </span>
+            <div className="min-w-0">
+              <h1 className="text-xs sm:text-sm font-bold leading-tight flex items-center gap-1.5">
+                <span className="truncate">Billing</span>
+                {currentVerticalMeta.label && (
+                  <span className="rounded bg-primary/10 px-1 py-0.2 text-[10px] font-semibold text-primary shrink-0">
+                    {currentVerticalMeta.label}
+                  </span>
+                )}
               </h1>
-              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span>{isStaff ? "Staff POS & History" : "Store POS & Tax Invoices"}</span>
-                {config?.gstin && <span className="hidden md:inline">• GSTIN: {config.gstin}</span>}
+              <div className="text-[10px] text-muted-foreground truncate">
+                {isStaff ? "Staff POS & History" : "Store POS & Tax Invoices"}
               </div>
             </div>
           </div>
 
-          {/* Segmented View Switcher: New Bill vs Invoice History */}
-          <div className="flex items-center rounded-lg border bg-muted/50 p-0.5 shadow-2xs">
+          {/* PRIMARY BILLING ACTIONS CONTAINER: ONE SINGLE HORIZONTAL LINE */}
+          <div className="inline-flex items-center rounded-lg border bg-muted/50 p-0.5 gap-1 shrink-0 shadow-2xs">
+            {/* [ 🧾 New Bill ] */}
             <button
               type="button"
               onClick={() => switchView("new")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-all",
+                "inline-flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-md text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
                 activeView === "new"
                   ? "bg-background text-foreground shadow-xs font-bold"
-                  : "text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-background/40"
               )}
             >
-              <ShoppingBag className="h-3.5 w-3.5" />
+              <Receipt className="h-3.5 w-3.5 text-primary shrink-0" />
               <span>New Bill</span>
             </button>
+
+            {/* [ 🕘 Invoice History ] */}
             <button
               type="button"
               onClick={() => switchView("history")}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-all",
+                "inline-flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-md text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
                 activeView === "history"
                   ? "bg-background text-foreground shadow-xs font-bold"
-                  : "text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-background/40"
               )}
             >
-              <History className="h-3.5 w-3.5" />
+              <Clock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
               <span>Invoice History</span>
-              {historyTotalCount > 0 && activeView === "history" && (
+              {historyTotalCount > 0 && (
                 <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 py-0.2 text-[10px] text-primary font-bold">
                   {historyTotalCount}
                 </span>
               )}
             </button>
+
+            {/* Subtle Vertical Divider */}
+            <div className="h-4 w-px bg-border/80 my-auto mx-0.5 shrink-0" />
+
+            {/* [ + New Quote ] */}
+            <button
+              type="button"
+              onClick={() => openQuoteModal(false)}
+              className="inline-flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-md text-xs font-semibold text-foreground bg-background hover:bg-accent border border-border/60 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
+            >
+              <Plus className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+              <span>New Quote</span>
+            </button>
           </div>
 
-          {/* Store Selector (when in New Bill view) */}
+          {/* Store Selector (when in New Bill view and multiple stores exist) */}
           {activeView === "new" && stores.length > 1 && (
             <select
               value={selectedStoreId}
               onChange={(e) => setSelectedStoreId(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium focus:outline-none"
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium focus:outline-none shrink-0"
             >
               {stores.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -1962,15 +1980,28 @@ export default function UnifiedBillingWorkspace({
               ))}
             </select>
           )}
+        </div>
 
-          {/* Quotation Loader & Quick Quote Actions (when in New Bill view) */}
-          {activeView === "new" && (
-            <div className="flex items-center gap-1.5 border-l pl-2 sm:pl-3 ml-1">
-              <div className="hidden sm:flex items-center gap-1.5">
+        {/* Right Section: Utility & Action Tools (Visually separated from primary navigation) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {activeView === "history" ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchHistoryInvoices()}
+              className="h-8 gap-1.5 text-xs font-medium"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", historyLoading && "animate-spin")} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          ) : (
+            <>
+              {/* Quotation Quick-Loader & Quotes Link (compact in utility group) */}
+              <div className="hidden xl:flex items-center gap-1 border-r pr-2 mr-0.5 shrink-0">
                 <div className="relative">
-                  <FileCheck className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                  <FileCheck className="absolute left-2.5 top-2.5 h-3 w-3 text-muted-foreground" />
                   <Input
-                    placeholder="Quotation #..."
+                    placeholder="Quote #..."
                     value={quoteInput}
                     onChange={(e) => setQuoteInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -1979,7 +2010,7 @@ export default function UnifiedBillingWorkspace({
                         handleLoadQuotation();
                       }
                     }}
-                    className="h-8 pl-8 pr-2 w-32 lg:w-40 text-xs font-mono uppercase"
+                    className="h-8 pl-7 pr-2 w-28 text-xs font-mono uppercase"
                   />
                 </div>
                 <Button
@@ -1987,80 +2018,46 @@ export default function UnifiedBillingWorkspace({
                   variant="secondary"
                   disabled={loadingQuote || !quoteInput.trim()}
                   onClick={() => handleLoadQuotation()}
-                  className="h-8 text-xs font-semibold px-2.5"
+                  className="h-8 text-xs font-semibold px-2 cursor-pointer"
                 >
-                  {loadingQuote ? "Loading..." : "Load"}
+                  {loadingQuote ? "..." : "Load"}
                 </Button>
+                <Link
+                  href={`${basePath}/quotations`}
+                  className="inline-flex items-center gap-1 h-8 px-2 rounded-md border border-border bg-card hover:bg-accent text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  title="View Quotations"
+                >
+                  <FileCheck className="h-3.5 w-3.5" />
+                  <span className="hidden 2xl:inline">Quotes</span>
+                </Link>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => openQuoteModal(false)}
-                className="h-8 text-xs font-semibold gap-1 px-2.5"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>New Quote</span>
-              </Button>
-              <Link
-                href={`${basePath}/quotations`}
-                className="hidden md:inline-flex items-center gap-1 h-8 px-2.5 rounded-md border border-border bg-card hover:bg-accent text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <FileCheck className="h-3.5 w-3.5" />
-                <span>Quotes</span>
-              </Link>
-            </div>
-          )}
-        </div>
 
-        {/* Right Action Tools: Register, Held Bills, Shortcuts, New Bill Shortcut */}
-        <div className="flex items-center gap-2">
-          {activeView === "history" ? (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => fetchHistoryInvoices()}
-                className="h-8 gap-1.5 text-xs font-medium"
-              >
-                <RefreshCw className={cn("h-3.5 w-3.5", historyLoading && "animate-spin")} />
-                <span className="hidden sm:inline">Refresh</span>
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => switchView("new")}
-                className="h-8 gap-1.5 text-xs font-bold bg-primary text-primary-foreground shadow-xs hover:bg-primary/90"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>+ New Bill</span>
-              </Button>
-            </>
-          ) : (
-            <>
               {/* Register Status */}
               {register?.status === "open" ? (
-                <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                <div className="hidden md:flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 whitespace-nowrap">
                   <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Register Open: ₹{parseFloat(register.expected_cash || register.opening_balance).toLocaleString()}
+                  <span className="hidden lg:inline">Register Open:</span>
+                  <span>₹{parseFloat(register.expected_cash || register.opening_balance).toLocaleString()}</span>
                 </div>
               ) : (
                 <a
                   href="/dashboard/register"
-                  className="hidden sm:flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-500/20"
+                  className="hidden md:flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-500/20 whitespace-nowrap"
                 >
                   <ShieldAlert className="h-3 w-3" />
-                  Register Closed
+                  <span className="hidden lg:inline">Register Closed</span>
                 </a>
               )}
 
-              {/* Held Bills Badge */}
+              {/* Utility Action 1: Held Bills Badge (Small Icon / Utility Button) */}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setHeldModalOpen(true)}
-                className="relative h-8 gap-1.5 text-xs font-medium"
+                className="relative h-8 gap-1.5 text-xs font-medium px-2.5 shrink-0"
+                title="Held Bills"
               >
-                <Pause className="h-3 w-3" />
+                <Pause className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Held Bills</span>
                 {heldCarts.length > 0 && (
                   <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
@@ -2069,23 +2066,24 @@ export default function UnifiedBillingWorkspace({
                 )}
               </Button>
 
-              {/* Ask Copilot */}
+              {/* AI Action 2: Ask Copilot (Small Icon / AI Button) */}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => window.dispatchEvent(new CustomEvent("open-copilot"))}
-                className="h-8 gap-1.5 text-xs font-semibold border-indigo-200 text-indigo-700 bg-indigo-50/50 hover:bg-indigo-100 hover:text-indigo-800 shadow-2xs"
+                className="h-8 gap-1.5 text-xs font-semibold border-indigo-200 text-indigo-700 bg-indigo-50/50 hover:bg-indigo-100 hover:text-indigo-800 shadow-2xs px-2.5 shrink-0"
+                title="Ask Copilot AI"
               >
                 <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
                 <span className="hidden sm:inline">Ask Copilot</span>
               </Button>
 
               {/* Keyboard Shortcut Hints */}
-              <div className="hidden xl:flex items-center gap-1.5 text-[11px] text-muted-foreground border-l pl-2.5">
+              <div className="hidden 2xl:flex items-center gap-1.5 text-[11px] text-muted-foreground border-l pl-2.5 whitespace-nowrap">
                 <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F2</span> Search
-                <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F4</span> Customer
+                <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F4</span> Cust
                 <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F6</span> Hold
-                <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F8</span> Complete
+                <span className="rounded bg-muted px-1.5 py-0.5 font-mono">F8</span> Pay
               </div>
             </>
           )}
