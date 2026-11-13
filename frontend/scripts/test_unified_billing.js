@@ -130,14 +130,15 @@ function testUnifiedBillingWorkspace() {
     paymentPanelSrc.includes("UPI") &&
       paymentPanelSrc.includes("CREDIT") &&
       paymentPanelSrc.includes("CASH") &&
-      paymentPanelSrc.includes("+ Split Payment") &&
+      paymentPanelSrc.includes("+ Add Another Payment Method") &&
       paymentPanelSrc.includes("Outstanding Balance After Purchase") &&
-      workspaceSrc.includes("checkoutActive") &&
+      !workspaceSrc.includes("checkoutActive") &&
       workspaceSrc.includes("selectSingleMethodAllocation") &&
       smartPaymentSrc.includes("selectMethodAllocation") &&
       smartPaymentSrc.includes("selectSingleMethodAllocation") &&
-      smartPaymentSrc.includes("updateAllocationAmount"),
-    "EmbeddedPaymentPanel must default to simple single-payment mode with optional progressive Split Payment mode"
+      smartPaymentSrc.includes("updateAllocationAmount") &&
+      smartPaymentSrc.includes("addPaymentAllocation"),
+    "EmbeddedPaymentPanel must default to simple single-payment mode with optional natural Split Payment addition"
   );
 
   // Invoice History Table & Actions

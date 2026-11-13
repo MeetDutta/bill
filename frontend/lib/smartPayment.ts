@@ -474,6 +474,29 @@ export function selectSingleMethodAllocation(
 }
 
 /**
+ * Appends another payment method to existing allocations, automatically pre-filling
+ * with any remaining balance.
+ */
+export function addPaymentAllocation(
+  allocations: PaymentAllocation[],
+  method: AllocationMethod,
+  billTotalPaise: number
+): PaymentAllocation[] {
+  const safeTotal = Math.max(0, Math.round(billTotalPaise));
+  const metrics = computePaymentMetrics(allocations, safeTotal);
+  const nextPaise = metrics.remainingPaise > 0 ? metrics.remainingPaise : 0;
+  const newRow: PaymentAllocation = {
+    id: createAllocationId(),
+    method,
+    amountPaise: nextPaise,
+    amountDraft: nextPaise > 0 ? formatPaise(nextPaise) : "0.00",
+    isManual: false,
+    reference: "",
+  };
+  return [...allocations, newRow];
+}
+
+/**
  * Computes intuitive quick-cash tender denominations strictly higher than the target bill amount.
  */
 export function computeQuickCashAmounts(targetRupees: number): number[] {

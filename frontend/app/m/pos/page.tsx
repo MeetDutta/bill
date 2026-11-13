@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { printThermalReceipt, downloadInvoicePdf } from "@/lib/receiptPrinter";
 import {
+  addPaymentAllocation,
   blurAllocationAmount,
   buildCheckoutPaymentPayload,
   changeAllocationMethod,
@@ -133,7 +134,6 @@ export default function MobilePOSPage() {
   const [manualBarcodeInput, setManualBarcodeInput] = useState("");
 
   // Smart Unified Payment State
-  const [isSplitMode, setIsSplitMode] = useState(false);
   const [showMobileRefField, setShowMobileRefField] = useState(false);
   const [paymentAllocations, setPaymentAllocations] = useState<PaymentAllocation[]>([]);
   const [otherMethod, setOtherMethod] = useState<OtherPaymentSubMethod>("NETBANKING");
@@ -561,43 +561,35 @@ export default function MobilePOSPage() {
     setErrorMessage(null);
     setShowMobileRefField(false);
     const resolved: AllocationMethod = method === "OTHER" ? otherMethod : method;
-    if (!isSplitMode) {
+    if (paymentAllocations.length <= 1) {
       setPaymentAllocations(selectSingleMethodAllocation(resolved, grandTotalPaise));
       return;
     }
     setPaymentAllocations((prev) => selectMethodAllocation(prev, resolved, grandTotalPaise).allocations);
   };
 
-  const handleEnableMobileSplit = () => {
-    setErrorMessage(null);
-    setIsSplitMode(true);
-    setPaymentAllocations((prev) =>
-      prev.length === 0 ? selectSingleMethodAllocation("CASH", grandTotalPaise) : prev
-    );
-  };
-
-  const handleDisableMobileSplit = () => {
-    setErrorMessage(null);
-    setIsSplitMode(false);
-    setPaymentAllocations((prev) =>
-      prev.length === 0 ? [] : selectSingleMethodAllocation(prev[0].method, grandTotalPaise)
-    );
-  };
-
-  const handleAddMobileSplitRow = () => {
+  const handleAddAnotherMobileMethod = (specifiedMethod?: AllocationMethod) => {
     setErrorMessage(null);
     const candidates: AllocationMethod[] = [
-      "CASH",
       "UPI",
+      "CASH",
       "CARD",
       ...(creditSalesEnabled ? (["CREDIT"] as AllocationMethod[]) : []),
       otherMethod,
     ];
     setPaymentAllocations((prev) => {
+      if (prev.length === 0) {
+        return selectSingleMethodAllocation(specifiedMethod || "CASH", grandTotalPaise);
+      }
       const used = new Set(prev.map((a) => a.method));
-      const next = candidates.find((m) => !used.has(m)) || "CASH";
-      return selectMethodAllocation(prev, next, grandTotalPaise).allocations;
+      const next = specifiedMethod || candidates.find((m) => !used.has(m)) || "UPI";
+      return addPaymentAllocation(prev, next, grandTotalPaise);
     });
+  };
+
+  const handleResetMobilePayments = () => {
+    setErrorMessage(null);
+    setPaymentAllocations([]);
   };
 
   const handleChangeOtherSubMethod = (sub: OtherPaymentSubMethod) => {
@@ -714,7 +706,6 @@ export default function MobilePOSPage() {
         raw: data,
       });
       setPaymentAllocations([]);
-      setIsSplitMode(false);
       setShowMobileRefField(false);
       setMobileWaPhone(customer.phone || "");
       const waPresentation = resolveWhatsAppPresentation(data.whatsapp_delivery, data.bill_sent);
@@ -1133,7 +1124,7 @@ export default function MobilePOSPage() {
           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm flex items-center justify-between">
             <div>
               <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                {isSplitMode ? "Split Payment" : "Payment"}
+                Payment
               </span>
               <span className="text-xs font-bold text-slate-700">Total Payable</span>
             </div>
@@ -1142,7 +1133,7 @@ export default function MobilePOSPage() {
             </span>
           </div>
 
-          {!isSplitMode ? (
+          {paymentAllocations.length <= 1 ? (
             <div className="space-y-3">
               {/* Primary Payment Method Tiles */}
               <div>
@@ -1325,7 +1316,7 @@ export default function MobilePOSPage() {
                             </span>
                             <button
                               type="button"
-                              onClick={handleEnableMobileSplit}
+                              onClick={() => handleAddAnotherMobileMethod("UPI")}
                               className="rounded bg-amber-600 text-white px-2 py-0.5 font-bold"
                             >
                               + Split Remaining
@@ -1407,29 +1398,28 @@ export default function MobilePOSPage() {
                 );
               })()}
 
-              {/* Explicit Split Payment Toggle Button */}
+              {/* Natural Add Another Method Action */}
               <button
                 type="button"
-                onClick={handleEnableMobileSplit}
+                onClick={() => handleAddAnotherMobileMethod()}
                 className="w-full rounded-xl border border-dashed border-slate-300 bg-white py-2.5 text-xs font-bold text-slate-600 hover:text-blue-600 hover:border-blue-400 flex items-center justify-center gap-1.5"
               >
-                <Split className="h-3.5 w-3.5" />
-                <span>+ Split Payment</span>
+                <Plus className="h-3.5 w-3.5" />
+                <span>+ Add Another Payment Method</span>
               </button>
             </div>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-blue-700 flex items-center gap-1">
-                  <Split className="h-3.5 w-3.5" />
-                  Split Payment Allocations
+                <span className="text-xs font-bold text-blue-700">
+                  Payment Methods ({paymentAllocations.length})
                 </span>
                 <button
                   type="button"
-                  onClick={handleDisableMobileSplit}
+                  onClick={handleResetMobilePayments}
                   className="text-xs font-semibold text-slate-500 underline"
                 >
-                  ← Single Payment
+                  Reset to 1 Method
                 </button>
               </div>
 
@@ -1632,7 +1622,7 @@ export default function MobilePOSPage() {
 
               <button
                 type="button"
-                onClick={handleAddMobileSplitRow}
+                onClick={() => handleAddAnotherMobileMethod()}
                 className="w-full rounded-xl border border-slate-300 bg-white py-2 text-xs font-bold text-slate-700 flex items-center justify-center gap-1"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -1643,7 +1633,6 @@ export default function MobilePOSPage() {
 
           {/* Live Inline Validation Notice */}
           {mobileValidationError && !errorMessage && !(
-            !isSplitMode &&
             paymentAllocations.length === 1 &&
             paymentAllocations[0].method === "CREDIT" &&
             (customer.is_walk_in || !customer.confirmed)
@@ -1675,7 +1664,7 @@ export default function MobilePOSPage() {
                 <span>
                   {paymentAllocations.length === 0
                     ? "Select Payment Method"
-                    : !isSplitMode && paymentAllocations.length === 1
+                    : paymentAllocations.length === 1
                       ? paymentAllocations[0].method === "CREDIT"
                         ? `Complete Credit Sale (${formatCurrency(cartSummary.grandTotal)})`
                         : `Complete ${getAllocationDisplayLabel(paymentAllocations[0].method)} Payment (${formatCurrency(cartSummary.grandTotal)})`
