@@ -1302,22 +1302,55 @@ export default function UnifiedBillingWorkspace({
     }
   };
 
+  const handleQuickSelectPhone = async (phoneToUse: string) => {
+    const normPhone = normalizeClientMobile(phoneToUse);
+    if (!normPhone || normPhone.length < 10) {
+      setCreateCustomerError("Please enter a valid 10-digit mobile number.");
+      return;
+    }
+    setCreateCustomerLoading(true);
+    setCreateCustomerError("");
+    try {
+      const res = await customerApi.create({
+        full_name: "Customer",
+        phone: normPhone,
+      } as Partial<Customer>);
+      checkoutIdempotencyKeyRef.current = "";
+      setSelectedCustomer(res.data);
+      setIsWalkIn(false);
+      setCustomerSelectionMode("matched");
+      setMobileInput(res.data.phone || normPhone);
+      setCustomerModalOpen(false);
+      setCheckoutError("");
+      setNewCustomerData(resetNewCustomerDraft());
+    } catch (err: unknown) {
+      try {
+        const lookup = await customerApi.lookupByMobile(normPhone);
+        if (lookup.data?.customer) {
+          checkoutIdempotencyKeyRef.current = "";
+          setSelectedCustomer(lookup.data.customer);
+          setIsWalkIn(false);
+          setCustomerSelectionMode("matched");
+          setMobileInput(lookup.data.customer.phone || normPhone);
+          setCustomerModalOpen(false);
+          setCheckoutError("");
+          return;
+        }
+      } catch (_) {}
+      setCreateCustomerError(parseApiError(err, "Failed to register customer mobile."));
+    } finally {
+      setCreateCustomerLoading(false);
+    }
+  };
+
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedName = newCustomerData.full_name.trim();
+    const trimmedName = newCustomerData.full_name.trim() || "Customer";
     const trimmedPhone = newCustomerData.phone.trim();
     const trimmedAddress = newCustomerData.address_line1.trim();
 
-    if (!trimmedName) {
-      setCreateCustomerError("Customer Name is required.");
-      return;
-    }
     if (!trimmedPhone) {
       setCreateCustomerError("Mobile Number is required.");
-      return;
-    }
-    if (!trimmedAddress) {
-      setCreateCustomerError("Customer Address is required.");
       return;
     }
 
@@ -1336,6 +1369,7 @@ export default function UnifiedBillingWorkspace({
       } as Partial<Customer>);
       checkoutIdempotencyKeyRef.current = "";
       setSelectedCustomer(res.data);
+      setIsWalkIn(false);
       setCustomerSelectionMode("matched");
       setMobileInput(res.data.phone || trimmedPhone);
       setCustomerModalOpen(false);
@@ -1566,15 +1600,47 @@ export default function UnifiedBillingWorkspace({
     // Synchronous lock to prevent duplicate concurrent submissions
     if (inFlightCheckoutRef.current || checkoutLoading) return;
 
+    let currentCustomer = selectedCustomer;
+    let currentIsWalkIn = isWalkIn;
+
     if (customerSelectionMode === "unselected" || customerSelectionMode === "not_found") {
-      setCheckoutError(
-        customerSelectionMode === "not_found"
-          ? "Please save the new customer details or select 'Continue as Walk-in Customer'."
-          : "Please enter the customer's mobile number or explicitly select 'Continue as Walk-in Customer'."
-      );
-      customerSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      customerMobileInputRef.current?.focus();
-      return;
+      const rawMobile = (customerSelectionMode === "not_found" ? newCustomerData.phone : mobileInput).trim();
+      const normMobile = normalizeClientMobile(rawMobile);
+      if (/^\d{10,15}$/.test(normMobile)) {
+        try {
+          const res = await customerApi.create({
+            full_name: newCustomerData.full_name.trim() || "Customer",
+            phone: normMobile,
+          } as Partial<Customer>);
+          currentCustomer = res.data;
+          currentIsWalkIn = false;
+          setSelectedCustomer(res.data);
+          setIsWalkIn(false);
+          setCustomerSelectionMode("matched");
+        } catch (_) {
+          try {
+            const lookup = await customerApi.lookupByMobile(normMobile);
+            if (lookup.data?.customer) {
+              currentCustomer = lookup.data.customer;
+              currentIsWalkIn = false;
+              setSelectedCustomer(lookup.data.customer);
+              setIsWalkIn(false);
+              setCustomerSelectionMode("matched");
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!currentCustomer && !currentIsWalkIn) {
+        setCheckoutError(
+          customerSelectionMode === "not_found"
+            ? "Please save customer details or select 'Continue as Walk-in Customer'."
+            : "Please enter customer mobile number or explicitly select 'Continue as Walk-in Customer'."
+        );
+        customerSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        customerMobileInputRef.current?.focus();
+        return;
+      }
     }
 
     if (paymentAllocations.length === 0) {
@@ -1601,8 +1667,8 @@ export default function UnifiedBillingWorkspace({
     const effectiveTotalPaise = toPaise(effectiveTotal);
     const validationErr = validateSmartPayments(effectiveAllocations, effectiveTotalPaise, {
       creditSalesEnabled,
-      isWalkIn,
-      selectedCustomer,
+      isWalkIn: currentIsWalkIn,
+      selectedCustomer: currentCustomer,
     });
     if (validationErr) {
       setCheckoutError(validationErr);
@@ -1631,19 +1697,19 @@ export default function UnifiedBillingWorkspace({
         overall_discount_type: overallDiscountType,
         overall_discount_value: Number(overallDiscountValue) || 0,
         is_interstate: isInterstate,
-        is_walk_in: isWalkIn,
+        is_walk_in: currentIsWalkIn,
         customer:
-          !isWalkIn && selectedCustomer
+          !currentIsWalkIn && currentCustomer
             ? {
-                id: selectedCustomer.id || undefined,
-                name: selectedCustomer.full_name,
-                phone: selectedCustomer.phone,
-                email: selectedCustomer.email,
-                address_line1: selectedCustomer.address_line1 || selectedCustomer.address || "",
-                city: selectedCustomer.city || "",
-                state: selectedCustomer.state || "",
-                postal_code: selectedCustomer.postal_code || selectedCustomer.pincode || "",
-                gstin: selectedCustomer.gstin || "",
+                id: currentCustomer.id || undefined,
+                name: currentCustomer.full_name,
+                phone: currentCustomer.phone,
+                email: currentCustomer.email,
+                address_line1: currentCustomer.address_line1 || currentCustomer.address || "",
+                city: currentCustomer.city || "",
+                state: currentCustomer.state || "",
+                postal_code: currentCustomer.postal_code || currentCustomer.pincode || "",
+                gstin: currentCustomer.gstin || "",
               }
             : undefined,
         payments: payloadPayments,
@@ -2501,7 +2567,7 @@ export default function UnifiedBillingWorkspace({
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 dark:text-amber-300">
                         <UserPlus className="h-3.5 w-3.5 shrink-0" />
-                        <span>New Customer — Add Details</span>
+                        <span>Mobile: {newCustomerData.phone || mobileInput}</span>
                       </div>
                       <div className="flex items-center gap-2 text-[11px]">
                         <button
@@ -2521,6 +2587,22 @@ export default function UnifiedBillingWorkspace({
                       </div>
                     </div>
 
+                    {/* Instant 1-Click Fast Bill to Phone */}
+                    <div className="flex items-center justify-between rounded-md bg-emerald-500/10 p-2 border border-emerald-500/25">
+                      <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                        Ready to send bill to {newCustomerData.phone || mobileInput}?
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => handleQuickSelectPhone(newCustomerData.phone || mobileInput)}
+                        disabled={createCustomerLoading}
+                        className="h-7 text-xs px-2.5 font-bold bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 shadow-xs"
+                      >
+                        ⚡ Use This Number
+                      </Button>
+                    </div>
+
                     {createCustomerError && (
                       <p className="text-[11px] text-destructive font-medium bg-destructive/10 px-2 py-1 rounded">
                         {createCustomerError}
@@ -2529,8 +2611,7 @@ export default function UnifiedBillingWorkspace({
 
                     <div className="grid grid-cols-2 gap-1.5">
                       <Input
-                        required
-                        placeholder="Customer Name *"
+                        placeholder="Customer Name (Optional)"
                         aria-label="New Customer Name"
                         value={newCustomerData.full_name}
                         onChange={(e) => setNewCustomerData({ ...newCustomerData, full_name: e.target.value })}
@@ -2546,8 +2627,7 @@ export default function UnifiedBillingWorkspace({
                       />
                     </div>
                     <Input
-                      required
-                      placeholder="Full Address / Address Line *"
+                      placeholder="Address (Optional)"
                       aria-label="New Customer Address"
                       value={newCustomerData.address_line1}
                       onChange={(e) => setNewCustomerData({ ...newCustomerData, address_line1: e.target.value })}
@@ -4206,8 +4286,7 @@ export default function UnifiedBillingWorkspace({
               )}
               <div className="grid grid-cols-2 gap-2">
                 <Input
-                  required
-                  placeholder="Full Name *"
+                  placeholder="Full Name (Optional)"
                   value={newCustomerData.full_name}
                   onChange={(e) => setNewCustomerData({ ...newCustomerData, full_name: e.target.value })}
                   className="text-xs"
@@ -4221,8 +4300,7 @@ export default function UnifiedBillingWorkspace({
                 />
               </div>
               <Input
-                required
-                placeholder="Address Line / Full Address *"
+                placeholder="Address Line (Optional)"
                 value={newCustomerData.address_line1}
                 onChange={(e) => setNewCustomerData({ ...newCustomerData, address_line1: e.target.value })}
                 className="text-xs"

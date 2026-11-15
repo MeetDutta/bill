@@ -71,8 +71,12 @@ class Command(BaseCommand):
                 "gst_enabled": True,
                 "allow_negative_stock": False,
                 "credit_sales_enabled": True,
+                "auto_send_whatsapp": True,
             },
         )
+        if not biz_config.auto_send_whatsapp:
+            biz_config.auto_send_whatsapp = True
+            biz_config.save(update_fields=["auto_send_whatsapp"])
 
         # 4A. Ensure Dedicated SUPER ADMIN exists
         super_email = (options.get("email") or os.environ.get("DJANGO_SUPER_ADMIN_EMAIL") or os.environ.get("DJANGO_SUPERUSER_EMAIL") or "superadmin@digitalbill.local").strip().lower()

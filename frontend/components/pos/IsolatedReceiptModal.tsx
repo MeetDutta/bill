@@ -845,32 +845,23 @@ export function IsolatedReceiptModal({
                   Retry
                 </button>
               )}
-              {waState.status === "skipped" && !showPhonePrompt && (
-                <button
-                  type="button"
-                  onClick={() => setShowPhonePrompt(true)}
-                  className="text-[11px] font-bold underline shrink-0 hover:opacity-80"
-                >
-                  Send to Phone
-                </button>
-              )}
             </div>
           )}
 
-          {showPhonePrompt && (
-            <div className="flex items-center gap-1.5">
+          {((waState.status === "skipped" && !customerPhone) || showPhonePrompt) && (
+            <div className="flex items-center gap-1.5 pt-1 border-t border-border/50">
               <input
                 type="tel"
                 value={customWaPhone}
                 onChange={(e) => setCustomWaPhone(e.target.value)}
                 placeholder="Enter customer WhatsApp mobile (e.g. 9876543210)"
-                className="flex-1 rounded border bg-background px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="flex-1 rounded border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
               />
               <button
                 type="button"
                 onClick={() => handleWhatsApp(customWaPhone)}
                 disabled={waState.status === "sending" || waState.status === "queued" || !customWaPhone.trim()}
-                className="rounded bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                className="rounded bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50 shrink-0 cursor-pointer shadow-xs active:scale-95 transition-transform"
               >
                 Send PDF
               </button>

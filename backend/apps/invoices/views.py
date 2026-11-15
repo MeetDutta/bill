@@ -251,7 +251,7 @@ class InvoiceSendWhatsAppView(APIView):
         data = request.data if isinstance(request.data, dict) else {}
         force = bool(data.get("force", False))
         async_mode = bool(data.get("async", False))
-        phone_override = (data.get("phone") or "").strip() or None
+        phone_override = (data.get("phone") or data.get("phone_number") or "").strip() or None
         format_type = (data.get("format_type") or "").strip().lower() or None
         if format_type and format_type not in ("a4", "thermal", "receipt"):
             format_type = None

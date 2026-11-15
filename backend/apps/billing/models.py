@@ -125,7 +125,7 @@ class BusinessConfig(UUIDModel, TenantModel, TimeStampedModel):
     default_invoice_notes = models.TextField(blank=True, default="Looking forward for your business.")
     invoice_elements = models.JSONField(default=default_invoice_elements, blank=True)
     auto_print = models.BooleanField(default=False)
-    auto_send_whatsapp = models.BooleanField(default=False)
+    auto_send_whatsapp = models.BooleanField(default=True)
     require_customer = models.BooleanField(default=False)
     is_pilot_mode = models.BooleanField(default=True)
     pilot_notes = models.TextField(blank=True, default="Controlled Pilot Deployment - Monitored Mode")

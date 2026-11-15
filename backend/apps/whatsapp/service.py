@@ -1450,17 +1450,17 @@ def _evaluate_auto_whatsapp_preconditions(transaction, wa_config_row=None, busin
             .first()
         )
 
-    auto_send_enabled = bool(business_config and business_config.auto_send_whatsapp)
-    if not auto_send_enabled:
-        if wa_config_row is not None:
-            return ("skipped", "Automatic WhatsApp invoice sending is disabled in Settings.", "")
-        return ("noop", "", "")
-
     if wa_config_row is not None and not wa_config_row.is_active:
         return ("skipped", "WhatsApp integration is disabled in Settings.", "")
 
     if WhatsAppService.for_organization(transaction.organization) is None:
         return ("skipped", "WhatsApp not configured", "")
+
+    auto_send_enabled = bool(business_config and business_config.auto_send_whatsapp)
+    if not auto_send_enabled:
+        if wa_config_row is not None:
+            return ("skipped", "Automatic WhatsApp invoice sending is disabled in Settings.", "")
+        return ("noop", "", "")
 
     customer = transaction.customer
     if customer is not None and not customer.whatsapp_opt_in:
@@ -1697,7 +1697,15 @@ def prepare_and_dispatch_post_sale_invoice_whatsapp(transaction_id: str, *, disp
         if action_to_dispatch == "pdf_only":
             _dispatch_pdf_only(str(tx.id))
         elif action_to_dispatch == "whatsapp":
-            if not getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+            if getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+                # When CELERY_TASK_ALWAYS_EAGER is enabled (Render deployment or tests), run synchronously
+                # so the WhatsApp dispatch is guaranteed to complete reliably and not lost to an ephemeral daemon thread.
+                try:
+                    generate_invoice_task.delay(str(tx.id), dispatch_whatsapp=True)
+                except Exception as exc:
+                    logger.warning("Eager Celery task failed, attempting direct delivery: %s", sanitize_whatsapp_error(exc))
+                    deliver_invoice_pdf_via_whatsapp(transaction=tx, force=True, record_failure=True)
+            else:
                 try:
                     generate_invoice_task.delay(str(tx.id), dispatch_whatsapp=True)
                 except Exception as exc:
@@ -1706,10 +1714,6 @@ def prepare_and_dispatch_post_sale_invoice_whatsapp(transaction_id: str, *, disp
                         sanitize_whatsapp_error(exc),
                     )
                     _spawn_post_sale_background_thread(str(tx.id), dispatch_whatsapp=True)
-            elif _should_run_sync_in_tests():
-                generate_invoice_task.delay(str(tx.id), dispatch_whatsapp=True)
-            else:
-                _spawn_post_sale_background_thread(str(tx.id), dispatch_whatsapp=True)
 
         return result_payload
 
