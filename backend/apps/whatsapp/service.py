@@ -1061,45 +1061,56 @@ def deliver_invoice_pdf_via_whatsapp(
                 "invoice_number": invoice.invoice_number,
             }
 
-        send_result = service.send_document(
-            to=phone,
-            media_id=media_id,
-            filename=filename,
-            caption=caption,
-        )
-        messages_list = send_result.get("messages") if isinstance(send_result, dict) else None
-        wamid = messages_list[0].get("id") if isinstance(messages_list, list) and messages_list and isinstance(messages_list[0], dict) else ""
+        from apps.whatsapp.models import WhatsAppTemplate
+
+        has_approved_template = WhatsAppTemplate.objects.filter(
+            organization=transaction.organization,
+            name="customer_invoice",
+            is_active=True,
+        ).exists()
+
+        wamid = ""
+        send_result = {}
         sent_via = "document_media_id"
 
-        if not wamid:
-            # Fallback to approved Meta WhatsApp utility template (customer_invoice)
-            # This allows automatic delivery even when outside the 24-hour customer service window
-            # without requiring the customer to send "hi" first.
+        if has_approved_template:
+            # Primary delivery: Approved Meta WhatsApp utility template (customer_invoice)
+            # Utility templates deliver 24/7 without requiring the customer to send "hi" first.
+            cust_name = (
+                getattr(customer, "full_name", "")
+                or getattr(customer, "name", "")
+                or getattr(invoice, "customer_name_snapshot", "")
+                or "Valued Customer"
+            )
+            tx_total_val = getattr(transaction, "total", None)
+            if tx_total_val is None:
+                tx_total_val = getattr(invoice, "total", 0)
+            tx_total_str = f"{float(tx_total_val or 0):.2f}"
+
+            template_components = [
+                {
+                    "type": "header",
+                    "parameters": [
+                        {
+                            "type": "document",
+                            "document": {
+                                "id": media_id,
+                                "filename": filename,
+                            },
+                        }
+                    ],
+                },
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": cust_name},
+                        {"type": "text", "text": invoice.invoice_number},
+                        {"type": "text", "text": tx_total_str},
+                    ],
+                },
+            ]
+
             try:
-                cust_name = getattr(customer, "full_name", "") or getattr(invoice, "customer_name_snapshot", "") or "Valued Customer"
-                tx_total_str = f"{float(getattr(transaction, 'total', 0) or 0):.2f}"
-                template_components = [
-                    {
-                        "type": "header",
-                        "parameters": [
-                            {
-                                "type": "document",
-                                "document": {
-                                    "id": media_id,
-                                    "filename": filename,
-                                },
-                            }
-                        ],
-                    },
-                    {
-                        "type": "body",
-                        "parameters": [
-                            {"type": "text", "text": cust_name},
-                            {"type": "text", "text": invoice.invoice_number},
-                            {"type": "text", "text": tx_total_str},
-                        ],
-                    },
-                ]
                 tmpl_res = service.send_template(
                     to=phone,
                     template_name="customer_invoice",
@@ -1113,7 +1124,19 @@ def deliver_invoice_pdf_via_whatsapp(
                         send_result = tmpl_res
                         sent_via = "template_customer_invoice"
             except Exception as tmpl_exc:
-                logger.warning("Template fallback attempt failed: %s", sanitize_whatsapp_error(tmpl_exc))
+                logger.info("Template send attempt failed: %s", sanitize_whatsapp_error(tmpl_exc))
+
+        # Fallback to direct document message if template was not configured or not accepted
+        if not wamid:
+            sent_via = "document_media_id"
+            send_result = service.send_document(
+                to=phone,
+                media_id=media_id,
+                filename=filename,
+                caption=caption,
+            )
+            messages_list = send_result.get("messages") if isinstance(send_result, dict) else None
+            wamid = messages_list[0].get("id") if isinstance(messages_list, list) and messages_list and isinstance(messages_list[0], dict) else ""
 
         if wamid:
             now = timezone.now()
