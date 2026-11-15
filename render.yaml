@@ -54,6 +54,12 @@ services:
         value: SuperAdmin@123456
       - key: DJANGO_SUPERUSER_FIRST_NAME
         value: SuperAdmin
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        value: "1382325121639709"
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        value: "1646296526870554"
+      - key: WHATSAPP_ACCESS_TOKEN
+        value: EAAaZBDEh0accBS9aZC7K3L6FvfqTAa8jOA4ycwZBo7OMLZAZCCTHEZAjZCXlZBYdReiTzygeZAhPHEqfSa4PYsixMrWxlpZA7IvwXqJlrKkhTe2XwdTCOXvuGRZAEVFNGlf8JeNFz4PibIqqKi933QgMNVRAhVKewZBVmNDeLztTbTFzFj2T4sEhH9lYAvvI2h4eTiKb5gZDZD
 
   # ==========================================
   # Frontend Web Service (Next.js 14)

@@ -234,4 +234,57 @@ class Command(BaseCommand):
                 Product.objects.create(organization=org, **p_data)
             self.stdout.write(self.style.SUCCESS(f"Seeded {len(starter_products)} starter products for POS billing."))
 
+        # 7. Ensure WhatsApp Cloud API Config exists and is populated
+        try:
+            from apps.whatsapp.models import WhatsAppConfig, WhatsAppTemplate
+
+            wa_config = WhatsAppConfig.objects.filter(organization=org).first()
+            wa_phone_id = (os.environ.get("WHATSAPP_PHONE_NUMBER_ID") or "1382325121639709").strip()
+            wa_account_id = (os.environ.get("WHATSAPP_BUSINESS_ACCOUNT_ID") or "1646296526870554").strip()
+            wa_token = (
+                os.environ.get("WHATSAPP_ACCESS_TOKEN")
+                or "EAAaZBDEh0accBS9aZC7K3L6FvfqTAa8jOA4ycwZBo7OMLZAZCCTHEZAjZCXlZBYdReiTzygeZAhPHEqfSa4PYsixMrWxlpZA7IvwXqJlrKkhTe2XwdTCOXvuGRZAEVFNGlf8JeNFz4PibIqqKi933QgMNVRAhVKewZBVmNDeLztTbTFzFj2T4sEhH9lYAvvI2h4eTiKb5gZDZD"
+            ).strip()
+
+            if not wa_config:
+                wa_config = WhatsAppConfig.objects.create(
+                    organization=org,
+                    phone_number_id=wa_phone_id,
+                    business_account_id=wa_account_id,
+                    access_token=wa_token,
+                    is_active=True,
+                )
+                self.stdout.write(self.style.SUCCESS(f"Created initial WhatsApp Cloud API configuration for '{org.name}'"))
+            else:
+                updated_fields = []
+                if not wa_config.phone_number_id and wa_phone_id:
+                    wa_config.phone_number_id = wa_phone_id
+                    updated_fields.append("phone_number_id")
+                if not wa_config.access_token and wa_token:
+                    wa_config.access_token = wa_token
+                    updated_fields.append("access_token")
+                if not wa_config.business_account_id and wa_account_id:
+                    wa_config.business_account_id = wa_account_id
+                    updated_fields.append("business_account_id")
+                if not wa_config.is_active:
+                    wa_config.is_active = True
+                    updated_fields.append("is_active")
+                if updated_fields:
+                    wa_config.save(update_fields=updated_fields)
+                    self.stdout.write(self.style.SUCCESS(f"Updated WhatsApp Cloud API configuration for '{org.name}'"))
+
+            WhatsAppTemplate.objects.get_or_create(
+                organization=org,
+                name="customer_invoice",
+                defaults={
+                    "template_id": "customer_invoice",
+                    "category": "utility",
+                    "language": "en_US",
+                    "status": "approved",
+                    "is_active": True,
+                },
+            )
+        except Exception as wa_seed_err:
+            self.stdout.write(self.style.WARNING(f"WhatsApp configuration seeding non-fatal warning: {wa_seed_err}"))
+
         self.stdout.write(self.style.SUCCESS("All default deployment credentials and stores verified successfully."))
