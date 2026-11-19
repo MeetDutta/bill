@@ -869,7 +869,7 @@ export interface InventoryMovement {
   sku: string;
   store_name?: string;
   user_name?: string;
-  movement_type: "SALE" | "PURCHASE" | "RETURN" | "ADJUSTMENT" | "DAMAGE" | "OPENING_STOCK" | "TRANSFER";
+  movement_type: "SALE" | "PURCHASE" | "RETURN" | "ADJUSTMENT" | "DAMAGE" | "OPENING_STOCK" | "TRANSFER" | "LOSS" | "FOUND" | "CORRECTION" | string;
   quantity: string;
   previous_stock: string;
   new_stock: string;

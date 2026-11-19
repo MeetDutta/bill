@@ -34,32 +34,39 @@ class CustomerListView(generics.ListCreateAPIView):
                 qs = qs.filter(is_walk_in=False)
             raw_search = str(self.request.query_params.get("search") or "").strip()
             if raw_search:
+                from django.db.models.functions import Concat
+                from django.db.models import Value
                 norm_search = normalize_phone(raw_search)
                 if _is_valid_uuid(raw_search):
                     qs = qs.filter(Q(id=raw_search) | Q(customer_id__iexact=raw_search))
-                elif norm_search and norm_search.isdigit() and len(norm_search) >= 4 and norm_search != raw_search:
-                    # Allow searching "+91 98765-43210" to match normalized stored phone "9876543210"
-                    qs = qs.filter(
-                        Q(phone__icontains=norm_search)
-                        | Q(phone__icontains=raw_search)
-                        | Q(first_name__icontains=raw_search)
+                else:
+                    name_q = (
+                        Q(first_name__icontains=raw_search)
                         | Q(last_name__icontains=raw_search)
+                    )
+                    search_terms = raw_search.split()
+                    if len(search_terms) > 1:
+                        qs = qs.annotate(full_name_concat=Concat("first_name", Value(" "), "last_name"))
+                        name_q = name_q | Q(full_name_concat__icontains=raw_search)
+
+                    phone_q = Q(phone__icontains=raw_search)
+                    if norm_search and norm_search != raw_search:
+                        phone_q = phone_q | Q(phone__icontains=norm_search)
+
+                    qs = qs.filter(
+                        name_q
+                        | phone_q
                         | Q(email__icontains=raw_search)
                         | Q(customer_id__icontains=raw_search)
+                        | Q(gstin__icontains=raw_search)
+                        | Q(city__icontains=raw_search)
+                        | Q(address_line1__icontains=raw_search)
                     )
         return qs
 
     def filter_queryset(self, queryset):
         raw_search = str(self.request.query_params.get("search") or "").strip()
-        norm_search = normalize_phone(raw_search)
-        skip_drf_search = bool(
-            raw_search
-            and (
-                _is_valid_uuid(raw_search)
-                or (norm_search and norm_search.isdigit() and len(norm_search) >= 4 and norm_search != raw_search)
-            )
-        )
-        if self.request.method == "GET" and skip_drf_search:
+        if self.request.method == "GET" and raw_search:
             for backend in list(self.filter_backends):
                 if getattr(backend, "__name__", "") == "SearchFilter":
                     continue

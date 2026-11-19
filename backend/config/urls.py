@@ -222,6 +222,7 @@ urlpatterns = [
     path("api/v1/alerts/<uuid:pk>/dismiss/", BusinessAlertDismissView.as_view(), name="root-alert-dism"),
     path("api/v1/pos/", include(("apps.billing.urls", "billing"), namespace="pos")),
     path("api/v1/billing/", include("apps.billing.urls")),
+    path("api/v1/migration/", include("apps.migration.urls")),
     path("api/v1/health/system/", SystemHealthView.as_view(), name="root-system-health"),
     path("api/v1/health/", include("apps.notifications.health_urls")),
     path("health/", include("apps.notifications.health_urls")),

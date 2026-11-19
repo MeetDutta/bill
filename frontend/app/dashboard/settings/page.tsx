@@ -141,10 +141,23 @@ export default function SettingsPage() {
   const signatureInputRef = useRef<HTMLInputElement>(null);
 
   // WhatsApp state
+  const DEFAULT_WHATSAPP_TEMPLATE = `Hello {customer_name},
+
+Thank you for shopping with us!
+
+Your invoice #{invoice_number} is attached.
+
+Total Amount: {total_amount}
+
+Date: {invoice_date}
+
+Thank you for choosing {business_name}.`;
+
   const [whatsappData, setWhatsappData] = useState({
     business_account_id: "",
     phone_number_id: "",
     access_token: "",
+    custom_invoice_message: "",
     is_active: true,
   });
 
@@ -163,6 +176,7 @@ export default function SettingsPage() {
             business_account_id: waRes.data.business_account_id || "",
             phone_number_id: waRes.data.phone_number_id || "",
             access_token: "",
+            custom_invoice_message: waRes.data.custom_invoice_message || "",
             is_active: waRes.data.is_active ?? true,
           });
         }
@@ -1890,6 +1904,119 @@ export default function SettingsPage() {
                     <p className="text-[11px] text-muted-foreground">
                       When enabled and WhatsApp is active, every completed POS checkout and converted quotation automatically sends the PDF invoice in the background when the customer has a valid WhatsApp phone number.
                     </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Custom WhatsApp Invoice Message Template Section */}
+              <div className="space-y-3 rounded-lg border border-border/80 bg-muted/10 p-3 sm:p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <MessageSquare className="h-4 w-4 text-emerald-600" />
+                      <span>Custom WhatsApp Invoice Message Template</span>
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Configure the personalized message sent along with the generated invoice PDF document.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setWhatsappData((prev) => ({
+                        ...prev,
+                        custom_invoice_message: DEFAULT_WHATSAPP_TEMPLATE,
+                      }))
+                    }
+                    className="h-7 text-[11px] px-2 font-medium shrink-0"
+                  >
+                    Restore Default
+                  </Button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-muted-foreground">Click to insert dynamic placeholder:</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { tag: "{customer_name}", desc: "Customer Name" },
+                      { tag: "{customer_phone}", desc: "Phone" },
+                      { tag: "{invoice_number}", desc: "Invoice #" },
+                      { tag: "{invoice_date}", desc: "Date" },
+                      { tag: "{total_amount}", desc: "Grand Total" },
+                      { tag: "{business_name}", desc: "Store / Company" },
+                    ].map((item) => (
+                      <button
+                        key={item.tag}
+                        type="button"
+                        onClick={() =>
+                          setWhatsappData((prev) => ({
+                            ...prev,
+                            custom_invoice_message: (prev.custom_invoice_message || DEFAULT_WHATSAPP_TEMPLATE) + ` ${item.tag} `,
+                          }))
+                        }
+                        className="rounded-md border bg-background px-2 py-1 text-[11px] font-mono font-medium hover:border-emerald-500 hover:text-emerald-600 transition-colors"
+                        title={item.desc}
+                      >
+                        + {item.tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-1">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-foreground">Message Template</label>
+                    <textarea
+                      rows={7}
+                      value={whatsappData.custom_invoice_message || DEFAULT_WHATSAPP_TEMPLATE}
+                      onChange={(e) =>
+                        setWhatsappData((prev) => ({
+                          ...prev,
+                          custom_invoice_message: e.target.value,
+                        }))
+                      }
+                      placeholder={DEFAULT_WHATSAPP_TEMPLATE}
+                      className="w-full rounded-md border border-input bg-background p-2.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y"
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Document caption limit: up to 1024 characters.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                      <span>WhatsApp Preview</span>
+                      <span className="text-[10px] text-emerald-600 font-medium">Live Customer View</span>
+                    </label>
+                    <div className="rounded-lg border bg-[#efeae2] dark:bg-[#111b21] p-3 text-xs shadow-inner min-h-[170px] flex flex-col justify-between">
+                      <div className="rounded-lg bg-white dark:bg-[#202c33] p-2.5 text-foreground shadow-xs space-y-2 border-l-4 border-emerald-500">
+                        {/* Attached PDF document badge */}
+                        <div className="flex items-center gap-2 p-2 rounded bg-muted/60 dark:bg-muted/20 border border-muted">
+                          <FileText className="h-6 w-6 text-red-500 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-bold truncate">Rahul_Sharma_INV-1024_2026-11-19.pdf</p>
+                            <p className="text-[9px] text-muted-foreground">1 page • 142 kB • PDF Document</p>
+                          </div>
+                        </div>
+
+                        {/* Formatted body text */}
+                        <p className="whitespace-pre-wrap font-sans text-xs text-foreground/90 leading-relaxed">
+                          {(whatsappData.custom_invoice_message || DEFAULT_WHATSAPP_TEMPLATE)
+                            .replace(/{customer_name}/g, "Rahul Sharma")
+                            .replace(/{customer_phone}/g, "+91 98765 43210")
+                            .replace(/{invoice_number}/g, "INV-1024")
+                            .replace(/{invoice_date}/g, new Date().toISOString().slice(0, 10))
+                            .replace(/{total_amount}/g, "₹1,450.00")
+                            .replace(/{business_name}/g, posData.business_name || "BillMeet Retail")}
+                        </p>
+                        <div className="text-[9px] text-muted-foreground text-right flex items-center justify-end gap-1">
+                          <span>12:45 PM</span>
+                          <span className="text-emerald-500">✓✓</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

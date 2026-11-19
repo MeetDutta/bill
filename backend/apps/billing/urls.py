@@ -18,6 +18,7 @@ from .views import (
     POSRegisterCloseView,
     POSInventoryMovementListView,
     POSInventoryAdjustView,
+    POSInventorySummaryView,
     POSPurchaseOrderView,
     POSPurchaseOrderDetailView,
     POSPurchaseOrderReceiveView,
@@ -97,6 +98,7 @@ urlpatterns = [
     path("register/close/", POSRegisterCloseView.as_view(), name="pos-register-close"),
 
     # Inventory
+    path("inventory/summary/", POSInventorySummaryView.as_view(), name="pos-inventory-summary"),
     path("inventory/movements/", POSInventoryMovementListView.as_view(), name="pos-inventory-movements"),
     path("inventory/adjust/", POSInventoryAdjustView.as_view(), name="pos-inventory-adjust"),
     path("inventory/adjustments/", POSManualAdjustmentsListView.as_view(), name="pos-inventory-adjustments"),

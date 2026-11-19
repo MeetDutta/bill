@@ -263,6 +263,24 @@ export default function UnifiedBillingWorkspace({
   const customerSectionRef = useRef<HTMLDivElement | null>(null);
   const customerMobileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Live autocomplete customer search
+  const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const [customerSearching, setCustomerSearching] = useState(false);
+  const customerSearchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Category quick-create state
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState("");
+
+  // WhatsApp Resend Modal state
+  const [resendWhatsAppModalOpen, setResendWhatsAppModalOpen] = useState(false);
+  const [resendTargetInvoice, setResendTargetInvoice] = useState<Invoice | null>(null);
+  const [resendPhoneInput, setResendPhoneInput] = useState("");
+  const [resendingWhatsApp, setResendingWhatsApp] = useState(false);
+
   // ==========================================
   // 6. QUICK ADD PRODUCT MODAL
   // ==========================================
@@ -1228,16 +1246,87 @@ export default function UnifiedBillingWorkspace({
     return cleaned;
   };
 
+  const handleInlineCustomerInputChange = (val: string) => {
+    setMobileInput(val);
+    if (mobileLookupError) setMobileLookupError("");
+
+    if (customerSearchTimeoutRef.current) {
+      clearTimeout(customerSearchTimeoutRef.current);
+    }
+
+    const trimmed = val.trim();
+    if (!trimmed) {
+      setCustomerSuggestions([]);
+      setCustomerDropdownOpen(false);
+      return;
+    }
+
+    customerSearchTimeoutRef.current = setTimeout(async () => {
+      setCustomerSearching(true);
+      try {
+        const res = await customerApi.list({ search: trimmed, page_size: 8 });
+        const list = res.data?.results || [];
+        setCustomerSuggestions(list);
+        setCustomerDropdownOpen(true);
+      } catch {
+        setCustomerSuggestions([]);
+      } finally {
+        setCustomerSearching(false);
+      }
+    }, 200);
+  };
+
+  const handleSelectSuggestedCustomer = (c: Customer) => {
+    checkoutIdempotencyKeyRef.current = "";
+    setSelectedCustomer(c);
+    setCustomerSelectionMode("matched");
+    setMobileInput(c.phone || "");
+    setCustomerDropdownOpen(false);
+    setCustomerSuggestions([]);
+    setCheckoutError("");
+  };
+
+  const handleStartCreateCustomerFromQuery = (query: string) => {
+    const trimmed = query.trim();
+    const isDigits = /^\d+$/.test(trimmed);
+    setNewCustomerData({
+      ...resetNewCustomerDraft(),
+      full_name: isDigits ? "" : trimmed,
+      phone: isDigits ? trimmed : "",
+    });
+    setCustomerSelectionMode("not_found");
+    setCustomerDropdownOpen(false);
+    setCustomerSuggestions([]);
+    setMobileLookupError("");
+  };
+
   const handleLookupCustomerByMobile = async (overrideInput?: string) => {
     const raw = (overrideInput ?? mobileInput).trim();
     if (!raw) {
-      setMobileLookupError("Enter a customer mobile number or choose Walk-in Customer.");
+      setMobileLookupError("Enter a customer name, mobile number or choose Walk-in.");
       return;
     }
     const normalized = normalizeClientMobile(raw);
-    if (!/^\d{10,15}$/.test(normalized) || (normalized.length === 10 && !/^[6-9]/.test(normalized))) {
-      setMobileLookupError("Please enter a valid 10-digit mobile number.");
-      return;
+
+    // If text contains letters, treat as name search
+    if (/[a-zA-Z]/.test(raw) || (!/^\d{10,15}$/.test(normalized) && normalized.length < 10)) {
+      setMobileLookupLoading(true);
+      try {
+        const res = await customerApi.list({ search: raw, page_size: 5 });
+        const results = res.data?.results || [];
+        if (results.length > 0) {
+          handleSelectSuggestedCustomer(results[0]);
+          return;
+        } else {
+          handleStartCreateCustomerFromQuery(raw);
+          return;
+        }
+      } catch {
+        handleStartCreateCustomerFromQuery(raw);
+        return;
+      } finally {
+        setMobileLookupLoading(false);
+      }
     }
 
     setMobileLookupLoading(true);
@@ -1251,6 +1340,7 @@ export default function UnifiedBillingWorkspace({
         setSelectedCustomer(data.customer);
         setCustomerSelectionMode("matched");
         setMobileInput(data.customer.phone || normalized);
+        setCustomerDropdownOpen(false);
         setCheckoutError("");
       } else {
         checkoutIdempotencyKeyRef.current = "";
@@ -1260,11 +1350,94 @@ export default function UnifiedBillingWorkspace({
           phone: data?.normalized_mobile || normalized,
         });
         setCustomerSelectionMode("not_found");
+        setCustomerDropdownOpen(false);
       }
     } catch (err: unknown) {
       setMobileLookupError(parseApiError(err, "Failed to verify mobile number."));
     } finally {
       setMobileLookupLoading(false);
+    }
+  };
+
+  const handleCreateNewCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newCatName.trim();
+    if (!name) return;
+    if (categories.some((c) => c.toLowerCase() === name.toLowerCase())) {
+      setCategoryError("Category already exists.");
+      return;
+    }
+    setCreatingCategory(true);
+    setCategoryError("");
+    try {
+      await productApi.createCategory({ name });
+      setCategories((prev) => Array.from(new Set([...prev, name])).sort((a, b) => a.localeCompare(b)));
+      setSelectedCategory(name);
+      setNewCatName("");
+      setShowCategoryModal(false);
+    } catch (err: unknown) {
+      setCategoryError(parseApiError(err, "Failed to create category."));
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
+  const handleOpenResendWhatsAppModal = (inv: Invoice, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const existingPhone = inv.customer_phone || (inv.customer_details as any)?.phone || "";
+    setResendTargetInvoice(inv);
+    setResendPhoneInput(existingPhone);
+    setResendWhatsAppModalOpen(true);
+  };
+
+  const handleExecuteResendWhatsApp = async () => {
+    if (!resendTargetInvoice?.id) return;
+    const phoneToUse = resendPhoneInput.trim();
+    if (!phoneToUse) {
+      alert("Please enter a customer mobile number.");
+      return;
+    }
+    setResendingWhatsApp(true);
+    setWhatsappFeedback(null);
+    try {
+      const res = await invoiceApi.sendWhatsApp(resendTargetInvoice.id, {
+        phone: phoneToUse,
+        force: true,
+        format_type: resendTargetInvoice.template_format === "thermal" ? "thermal" : "a4",
+      });
+      const data = res.data;
+      if (data?.status === "sent" || data?.status === "already_sent") {
+        const updatedDelivery = data.whatsapp_delivery || { status: "sent" as const };
+        syncWhatsAppDeliveryState(resendTargetInvoice.id, updatedDelivery, true);
+        setWhatsappFeedback({
+          type: "success",
+          invoiceId: resendTargetInvoice.id,
+          message: `✓ Invoice #${resendTargetInvoice.invoice_number} PDF sent to ${phoneToUse}!`,
+        });
+      } else if (data?.status === "queued" || data?.status === "processing") {
+        setWhatsappFeedback({
+          type: "success",
+          invoiceId: resendTargetInvoice.id,
+          message: `Invoice #${resendTargetInvoice.invoice_number} PDF queued for WhatsApp delivery to ${phoneToUse}.`,
+        });
+      } else {
+        setWhatsappFeedback({
+          type: "error",
+          invoiceId: resendTargetInvoice.id,
+          message: `⚠ WhatsApp delivery failed${data?.error ? `: ${data.error}` : "."}`,
+        });
+      }
+      setResendWhatsAppModalOpen(false);
+      setResendTargetInvoice(null);
+      setResendPhoneInput("");
+    } catch (err: unknown) {
+      setWhatsappFeedback({
+        type: "error",
+        invoiceId: resendTargetInvoice.id,
+        message: `⚠ ${parseApiError(err, "WhatsApp delivery failed.")}`,
+      });
+    } finally {
+      setResendingWhatsApp(false);
     }
   };
 
@@ -1376,6 +1549,21 @@ export default function UnifiedBillingWorkspace({
       setCheckoutError("");
       setNewCustomerData(resetNewCustomerDraft());
     } catch (err: unknown) {
+      try {
+        const norm = normalizeClientMobile(trimmedPhone);
+        const lookup = await customerApi.lookupByMobile(norm || trimmedPhone);
+        if (lookup.data?.customer) {
+          checkoutIdempotencyKeyRef.current = "";
+          setSelectedCustomer(lookup.data.customer);
+          setIsWalkIn(false);
+          setCustomerSelectionMode("matched");
+          setMobileInput(lookup.data.customer.phone || trimmedPhone);
+          setCustomerModalOpen(false);
+          setCheckoutError("");
+          setNewCustomerData(resetNewCustomerDraft());
+          return;
+        }
+      } catch (_) {}
       setCreateCustomerError(
         parseApiError(err, "Failed to create customer. Check mobile number or details.")
       );
@@ -1940,6 +2128,12 @@ export default function UnifiedBillingWorkspace({
     if (e) e.stopPropagation();
     if (!inv?.id || sendingWhatsAppId === inv.id) return;
 
+    const existingPhone = inv.customer_phone || (inv.customer_details as any)?.phone || "";
+    if (!existingPhone) {
+      handleOpenResendWhatsAppModal(inv, e);
+      return;
+    }
+
     setSendingWhatsAppId(inv.id);
     setWhatsappFeedback(null);
     try {
@@ -2344,13 +2538,14 @@ export default function UnifiedBillingWorkspace({
                 </Button>
               </div>
 
-              {/* Category Filter Pills */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+              {/* Category Filter Pills (Sell Page Navigation) */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
                 <button
+                  type="button"
                   onClick={() => setSelectedCategory("all")}
-                  className={`rounded-full px-3 py-1 font-medium transition-colors ${
+                  className={`rounded-full px-3 py-1 font-medium transition-colors shrink-0 ${
                     selectedCategory === "all"
-                      ? "bg-primary text-primary-foreground"
+                      ? "bg-primary text-primary-foreground shadow-xs"
                       : "bg-muted text-muted-foreground hover:bg-muted/80"
                   }`}
                 >
@@ -2359,16 +2554,37 @@ export default function UnifiedBillingWorkspace({
                 {categories.map((c) => (
                   <button
                     key={c}
+                    type="button"
                     onClick={() => setSelectedCategory(c)}
                     className={`rounded-full px-3 py-1 font-medium transition-colors shrink-0 ${
                       selectedCategory === c
-                        ? "bg-primary text-primary-foreground"
+                        ? "bg-primary text-primary-foreground shadow-xs"
                         : "bg-muted text-muted-foreground hover:bg-muted/80"
                     }`}
                   >
                     {c}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory("uncategorized")}
+                  className={`rounded-full px-3 py-1 font-medium transition-colors shrink-0 ${
+                    selectedCategory === "uncategorized"
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "bg-muted/60 text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Uncategorized
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCategoryModal(true)}
+                  className="rounded-full px-2.5 py-1 font-semibold border border-dashed border-primary/40 text-primary hover:bg-primary/10 transition-colors shrink-0 flex items-center gap-1"
+                  title="Create New Category"
+                >
+                  <Plus className="h-3 w-3" />
+                  <span>Category</span>
+                </button>
               </div>
 
               {/* Products Grid */}
@@ -2492,41 +2708,118 @@ export default function UnifiedBillingWorkspace({
               {/* Step 1: Mobile-First Inline Customer Identification */}
               <div ref={customerSectionRef} className="border-b pb-2.5 shrink-0 space-y-2">
                 {customerSelectionMode === "unselected" && (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 relative">
                     <div className="flex items-center justify-between gap-2">
                       <label className="text-[11px] font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                        <Phone className="h-3.5 w-3.5 text-primary" />
-                        <span>Customer Mobile Number</span>
+                        <Users className="h-3.5 w-3.5 text-primary" />
+                        <span>Customer (Name or Mobile)</span>
                       </label>
                       <button
                         type="button"
                         onClick={() => setCustomerModalOpen(true)}
                         className="text-[11px] font-semibold text-primary hover:underline flex items-center gap-1"
                       >
-                        <Users className="h-3 w-3" />
+                        <Search className="h-3 w-3" />
                         <span>Directory (F4)</span>
                       </button>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <Input
-                        ref={customerMobileInputRef}
-                        type="tel"
-                        inputMode="tel"
-                        placeholder="Enter 10-digit mobile number..."
-                        aria-label="Customer Mobile Number"
-                        value={mobileInput}
-                        onChange={(e) => {
-                          setMobileInput(e.target.value);
-                          if (mobileLookupError) setMobileLookupError("");
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleLookupCustomerByMobile();
-                          }
-                        }}
-                        className="h-8 text-xs font-mono flex-1"
-                      />
+                      <div className="relative flex-1">
+                        <Input
+                          ref={customerMobileInputRef}
+                          type="text"
+                          placeholder="Search customer name or 10-digit mobile..."
+                          aria-label="Customer Name or Mobile Number"
+                          value={mobileInput}
+                          onChange={(e) => handleInlineCustomerInputChange(e.target.value)}
+                          onFocus={() => {
+                            if (mobileInput.trim() && customerSuggestions.length > 0) {
+                              setCustomerDropdownOpen(true);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              if (customerSuggestions.length > 0) {
+                                handleSelectSuggestedCustomer(customerSuggestions[0]);
+                              } else {
+                                handleLookupCustomerByMobile();
+                              }
+                            } else if (e.key === "Escape") {
+                              setCustomerDropdownOpen(false);
+                            }
+                          }}
+                          className="h-8 text-xs font-medium flex-1 pr-7"
+                        />
+                        {customerSearching && (
+                          <div className="absolute right-2 top-2">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        )}
+
+                        {/* Live Autocomplete Dropdown */}
+                        {customerDropdownOpen && mobileInput.trim().length > 0 && (
+                          <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-md border bg-popover text-popover-foreground shadow-lg overflow-hidden max-h-60 overflow-y-auto">
+                            {customerSuggestions.length > 0 ? (
+                              <div className="p-1 space-y-0.5">
+                                {customerSuggestions.map((c) => (
+                                  <div
+                                    key={c.id}
+                                    onClick={() => handleSelectSuggestedCustomer(c)}
+                                    className="p-2 hover:bg-accent rounded-sm cursor-pointer transition-colors text-xs flex items-center justify-between gap-2"
+                                  >
+                                    <div className="min-w-0">
+                                      <p className="font-bold text-foreground truncate">{c.full_name}</p>
+                                      <p className="text-[11px] font-mono text-muted-foreground">{c.phone}</p>
+                                      {(c.address_line1 || c.city) && (
+                                        <p className="text-[10px] text-muted-foreground truncate">
+                                          {[c.address_line1, c.city, c.state].filter(Boolean).join(", ")}
+                                        </p>
+                                      )}
+                                    </div>
+                                    {Number(c.outstanding_credit || 0) > 0 && (
+                                      <span className="text-[10px] font-semibold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded shrink-0">
+                                        Due: ₹{Number(c.outstanding_credit).toFixed(2)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                                <div className="border-t pt-1 mt-1 px-2 py-1 flex items-center justify-between text-[11px] bg-muted/30">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartCreateCustomerFromQuery(mobileInput)}
+                                    className="font-semibold text-primary hover:underline"
+                                  >
+                                    + Add New Customer &ldquo;{mobileInput}&rdquo;
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCustomerDropdownOpen(false)}
+                                    className="text-muted-foreground hover:text-foreground"
+                                  >
+                                    Close
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="p-3 text-center space-y-2">
+                                <p className="text-xs text-muted-foreground">
+                                  No customer found matching &ldquo;{mobileInput}&rdquo;
+                                </p>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => handleStartCreateCustomerFromQuery(mobileInput)}
+                                  className="h-7 text-xs font-semibold w-full"
+                                >
+                                  + Create Customer &ldquo;{mobileInput}&rdquo;
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
                       <Button
                         type="button"
                         size="sm"
@@ -2537,19 +2830,21 @@ export default function UnifiedBillingWorkspace({
                         {mobileLookupLoading ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          "Continue"
+                          "Find / Add"
                         )}
                       </Button>
                     </div>
+
                     {mobileLookupError && (
                       <p className="text-[11px] text-destructive font-medium flex items-center gap-1">
                         <AlertCircle className="h-3 w-3 shrink-0" />
                         <span>{mobileLookupError}</span>
                       </p>
                     )}
+
                     <div className="flex items-center justify-between gap-2 pt-0.5">
                       <span className="text-[10px] text-muted-foreground">
-                        Customer declined or doesn&apos;t want to share?
+                        Customer declined details?
                       </span>
                       <button
                         type="button"
@@ -2611,7 +2906,8 @@ export default function UnifiedBillingWorkspace({
 
                     <div className="grid grid-cols-2 gap-1.5">
                       <Input
-                        placeholder="Customer Name (Optional)"
+                        required
+                        placeholder="Customer Name *"
                         aria-label="New Customer Name"
                         value={newCustomerData.full_name}
                         onChange={(e) => setNewCustomerData({ ...newCustomerData, full_name: e.target.value })}
@@ -2627,7 +2923,7 @@ export default function UnifiedBillingWorkspace({
                       />
                     </div>
                     <Input
-                      placeholder="Address (Optional)"
+                      placeholder="Billing Address (Street / Building)"
                       aria-label="New Customer Address"
                       value={newCustomerData.address_line1}
                       onChange={(e) => setNewCustomerData({ ...newCustomerData, address_line1: e.target.value })}
@@ -4547,6 +4843,123 @@ export default function UnifiedBillingWorkspace({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* MODAL: QUICK CREATE CATEGORY */}
+      <Dialog open={showCategoryModal} onOpenChange={setShowCategoryModal}>
+        <DialogContent className="max-w-sm w-[92vw] p-4 sm:p-5">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-1.5">
+              <Tag className="h-4 w-4 text-primary" />
+              <span>Add New Product Category</span>
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateNewCategory} className="space-y-3 pt-2">
+            <div>
+              <label className="text-xs font-semibold text-foreground">Category Name *</label>
+              <Input
+                required
+                autoFocus
+                placeholder="e.g. Beverages, Stationery, Snacks..."
+                value={newCatName}
+                onChange={(e) => {
+                  setNewCatName(e.target.value);
+                  if (categoryError) setCategoryError("");
+                }}
+                className="mt-1 text-xs"
+              />
+              {categoryError && (
+                <p className="text-[11px] text-destructive mt-1 font-medium">{categoryError}</p>
+              )}
+            </div>
+            <DialogFooter className="flex gap-2 justify-end pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCategoryModal(false)}
+                className="text-xs h-8"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={creatingCategory || !newCatName.trim()}
+                className="text-xs h-8 font-semibold"
+              >
+                {creatingCategory ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Create Category"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL: RESEND INVOICE VIA WHATSAPP */}
+      <Dialog open={resendWhatsAppModalOpen} onOpenChange={setResendWhatsAppModalOpen}>
+        <DialogContent className="max-w-md w-[92vw] p-4 sm:p-5">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-2">
+              <Share2 className="h-4 w-4 text-emerald-600" />
+              <span>Resend Invoice #{resendTargetInvoice?.invoice_number} via WhatsApp</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-1 text-xs">
+            <div className="p-2.5 rounded bg-muted/40 border space-y-1">
+              <div className="flex justify-between font-semibold text-foreground">
+                <span>Customer:</span>
+                <span>{resendTargetInvoice?.customer_name || "Walk-in Customer"}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Invoice Total:</span>
+                <span className="font-bold text-foreground">₹{Number(resendTargetInvoice?.total || 0).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                WhatsApp Mobile Number *
+              </label>
+              <Input
+                type="tel"
+                inputMode="tel"
+                placeholder="Enter 10-digit customer mobile number..."
+                value={resendPhoneInput}
+                onChange={(e) => setResendPhoneInput(e.target.value)}
+                className="text-xs font-mono"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                The finalized PDF invoice will be generated and dispatched with your configured WhatsApp message template.
+              </p>
+            </div>
+
+            <DialogFooter className="flex gap-2 justify-end pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setResendWhatsAppModalOpen(false)}
+                className="text-xs h-8"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={resendingWhatsApp || !resendPhoneInput.trim()}
+                onClick={handleExecuteResendWhatsApp}
+                className="text-xs h-8 font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                {resendingWhatsApp ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  "Send PDF via WhatsApp"
+                )}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <QuotationCreateModal
         open={quoteModalOpen}
         onClose={() => setQuoteModalOpen(false)}

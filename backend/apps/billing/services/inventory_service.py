@@ -23,28 +23,49 @@ class InventoryService:
         quantity_delta: Decimal,
         movement_type: str = "ADJUSTMENT",
         notes: str = "",
+        reference_type: str = "adjustment",
+        reference_id: str = "",
+        set_stock: bool = False,
     ) -> dict:
         quantity_delta = Decimal(str(quantity_delta))
-        if quantity_delta == Decimal("0.00"):
-            raise ValidationError("Quantity delta cannot be zero.")
 
         valid_types = dict(getattr(InventoryMovement, "MOVEMENT_TYPES", getattr(InventoryMovement, "MOVEMENT_CHOICES", [])))
         if movement_type not in valid_types:
             raise ValidationError(f"Invalid movement type '{movement_type}'.")
+
+        # Enforce consistent signing based on movement semantics
+        if movement_type in ["DAMAGE", "LOSS"] and quantity_delta > 0:
+            quantity_delta = -abs(quantity_delta)
+        elif movement_type in ["FOUND", "PURCHASE"] and quantity_delta < 0:
+            quantity_delta = abs(quantity_delta)
 
         with transaction.atomic():
             try:
                 product = Product.objects.select_for_update().get(id=product_id, organization=organization)
             except Product.DoesNotExist:
                 raise ValidationError("Product not found.")
+
             prev_stock = product.current_stock
-            new_stock = prev_stock + quantity_delta
+            if set_stock:
+                # quantity_delta represents the new absolute target stock
+                new_stock = quantity_delta
+                quantity_delta = new_stock - prev_stock
+            else:
+                new_stock = prev_stock + quantity_delta
+
+            if quantity_delta == Decimal("0.00"):
+                raise ValidationError("Quantity delta cannot be zero.")
 
             if new_stock < Decimal("0.00") and movement_type != "ADJUSTMENT":
                 raise ValidationError(f"Stock cannot become negative ({new_stock}).")
 
             product.current_stock = new_stock
-            product.save(update_fields=["current_stock"])
+            update_fields = ["current_stock"]
+            if movement_type == "OPENING_STOCK" and (product.opening_stock is None or product.opening_stock == Decimal("0.00")):
+                product.opening_stock = new_stock
+                update_fields.append("opening_stock")
+
+            product.save(update_fields=update_fields)
 
             movement = InventoryMovement.objects.create(
                 organization=organization,
@@ -55,7 +76,8 @@ class InventoryService:
                 quantity=quantity_delta,
                 previous_stock=prev_stock,
                 new_stock=new_stock,
-                reference_type="adjustment",
+                reference_type=reference_type or "adjustment",
+                reference_id=reference_id or "",
                 notes=notes,
             )
 
@@ -73,7 +95,90 @@ class InventoryService:
             "quantity_delta": str(quantity_delta),
             "new_stock": str(new_stock),
             "movement_type": movement_type,
+            "reference_type": movement.reference_type,
+            "reference_id": movement.reference_id,
+            "user": getattr(user, "name", getattr(user, "username", getattr(user, "email", "Staff"))),
             "created_at": movement.created_at.isoformat(),
+        }
+
+    @classmethod
+    def get_inventory_summary(cls, organization, store=None) -> dict:
+        """
+        Calculates aggregate inventory valuation, on-hand units, opening stock, alerts,
+        and movement breakdowns.
+        """
+        from apps.products.models import Product, InventoryMovement, Supplier
+        from django.db.models import Sum, Count, Q
+
+        qs = Product.objects.filter(organization=organization, is_active=True)
+
+        total_products = qs.count()
+        total_current_stock = qs.aggregate(s=Sum("current_stock"))["s"] or Decimal("0.00")
+        total_opening_stock = qs.aggregate(s=Sum("opening_stock"))["s"] or Decimal("0.00")
+
+        cost_val = Decimal("0.00")
+        retail_val = Decimal("0.00")
+        low_stock_count = 0
+        out_of_stock_count = 0
+
+        for p in qs.only("current_stock", "cost_price", "unit_price", "min_stock"):
+            stock = p.current_stock or Decimal("0.00")
+            c_price = p.cost_price or Decimal("0.00")
+            s_price = p.unit_price or Decimal("0.00")
+            min_stk = p.min_stock or Decimal("0.00")
+
+            if stock <= Decimal("0.00"):
+                out_of_stock_count += 1
+            elif stock <= min_stk:
+                low_stock_count += 1
+
+            if stock > Decimal("0.00"):
+                cost_val += stock * c_price
+                retail_val += stock * s_price
+
+        mov_qs = InventoryMovement.objects.filter(organization=organization)
+        if store:
+            mov_qs = mov_qs.filter(store=store)
+
+        mov_stats = mov_qs.aggregate(
+            total_additions=Sum("quantity", filter=Q(quantity__gt=0)),
+            total_deductions=Sum("quantity", filter=Q(quantity__lt=0)),
+            purchased_qty=Sum("quantity", filter=Q(movement_type="PURCHASE")),
+            damaged_qty=Sum("quantity", filter=Q(movement_type__in=["DAMAGE", "LOSS"])),
+            returned_qty=Sum("quantity", filter=Q(movement_type="RETURN")),
+            adjusted_qty=Sum("quantity", filter=Q(movement_type="ADJUSTMENT")),
+        )
+
+        total_suppliers = Supplier.objects.filter(organization=organization, is_active=True).count()
+
+        by_type_qs = mov_qs.values("movement_type").annotate(
+            count=Count("id"),
+            total_qty=Sum("quantity")
+        )
+        movements_by_type = {
+            item["movement_type"]: {
+                "count": item["count"],
+                "total_quantity": str(item["total_qty"] or Decimal("0.00"))
+            }
+            for item in by_type_qs
+        }
+
+        return {
+            "total_products": total_products,
+            "total_current_stock": str(total_current_stock),
+            "total_opening_stock": str(total_opening_stock),
+            "cost_valuation": str(round_decimal(cost_val)),
+            "retail_valuation": str(round_decimal(retail_val)),
+            "low_stock_count": low_stock_count,
+            "out_of_stock_count": out_of_stock_count,
+            "total_suppliers": total_suppliers,
+            "total_additions_qty": str(round_decimal(mov_stats["total_additions"] or Decimal("0.00"))),
+            "total_deductions_qty": str(round_decimal(abs(mov_stats["total_deductions"] or Decimal("0.00")))),
+            "purchased_qty": str(round_decimal(mov_stats["purchased_qty"] or Decimal("0.00"))),
+            "damaged_qty": str(round_decimal(abs(mov_stats["damaged_qty"] or Decimal("0.00")))),
+            "returned_qty": str(round_decimal(mov_stats["returned_qty"] or Decimal("0.00"))),
+            "adjusted_qty": str(round_decimal(mov_stats["adjusted_qty"] or Decimal("0.00"))),
+            "movements_by_type": movements_by_type,
         }
 
     @classmethod

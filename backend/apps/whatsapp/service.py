@@ -66,13 +66,93 @@ def format_whatsapp_phone(raw_phone):
     return ""
 
 
-def build_invoice_pdf_filename(invoice_number, fallback_id=""):
-    """Generate a safe, predictable PDF filename: Invoice_<invoice_number>.pdf."""
-    base = str(invoice_number or fallback_id or "Receipt").strip()
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._-")
-    if not safe:
-        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(fallback_id or "Receipt")).strip("._-") or "Receipt"
-    return f"Invoice_{safe}.pdf"
+DEFAULT_INVOICE_WHATSAPP_TEMPLATE = """Hello {customer_name},
+
+Thank you for shopping with us!
+
+Your invoice #{invoice_number} is attached.
+
+Total Amount: {total_amount}
+
+Date: {invoice_date}
+
+Thank you for choosing {business_name}."""
+
+
+def render_whatsapp_invoice_message(template_str, invoice, transaction=None, customer=None, organization=None):
+    """
+    Renders custom WhatsApp message template with placeholders:
+    {customer_name}, {customer_phone}, {invoice_number}, {invoice_date}, {total_amount}, {business_name}
+    Falls back gracefully if fields are missing.
+    """
+    if not template_str or not template_str.strip():
+        template_str = DEFAULT_INVOICE_WHATSAPP_TEMPLATE
+
+    from decimal import Decimal
+    tx = transaction or getattr(invoice, "transaction", None)
+    cust = customer or (getattr(tx, "customer", None) if tx else None)
+    org = organization or getattr(invoice, "organization", None) or (getattr(tx, "organization", None) if tx else None)
+
+    # Customer Name & Phone
+    customer_name = "Valued Customer"
+    customer_phone = ""
+    if cust:
+        customer_name = f"{getattr(cust, 'first_name', '')} {getattr(cust, 'last_name', '')}".strip() or getattr(cust, "name", "") or "Valued Customer"
+        customer_phone = getattr(cust, "phone_number", "") or getattr(cust, "phone", "")
+    elif tx and getattr(tx, "customer_name", None):
+        customer_name = tx.customer_name
+        customer_phone = getattr(tx, "customer_phone", "")
+
+    # Business Name
+    business_name = "our business"
+    if org:
+        business_name = getattr(org, "name", "our business")
+        try:
+            from apps.billing.models import BusinessConfig
+            bconfig = BusinessConfig.objects.filter(organization=org).first()
+            if bconfig and bconfig.business_name:
+                business_name = bconfig.business_name
+        except Exception:
+            pass
+
+    # Invoice Details
+    inv_number = getattr(invoice, "invoice_number", "") or (getattr(tx, "invoice_number", "") if tx else "")
+    total_val = getattr(invoice, "total_amount", None)
+    if total_val is None and tx:
+        total_val = getattr(tx, "total_amount", getattr(tx, "total", 0))
+    total_amount = f"₹{total_val:.2f}" if isinstance(total_val, (int, float, Decimal)) else f"₹{total_val or '0.00'}"
+
+    inv_date_raw = getattr(invoice, "issue_date", None) or getattr(invoice, "created_at", None) or (getattr(tx, "created_at", None) if tx else None)
+    if hasattr(inv_date_raw, "strftime"):
+        inv_date = inv_date_raw.strftime("%Y-%m-%d")
+    elif inv_date_raw:
+        inv_date = str(inv_date_raw)[:10]
+    else:
+        inv_date = timezone.now().strftime("%Y-%m-%d")
+
+    placeholders = {
+        "{customer_name}": customer_name,
+        "{customer_phone}": customer_phone or "N/A",
+        "{invoice_number}": inv_number,
+        "{invoice_date}": inv_date,
+        "{total_amount}": total_amount,
+        "{business_name}": business_name,
+    }
+
+    result = template_str
+    for ph, val in placeholders.items():
+        result = result.replace(ph, str(val))
+    return result[:1024]
+
+
+def build_invoice_pdf_filename(invoice_number, customer_name="", invoice_date=None, fallback_id=""):
+    """Generate a safe, predictable PDF filename: CustomerName_InvoiceNumber_Date.pdf."""
+    from apps.invoices.pdf import sanitize_invoice_pdf_filename
+    return sanitize_invoice_pdf_filename(
+        invoice_number=invoice_number or fallback_id,
+        customer_name=customer_name,
+        invoice_date=invoice_date,
+    )
 
 
 def serialize_whatsapp_delivery(msg):
@@ -745,12 +825,35 @@ def deliver_invoice_pdf_via_whatsapp(
     pdf_format = format_type or getattr(invoice, "template_format", "a4") or "a4"
     if pdf_format not in ("a4", "thermal", "receipt"):
         pdf_format = "a4"
-    filename = build_invoice_pdf_filename(invoice.invoice_number, str(invoice.id))
-    caption = INVOICE_WHATSAPP_CAPTION
+    # Resolve customer & custom message template
+    customer = transaction.customer
+    cust_name = ""
+    if customer:
+        cust_name = f"{customer.first_name} {customer.last_name}".strip() or getattr(customer, "name", "")
+    elif transaction and getattr(transaction, "customer_name", None):
+        cust_name = transaction.customer_name
+
+    org = getattr(transaction, "organization", None) or getattr(invoice, "organization", None)
+    from apps.whatsapp.models import WhatsAppConfig
+    cfg = WhatsAppConfig.objects.filter(organization=org).first() if org else None
+    custom_tmpl = getattr(cfg, "custom_invoice_message", "")
+
+    filename = build_invoice_pdf_filename(
+        invoice.invoice_number,
+        customer_name=cust_name,
+        invoice_date=getattr(invoice, "issue_date", None) or getattr(invoice, "created_at", None),
+        fallback_id=str(invoice.id),
+    )
+    caption = render_whatsapp_invoice_message(
+        custom_tmpl,
+        invoice=invoice,
+        transaction=transaction,
+        customer=customer,
+        organization=org,
+    )
     trigger_mode = "manual" if (record_failure or force or phone_override) else "automatic"
 
     # Validate customer opt-in & recipient phone before checking credentials (preserves opt-out semantics)
-    customer = transaction.customer
     if phone_override is not None and str(phone_override).strip():
         raw_phone = str(phone_override).strip()
         if customer and not customer.whatsapp_opt_in and not force:
@@ -1625,8 +1728,32 @@ def prepare_and_dispatch_post_sale_invoice_whatsapp(transaction_id: str, *, disp
         pdf_format = getattr(invoice, "template_format", "a4") or "a4"
         if pdf_format not in ("a4", "thermal", "receipt"):
             pdf_format = "a4"
-        filename = build_invoice_pdf_filename(invoice.invoice_number, str(invoice.id))
-        caption = INVOICE_WHATSAPP_CAPTION
+
+        tx_cust = tx.customer
+        cust_name = ""
+        if tx_cust:
+            cust_name = f"{tx_cust.first_name} {tx_cust.last_name}".strip() or getattr(tx_cust, "name", "")
+        elif getattr(tx, "customer_name", None):
+            cust_name = tx.customer_name
+
+        org = getattr(tx, "organization", None) or getattr(invoice, "organization", None)
+        from apps.whatsapp.models import WhatsAppConfig
+        cfg = WhatsAppConfig.objects.filter(organization=org).first() if org else None
+        custom_tmpl = getattr(cfg, "custom_invoice_message", "")
+
+        filename = build_invoice_pdf_filename(
+            invoice.invoice_number,
+            customer_name=cust_name,
+            invoice_date=getattr(invoice, "issue_date", None) or getattr(invoice, "created_at", None),
+            fallback_id=str(invoice.id),
+        )
+        caption = render_whatsapp_invoice_message(
+            custom_tmpl,
+            invoice=invoice,
+            transaction=tx,
+            customer=tx_cust,
+            organization=org,
+        )
         external_id = f"invoice:{invoice.id}"
 
         disposition, reason, phone = _evaluate_auto_whatsapp_preconditions(tx)

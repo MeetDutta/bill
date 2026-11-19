@@ -46,6 +46,7 @@ class Product(UUIDModel, TenantModel, TimeStampedModel):
     hsn_code = models.CharField(max_length=20, blank=True)
     unit = models.CharField(max_length=30, default="PCS")  # PCS, KG, GM, LTR, MTR, BOX, etc.
     current_stock = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    opening_stock = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), help_text="Configured initial opening stock quantity")
     min_stock = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     max_stock = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     baseline_stock = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, help_text="Configured replenishment baseline stock quantity for percentage threshold alerts")
@@ -114,6 +115,8 @@ class InventoryMovement(UUIDModel, TenantModel, TimeStampedModel):
         ("RETURN", "Customer Return Restock"),
         ("ADJUSTMENT", "Manual Stock Adjustment"),
         ("DAMAGE", "Damaged / Expired Goods"),
+        ("LOSS", "Stock Loss / Theft"),
+        ("FOUND", "Found Surplus Stock"),
         ("OPENING_STOCK", "Opening Stock Entry"),
         ("TRANSFER", "Inter-Store Transfer"),
     ]

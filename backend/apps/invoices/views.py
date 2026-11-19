@@ -184,8 +184,18 @@ class InvoicePDFView(APIView):
                 if not pdf_bytes or not pdf_bytes.startswith(b"%PDF-"):
                     raise ValueError("Generated PDF payload is invalid.")
                 disp = "attachment" if request.query_params.get("download") == "true" else "inline"
+                tx = getattr(invoice, "transaction", None)
+                customer = getattr(tx, "customer", None) if tx else None
+                cust_name = ""
+                if customer:
+                    cust_name = f"{customer.first_name} {customer.last_name}".strip() or customer.name
+                elif tx and getattr(tx, "customer_name", None):
+                    cust_name = tx.customer_name
+
                 safe_filename = sanitize_invoice_pdf_filename(
                     invoice.invoice_number,
+                    customer_name=cust_name,
+                    invoice_date=getattr(invoice, "issue_date", None) or getattr(invoice, "created_at", None),
                     format_type=format_type if format_type in ("thermal", "receipt") else "a4",
                 )
                 response = HttpResponse(pdf_bytes, content_type="application/pdf")

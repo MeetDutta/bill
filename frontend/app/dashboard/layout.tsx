@@ -12,6 +12,10 @@ import {
   RotateCcw,
   Receipt,
   Boxes,
+  Package,
+  FolderTree,
+  ArrowDownToLine,
+  ArrowUpFromLine,
   SlidersHorizontal,
   Truck,
   ClipboardList,
@@ -25,6 +29,7 @@ import {
   Landmark,
   CreditCard,
   AlertCircle,
+  AlertTriangle,
   FileSpreadsheet,
   BarChart3,
   TrendingUp,
@@ -65,8 +70,21 @@ const navSections: NavSection[] = [
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { name: "Sell", href: "/dashboard/billing", icon: Receipt },
       { name: "Quotations", href: "/dashboard/quotations", icon: FileCheck },
-      { name: "Inventory", href: "/dashboard/inventory", icon: Boxes },
       { name: "Customers", href: "/dashboard/customers", icon: Users },
+    ],
+  },
+  {
+    title: "STOCK MANAGEMENT",
+    key: "stock",
+    items: [
+      { name: "Stock Overview", href: "/dashboard/inventory", icon: Boxes },
+      { name: "Products", href: "/dashboard/products", icon: Package },
+      { name: "Categories", href: "/dashboard/inventory/categories", icon: FolderTree },
+      { name: "Stock Inward", href: "/dashboard/inventory/inward", icon: ArrowDownToLine },
+      { name: "Stock Outward", href: "/dashboard/inventory/outward", icon: ArrowUpFromLine },
+      { name: "Stock Movement", href: "/dashboard/inventory/movements", icon: History },
+      { name: "Stock Adjustment", href: "/dashboard/inventory/adjustments", icon: SlidersHorizontal },
+      { name: "Low Stock / Out of Stock", href: "/dashboard/inventory?filter=low_stock", icon: AlertTriangle },
     ],
   },
   {
@@ -88,13 +106,12 @@ const navSections: NavSection[] = [
       { name: "Returns", href: "/dashboard/returns", icon: RotateCcw },
       { name: "Purchase Orders", href: "/dashboard/purchases", icon: ClipboardList },
       { name: "Suppliers", href: "/dashboard/suppliers", icon: Truck },
-      { name: "Stock Movements", href: "/dashboard/inventory/movements", icon: History },
-      { name: "Stock Adjustments", href: "/dashboard/inventory/adjustments", icon: SlidersHorizontal },
       { name: "Staff Management", href: "/dashboard/staff", icon: Users },
       { name: "Coupons & Discounts", href: "/dashboard/coupons", icon: Ticket },
       { name: "Campaigns", href: "/dashboard/campaigns", icon: Megaphone },
       { name: "AI Assistant", href: "/dashboard/ai-campaigns", icon: Sparkles },
       { name: "Stores", href: "/dashboard/stores", icon: Store },
+      { name: "POS Migration", href: "/dashboard/migration", icon: FileSpreadsheet },
       { name: "System Health", href: "/dashboard/health", icon: Activity },
       { name: "Settings", href: "/dashboard/settings", icon: Settings },
     ],
@@ -175,11 +192,21 @@ export default function DashboardLayout({
     };
   }, [router]);
 
+  const [currentFilter, setCurrentFilter] = useState<string | null>(null);
+
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      setCurrentTab(params.get("tab"));
-    }
+    const updateQueryParams = () => {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        setCurrentTab(params.get("tab"));
+        setCurrentFilter(params.get("filter"));
+      }
+    };
+    updateQueryParams();
+    window.addEventListener("popstate", updateQueryParams);
+    return () => {
+      window.removeEventListener("popstate", updateQueryParams);
+    };
   }, [pathname]);
 
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -188,7 +215,9 @@ export default function DashboardLayout({
 
   // Helper to determine if an item is active
   const isItemActive = React.useCallback((item: NavItem) => {
-    const [itemPath] = item.href.split("?");
+    const [itemPath, itemQuery] = item.href.split("?");
+    const itemFilter = itemQuery ? new URLSearchParams(itemQuery).get("filter") : null;
+
     if (itemPath === "/dashboard/billing") {
       if (
         pathname === "/dashboard/billing" ||
@@ -203,6 +232,15 @@ export default function DashboardLayout({
       return pathname === "/dashboard/notifications" || pathname?.startsWith("/dashboard/notifications");
     }
     if (pathname !== itemPath) return false;
+
+    // Distinguish between /dashboard/inventory (Stock Overview) and /dashboard/inventory?filter=low_stock
+    if (itemFilter) {
+      return currentFilter === itemFilter;
+    }
+    if (currentFilter && pathname === "/dashboard/inventory") {
+      return false;
+    }
+
     if (item.tab) {
       return currentTab === item.tab;
     }
@@ -211,7 +249,7 @@ export default function DashboardLayout({
       return false;
     }
     return true;
-  }, [pathname, currentTab]);
+  }, [pathname, currentTab, currentFilter]);
 
   // Find active section key
   const activeSectionKey = useMemo(() => {
@@ -222,8 +260,11 @@ export default function DashboardLayout({
         }
       }
     }
+    if (pathname?.startsWith("/dashboard/inventory") || pathname?.startsWith("/dashboard/products")) {
+      return "stock";
+    }
     return "dashboard";
-  }, [isItemActive]);
+  }, [isItemActive, pathname]);
 
   // Load persisted collapsed state from sessionStorage on mount
   useEffect(() => {

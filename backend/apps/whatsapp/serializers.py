@@ -15,12 +15,13 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
             "id", "business_account_id", "phone_number_id", "access_token",
             "webhook_verify_token", "is_active", "has_access_token",
             "access_token_configured", "configured",
-            "masked_access_token", "organization", "created_at",
+            "masked_access_token", "custom_invoice_message", "organization", "created_at",
         ]
         read_only_fields = ["id", "created_at", "organization"]
         extra_kwargs = {
             "access_token": {"write_only": True, "required": False, "allow_blank": True},
             "webhook_verify_token": {"required": False, "allow_blank": True},
+            "custom_invoice_message": {"required": False, "allow_blank": True},
         }
 
     def get_has_access_token(self, obj):

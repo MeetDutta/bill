@@ -8,6 +8,11 @@ class WhatsAppConfig(UUIDModel, TenantModel, TimeStampedModel):
     phone_number_id = models.CharField(max_length=100)
     access_token = models.TextField()
     webhook_verify_token = models.CharField(max_length=100, blank=True)
+    custom_invoice_message = models.TextField(
+        blank=True,
+        default="",
+        help_text="Custom WhatsApp message template with placeholders {customer_name}, {invoice_number}, etc.",
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

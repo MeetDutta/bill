@@ -1218,11 +1218,39 @@ def _render_thermal_pdf(buffer, invoice, tx, org, store, customer, items, paymen
     doc.build(story)
 
 
-def sanitize_invoice_pdf_filename(invoice_number: str, format_type: str = "a4") -> str:
-    """Build a filesystem-safe and Content-Disposition-safe PDF filename."""
-    clean_num = re.sub(r"[^A-Za-z0-9._-]+", "_", str(invoice_number or "invoice")).strip("._") or "invoice"
+def sanitize_invoice_pdf_filename(
+    invoice_number: str,
+    customer_name: str = "",
+    invoice_date=None,
+    format_type: str = "a4",
+) -> str:
+    """
+    Build a filesystem-safe and Content-Disposition-safe PDF filename formatted as:
+    CustomerName_InvoiceNumber_Date.pdf
+    e.g. Vrushabh_Gillakar_INV-1024_2026-11-19.pdf
+    or WalkIn_INV-1025_2026-11-19.pdf
+    """
+    c_raw = str(customer_name or "").strip()
+    if not c_raw or c_raw.lower().startswith("walk") or c_raw.lower() in ("walk-in", "walkin", "guest", "cash customer"):
+        safe_customer = "WalkIn"
+    else:
+        safe_customer = re.sub(r"[^A-Za-z0-9]+", "_", c_raw).strip("_")
+        if not safe_customer:
+            safe_customer = "WalkIn"
+
+    clean_num = re.sub(r"[^A-Za-z0-9._-]+", "_", str(invoice_number or "INV")).strip("._") or "INV"
+
+    date_str = ""
+    if hasattr(invoice_date, "strftime"):
+        date_str = invoice_date.strftime("%Y-%m-%d")
+    elif invoice_date:
+        date_str = str(invoice_date)[:10]
+
     suffix = f"_{format_type}" if format_type in ("thermal", "receipt") else ""
-    return f"{clean_num}{suffix}.pdf"
+
+    if date_str:
+        return f"{safe_customer}_{clean_num}_{date_str}{suffix}.pdf"
+    return f"{safe_customer}_{clean_num}{suffix}.pdf"
 
 
 def generate_invoice_pdf(invoice, format_type: str = "a4") -> str:
@@ -1235,7 +1263,22 @@ def generate_invoice_pdf(invoice, format_type: str = "a4") -> str:
     invoices_dir = os.path.join(settings.MEDIA_ROOT, "invoices")
     os.makedirs(invoices_dir, exist_ok=True)
 
-    pdf_filename = sanitize_invoice_pdf_filename(invoice.invoice_number, format_type=format_type)
+    tx = getattr(invoice, "transaction", None)
+    customer = getattr(tx, "customer", None) if tx else None
+    customer_name = ""
+    if customer:
+        customer_name = f"{customer.first_name} {customer.last_name}".strip() or customer.name
+    elif tx and getattr(tx, "customer_name", None):
+        customer_name = tx.customer_name
+
+    inv_date = getattr(invoice, "issue_date", None) or getattr(invoice, "created_at", None)
+
+    pdf_filename = sanitize_invoice_pdf_filename(
+        invoice.invoice_number,
+        customer_name=customer_name,
+        invoice_date=inv_date,
+        format_type=format_type,
+    )
     pdf_filepath = os.path.join(invoices_dir, pdf_filename)
 
     pdf_bytes = generate_invoice_pdf_bytes(invoice, format_type=format_type)

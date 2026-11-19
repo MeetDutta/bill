@@ -130,9 +130,12 @@ class POSProductSearchView(APIView):
             )
 
         if category and category != "all":
-            products = products.filter(
-                Q(category__name__iexact=category) | Q(category__id__iexact=category)
-            )
+            if category.lower() == "uncategorized":
+                products = products.filter(Q(category__isnull=True) | Q(category__name__iexact="uncategorized"))
+            else:
+                products = products.filter(
+                    Q(category__name__iexact=category) | Q(category__id__iexact=category)
+                )
 
         if low_stock_only:
             products = products.filter(
@@ -571,10 +574,35 @@ class POSInventoryMovementListView(APIView):
         if product_id:
             qs = qs.filter(product_id=product_id)
 
+        reference = request.GET.get("reference")
+        if reference:
+            qs = qs.filter(Q(reference_id__icontains=reference) | Q(reference_type__icontains=reference))
+
+        search = request.GET.get("search")
+        if search:
+            qs = qs.filter(
+                Q(product__name__icontains=search)
+                | Q(product__sku__icontains=search)
+                | Q(product__barcode__icontains=search)
+                | Q(notes__icontains=search)
+            )
+
         paginator = StandardPOSPagination()
         page = paginator.paginate_queryset(qs, request)
         serializer = InventoryMovementSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class POSInventorySummaryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        store = request.user.stores.first() if hasattr(request.user, "stores") else None
+        data = InventoryService.get_inventory_summary(
+            organization=request.user.organization,
+            store=store,
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class POSInventoryAdjustView(APIView):
@@ -593,6 +621,9 @@ class POSInventoryAdjustView(APIView):
             quantity_delta=Decimal(str(qty_delta)),
             movement_type=request.data.get("movement_type", "ADJUSTMENT"),
             notes=request.data.get("notes", ""),
+            reference_type=request.data.get("reference_type", "adjustment"),
+            reference_id=request.data.get("reference_id", ""),
+            set_stock=bool(request.data.get("set_stock", False)),
         )
         try:
             from apps.billing.services.realtime_service import RealtimeService

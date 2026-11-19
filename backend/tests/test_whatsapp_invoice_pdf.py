@@ -162,7 +162,11 @@ class WhatsAppInvoicePDFDeliveryTests(APITestCase):
 
         tx = Transaction.objects.get(id=checkout_res.data["id"])
         invoice = Invoice.objects.get(transaction=tx)
-        expected_filename = f"Invoice_{invoice.invoice_number}.pdf"
+        expected_filename = build_invoice_pdf_filename(
+            invoice.invoice_number,
+            customer_name=f"{self.customer.first_name} {self.customer.last_name}".strip(),
+            invoice_date=invoice.created_at,
+        )
 
         # Exactly 2 Meta calls: (1) /media upload, (2) /messages document send (NOT called twice!)
         self.assertEqual(mock_post.call_count, 2)
@@ -204,7 +208,8 @@ class WhatsAppInvoicePDFDeliveryTests(APITestCase):
         self.assertNotIn("text", msg_payload)
         self.assertEqual(msg_payload["document"]["id"], "MEDIA_INV_001")
         self.assertEqual(msg_payload["document"]["filename"], expected_filename)
-        self.assertEqual(msg_payload["document"]["caption"], INVOICE_WHATSAPP_CAPTION)
+        self.assertIn("Aarav Patel", msg_payload["document"]["caption"])
+        self.assertIn(invoice.invoice_number, msg_payload["document"]["caption"])
 
         # Verify DB tracking
         wa_msg = WhatsAppMessage.objects.get(external_id=f"invoice:{invoice.id}")
@@ -378,7 +383,7 @@ class WhatsAppInvoicePDFDeliveryTests(APITestCase):
         - /api/v1/whatsapp/messages/<id>/retry/ retries failed invoice messages
         - Filename sanitization prevents path traversal
         """
-        self.assertEqual(build_invoice_pdf_filename("../../etc/INV/2026#1"), "Invoice_etc_INV_2026_1.pdf")
+        self.assertEqual(build_invoice_pdf_filename("../../etc/INV/2026#1"), "WalkIn_etc_INV_2026_1.pdf")
 
         # Turn off auto_send so staff checkout creates invoice silently first
         self.config.auto_send_whatsapp = False

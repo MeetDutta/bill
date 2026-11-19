@@ -98,8 +98,11 @@ class CustomerSerializer(serializers.ModelSerializer):
                     if self.instance:
                         qs = qs.exclude(pk=self.instance.pk)
                     if qs.exists():
+                        existing = qs.first()
                         raise serializers.ValidationError({
-                            "phone": ["Customer with this phone number already exists."]
+                            "phone": [f"Customer with this phone number already exists ({existing.full_name})."],
+                            "existing_customer_id": str(existing.id),
+                            "existing_customer_name": existing.full_name,
                         })
             elif self.instance is None:
                 raise serializers.ValidationError({"phone": ["Mobile number is required."]})

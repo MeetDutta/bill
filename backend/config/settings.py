@@ -162,6 +162,7 @@ INSTALLED_APPS = [
     "apps.reports",
     "apps.ai",
     "apps.engagement",
+    "apps.migration",
 ]
 
 MIDDLEWARE = [

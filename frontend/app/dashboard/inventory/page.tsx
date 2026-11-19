@@ -27,6 +27,23 @@ import { useRealtimeSubscription } from "@/services/realtime";
 export default function CurrentStockPage() {
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [inventorySummary, setInventorySummary] = useState<{
+    total_products: number;
+    total_current_stock: string;
+    total_opening_stock: string;
+    cost_valuation: string;
+    retail_valuation: string;
+    low_stock_count: number;
+    out_of_stock_count: number;
+    total_suppliers: number;
+    total_additions_qty: string;
+    total_deductions_qty: string;
+    purchased_qty: string;
+    damaged_qty: string;
+    returned_qty: string;
+    adjusted_qty: string;
+    movements_by_type: Record<string, { count: number; total_quantity: string }>;
+  } | null>(null);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [creatingCategory, setCreatingCategory] = useState(false);
@@ -109,14 +126,18 @@ export default function CurrentStockPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [prodRes, categoryRes] = await Promise.all([
+      const [prodRes, categoryRes, summaryRes] = await Promise.all([
         posApi.searchProducts({ page_size: 200 }),
         productApi.listCategories({ all: true }),
+        posApi.getInventorySummary().catch(() => ({ data: null })),
       ]);
       const prodList = Array.isArray(prodRes.data) ? prodRes.data : (prodRes.data as any)?.results || [];
       const categoryData = Array.isArray(categoryRes.data) ? categoryRes.data : (categoryRes.data as any)?.results || [];
       setProducts(prodList);
       setCategories(categoryData.filter((c: any) => c.is_active !== false).map((c: any) => ({ id: c.id, name: c.name })));
+      if (summaryRes?.data) {
+        setInventorySummary(summaryRes.data);
+      }
     } catch (err) {
       console.error("Failed to load inventory products", err);
     } finally {
@@ -374,50 +395,85 @@ export default function CurrentStockPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Total Catalog SKUs
+              On-Hand Inventory
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalSKUs}</div>
-            <p className="text-xs text-muted-foreground mt-1">Active inventory items</p>
+            <div className="text-2xl font-bold text-foreground">
+              {inventorySummary
+                ? Number(inventorySummary.total_current_stock).toLocaleString("en-IN")
+                : totalStockUnits.toLocaleString()}
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+              <span>{totalSKUs} active SKUs</span>
+              {inventorySummary?.total_opening_stock && (
+                <span>Opening: {Number(inventorySummary.total_opening_stock).toLocaleString("en-IN")}</span>
+              )}
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              On-Hand Units
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-foreground">{totalStockUnits.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">Total physical inventory units</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Inventory Valuation
+              Stock Valuation
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-600">
-              ₹{totalValuation.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              ₹
+              {inventorySummary
+                ? Number(inventorySummary.cost_valuation).toLocaleString("en-IN", { minimumFractionDigits: 2 })
+                : totalValuation.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">Calculated at cost basis</p>
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+              <span>At Cost Basis</span>
+              {inventorySummary?.retail_valuation && (
+                <span className="text-foreground font-medium">
+                  Retail: ₹{Number(inventorySummary.retail_valuation).toLocaleString("en-IN", { minimumFractionDigits: 0 })}
+                </span>
+              )}
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Low Stock Alerts
+              Stock Level Alerts
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{lowStockCount}</div>
-            <p className="text-xs text-muted-foreground mt-1">Items at or below reorder level</p>
+            <div className="text-2xl font-bold text-red-600">
+              {inventorySummary ? inventorySummary.low_stock_count : lowStockCount}
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+              <span>At / below reorder</span>
+              {inventorySummary && (
+                <span className={inventorySummary.out_of_stock_count > 0 ? "text-red-500 font-semibold" : ""}>
+                  Out of Stock: {inventorySummary.out_of_stock_count}
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Damaged & Returns
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">
+              {inventorySummary ? inventorySummary.damaged_qty : "0.00"}
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+              <span>Damaged / Loss</span>
+              {inventorySummary && (
+                <span>Returns: {inventorySummary.returned_qty}</span>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -728,6 +784,8 @@ export default function CurrentStockPage() {
                   <option value="DAMAGE">Damage / Broken Goods</option>
                   <option value="LOSS">Loss / Shrinkage</option>
                   <option value="FOUND">Found Stock Surplus</option>
+                  <option value="RETURN">Customer Return Restock</option>
+                  <option value="OPENING_STOCK">Opening Stock Entry</option>
                   <option value="CORRECTION">Audit Count Correction</option>
                 </select>
               </div>

@@ -249,6 +249,7 @@ export const posApi = {
     api.post("/pos/register/movement/", data),
   closeRegister: (data: { actual_cash: number; notes?: string }) => api.post("/pos/register/close/", data),
   getInventoryMovements: (params?: unknown) => api.get("/pos/inventory/movements/", { params }),
+  getInventorySummary: () => api.get("/pos/inventory/summary/"),
   adjustInventory: (data: unknown) => api.post("/pos/inventory/adjust/", data),
   getManualAdjustments: (params?: unknown) => api.get("/pos/inventory/adjustments/", { params }),
   getPurchaseOrders: (params?: unknown) => api.get("/pos/inventory/purchases/", { params }),
@@ -570,6 +571,22 @@ export const exportSalesReport = async (params?: {
 export const reportsApi = {
   exportSalesReport,
 };
+
+// POS Migration & CSV Import Engine
+export const migrationApi = {
+  upload: (formData: FormData) =>
+    api.post("/migration/upload/", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  listJobs: () => api.get("/migration/jobs/"),
+  getJob: (id: string) => api.get(`/migration/jobs/${id}/`),
+  deleteJob: (id: string) => api.delete(`/migration/jobs/${id}/`),
+  validateJob: (id: string, data: { column_mapping: Record<string, string>; duplicate_strategy?: string }) =>
+    api.post(`/migration/jobs/${id}/validate/`, data),
+  executeJob: (id: string) => api.post(`/migration/jobs/${id}/execute/`),
+  rollbackJob: (id: string) => api.post(`/migration/jobs/${id}/rollback/`),
+};
+
 
 
 
